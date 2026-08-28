@@ -571,6 +571,38 @@ describe("interactive host runtime", () => {
 			await fake.close();
 		}
 	});
+	it("mirrors unnamed custom-only deferred setup entries", async () => {
+		const qa = scratch("setup-unnm");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			await runtime.newSession({
+				setup: async (manager) => {
+					manager.appendCustomEntry("setup-state", { marker: true });
+				},
+			});
+			expect(runtime.session.sessionManager.getEntries()).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ type: "custom", customType: "setup-state", data: { marker: true } }),
+				]),
+			);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
 
 	it("preserves expandPromptTemplates for string replacement messages", async () => {
 		const qa = scratch("opts");

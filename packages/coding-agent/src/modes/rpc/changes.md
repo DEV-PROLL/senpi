@@ -1,5 +1,9 @@
 # changes
 
+## 2026-08-28 - Hydrate unnamed deferred setup entries
+
+- `get_state` ships deferred (not-yet-persisted) session entries whenever any exist, no longer gated on a session name, so unnamed custom-only setup mutations hydrate the shared-host proxy mirror before the first provider turn.
+
 ## 2026-08-28 - Preserve derived state for verbatim setup entries
 
 - Added the public `SessionManager.appendEntry()` transport seam. It preserves captured entry IDs, timestamps, and parent IDs while updating session names, labels, usage, and message identity tracking.
