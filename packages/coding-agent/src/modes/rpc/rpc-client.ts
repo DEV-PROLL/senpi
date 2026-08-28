@@ -10,6 +10,7 @@ import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core"
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { PromptDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
+import { MissingSessionCwdError } from "../../core/session-cwd.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { ServiceTier } from "../../core/extensions/builtin/service-tier.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
@@ -70,7 +71,12 @@ type PromptOptions = {
 };
 
 export type RpcProviderAccountEvent = RpcAuthAccountsChangedEvent | RpcAccountFailoverEvent;
-export type RpcClientEvent = JsonAgentSessionEvent | RpcProviderAccountEvent | RpcExtensionEvent;
+export type RpcClientEvent =
+	| JsonAgentSessionEvent
+	| RpcProviderAccountEvent
+	| RpcExtensionEvent
+	| { type: "bash_start" }
+	| { type: "bash_end" };
 export type RpcEventListener = (event: RpcClientEvent) => void;
 
 function isProviderAccountEvent(event: RpcClientEvent): event is RpcProviderAccountEvent {
@@ -400,9 +406,31 @@ export class RpcClient {
 	/**
 	 * Clear queued steering and follow-up messages, returning their text.
 	 */
-	async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
-		const response = await this.send({ type: "clear_queue" });
+	async clearQueue(options?: { abortWillFollow?: boolean }): Promise<{ steering: string[]; followUp: string[] }> {
+		const response = await this.send({ type: "clear_queue", abortWillFollow: options?.abortWillFollow });
 		return this.getData(response);
+	}
+
+	async getSteeringMessages(): Promise<string[]> {
+		const response = await this.send({ type: "get_steering_messages" });
+		return this.getData<{ messages: string[] }>(response).messages;
+	}
+
+	async getFollowUpMessages(): Promise<string[]> {
+		const response = await this.send({ type: "get_follow_up_messages" });
+		return this.getData<{ messages: string[] }>(response).messages;
+	}
+
+	async abortBranchSummary(): Promise<void> {
+		await this.send({ type: "abort_branch_summary" });
+	}
+
+	async recordBashResult(command: string, result: BashResult, excludeFromContext?: boolean): Promise<void> {
+		await this.send({ type: "record_bash_result", command, result, excludeFromContext });
+	}
+
+	async setLabel(entryId: string, label?: string): Promise<void> {
+		await this.send({ type: "set_label", entryId, label });
 	}
 
 	/**
@@ -550,8 +578,16 @@ export class RpcClient {
 	/**
 	 * Execute a bash command.
 	 */
-	async bash(command: string, options?: { excludeFromContext?: boolean }): Promise<BashResult> {
-		const response = await this.send({ type: "bash", command, excludeFromContext: options?.excludeFromContext });
+	async bash(
+		command: string,
+		options?: { excludeFromContext?: boolean; operations?: Record<string, unknown> },
+	): Promise<BashResult> {
+		const response = await this.send({
+			type: "bash",
+			command,
+			excludeFromContext: options?.excludeFromContext,
+			operations: options?.operations,
+		});
 		return this.getData(response);
 	}
 
@@ -595,8 +631,8 @@ export class RpcClient {
 	 * Switch to a different session file.
 	 * @returns Object with `cancelled: true` if an extension cancelled the switch
 	 */
-	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
-		const response = await this.send({ type: "switch_session", sessionPath });
+	async switchSession(sessionPath: string, options?: { cwdOverride?: string }): Promise<{ cancelled: boolean }> {
+		const response = await this.send({ type: "switch_session", sessionPath, cwdOverride: options?.cwdOverride });
 		return this.getData(response);
 	}
 
@@ -604,8 +640,8 @@ export class RpcClient {
 	 * Fork from a specific message.
 	 * @returns Object with `text` (the message text) and `cancelled` (if extension cancelled)
 	 */
-	async fork(entryId: string): Promise<{ text: string; cancelled: boolean }> {
-		const response = await this.send({ type: "fork", entryId });
+	async fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ text: string; cancelled: boolean }> {
+		const response = await this.send({ type: "fork", entryId, position: options?.position });
 		return this.getData(response);
 	}
 
@@ -741,7 +777,13 @@ export class RpcClient {
 			}, timeout);
 
 			const unsubscribe = this.onEvent((event) => {
-				if (isProviderAccountEvent(event) || event.type === "extension_event") return;
+				if (
+					isProviderAccountEvent(event) ||
+					event.type === "extension_event" ||
+					event.type === "bash_start" ||
+					event.type === "bash_end"
+				)
+					return;
 				events.push(event);
 				if (event.type === "agent_settled") {
 					clearTimeout(timer);
@@ -872,6 +914,9 @@ export class RpcClient {
 	private getData<T>(response: RpcResponse): T {
 		if (!response.success) {
 			const errorResponse = response as Extract<RpcResponse, { success: false }>;
+			if (errorResponse.errorCode === "missing_session_cwd" && errorResponse.errorData) {
+				throw new MissingSessionCwdError(errorResponse.errorData as ConstructorParameters<typeof MissingSessionCwdError>[0]);
+			}
 			throw new Error(errorResponse.error);
 		}
 		// Type assertion: we trust response.data matches T based on the command sent.

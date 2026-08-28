@@ -38,7 +38,10 @@ type RpcSessionCommand =
 	| { id?: string; type: "abort_compaction" }
 	| { id?: string; type: "reload" }
 	| { id?: string; type: "check_reload_veto" }
-	| { id?: string; type: "clear_queue" }
+	| { id?: string; type: "clear_queue"; abortWillFollow?: boolean }
+	| { id?: string; type: "get_steering_messages" }
+	| { id?: string; type: "get_follow_up_messages" }
+	| { id?: string; type: "abort_branch_summary" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 
 	// State
@@ -71,8 +74,16 @@ type RpcSessionCommand =
 	| { id?: string; type: "abort_retry" }
 
 	// Bash
-	| { id?: string; type: "bash"; command: string; excludeFromContext?: boolean }
+	| {
+			id?: string;
+			type: "bash";
+			command: string;
+			excludeFromContext?: boolean;
+			operations?: Record<string, unknown>;
+	  }
+	| { id?: string; type: "record_bash_result"; command: string; result: BashResult; excludeFromContext?: boolean }
 	| { id?: string; type: "abort_bash" }
+	| { id?: string; type: "set_label"; entryId: string; label?: string }
 	| {
 			id?: string;
 			type: "navigate_tree";
@@ -87,8 +98,8 @@ type RpcSessionCommand =
 	| { id?: string; type: "get_session_stats" }
 	| { id?: string; type: "export_html"; outputPath?: string }
 	| { id?: string; type: "export_jsonl"; outputPath?: string }
-	| { id?: string; type: "switch_session"; sessionPath: string }
-	| { id?: string; type: "fork"; entryId: string }
+	| { id?: string; type: "switch_session"; sessionPath: string; cwdOverride?: string }
+	| { id?: string; type: "fork"; entryId: string; position?: "before" | "at" }
 	| { id?: string; type: "clone" }
 	| { id?: string; type: "get_fork_messages" }
 	| { id?: string; type: "get_entries"; since?: string }
@@ -491,7 +502,15 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "account_remove"; success: true }
 
 	// Error response (any command can fail)
-	| { id?: string; type: "response"; command: string; success: false; error: string };
+	| {
+			id?: string;
+			type: "response";
+			command: string;
+			success: false;
+			error: string;
+			errorCode?: string;
+			errorData?: unknown;
+	  };
 
 // ============================================================================
 // Extension UI Events (stdout)

@@ -3,7 +3,9 @@
 ## Shared-host interactive parity regressions (2026-08-28)
 
 - Shared-host session replacement now refreshes the client proxy after /new, /fork, /import, and /resume; tree navigation, reload/veto, compaction abort, queue recovery ordering, bash options/output, model prompt metadata, and JSONL export route to the authoritative host session.
-- RPC state mirrors host compaction, retry, bash, and pending-queue lifecycle fields so TUI interrupt and reload guards do not consult the bootstrap session.
+- RPC state mirrors host compaction, retry, bash, and pending-queue lifecycle fields so TUI interrupt and reload guards do not consult the bootstrap session. Queue reads/clear, branch-summary abort, extension-handled bash persistence, and tree labels also route to the host.
+- Extension binding remains client-local under the shared host by design: extension UI callbacks and context objects contain local TUI resources that cannot be serialized over JSONL. Session replacement refreshes the proxy identity before rebinding, while no RPC binding route is introduced.
+- Bash `operations` are not serialized as executable callbacks; the wire carries only JSON-safe metadata, and host-side extension dispatch supplies the executable operations object before execution.
 
 ## Shared-host session replacement refreshes the interactive proxy (2026-08-28)
 

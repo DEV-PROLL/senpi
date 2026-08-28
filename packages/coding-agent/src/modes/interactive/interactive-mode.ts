@@ -3801,7 +3801,9 @@ export class InteractiveMode {
 						if (action === "tree") {
 							this.showTreeSelector();
 						} else {
-							this.showUserMessageSelector();
+							void this.showUserMessageSelector().catch((error) =>
+								this.showError(error instanceof Error ? error.message : String(error)),
+							);
 						}
 						this.lastEscapeTime = 0;
 					} else {
@@ -3841,7 +3843,13 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
 		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
-		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
+		this.defaultEditor.onAction(
+			"app.session.fork",
+			() =>
+				void this.showUserMessageSelector().catch((error) =>
+					this.showError(error instanceof Error ? error.message : String(error)),
+				),
+		);
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
 
 		this.defaultEditor.onChange = (text: string) => {
@@ -4003,199 +4011,159 @@ export class InteractiveMode {
 
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (text: string) => {
-			// Capture-then-clear BEFORE any branch: handleFollowUp's non-streaming
-			// path pre-resolves images and hands off here, but slash / extension /
-			// bash submissions return before the consuming branches below. Clearing
-			// only after use would leak a stale array into a later ordinary
-			// submission whose text never references it.
-			const preResolvedImages = this.preResolvedSubmissionImages;
-			this.preResolvedSubmissionImages = undefined;
+			try {
+				// Capture-then-clear BEFORE any branch: handleFollowUp's non-streaming
+				// path pre-resolves images and hands off here, but slash / extension /
+				// bash submissions return before the consuming branches below. Clearing
+				// only after use would leak a stale array into a later ordinary
+				// submission whose text never references it.
+				const preResolvedImages = this.preResolvedSubmissionImages;
+				this.preResolvedSubmissionImages = undefined;
 
-			this.hideShortcutOverlay();
-			this.lastEditorText = "";
-			text = text.trim();
-			if (!text) return;
+				this.hideShortcutOverlay();
+				this.lastEditorText = "";
+				text = text.trim();
+				if (!text) return;
 
-			// Handle commands
-			if (text === "/settings") {
-				await this.showSettingsSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/favorite-models") {
-				this.editor.setText("");
-				await this.showFavoriteModelsSelector();
-				return;
-			}
-			if (text === "/scoped-models") {
-				this.editor.setText("");
-				this.showScopedModelsSelector();
-				return;
-			}
-			if (text === "/model" || text.startsWith("/model ")) {
-				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
-				this.editor.setText("");
-				await this.handleModelCommand(searchTerm);
-				return;
-			}
-			if (text === "/export" || text.startsWith("/export ")) {
-				await this.handleExportCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/import" || text.startsWith("/import ")) {
-				await this.handleImportCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/share") {
-				await this.handleShareCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/copy") {
-				await this.handleCopyCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/name" || text.startsWith("/name ")) {
-				await this.handleNameCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/session") {
-				await this.handleSessionCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/changelog") {
-				this.handleChangelogCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/keybindings") {
-				this.editor.setText("");
-				await this.handleKeybindingsCommand();
-				return;
-			}
-			if (text === "/hotkeys") {
-				this.handleHotkeysCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/fork") {
-				await this.showUserMessageSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/clone") {
-				this.editor.setText("");
-				await this.handleCloneCommand();
-				return;
-			}
-			if (text === "/tree") {
-				this.showTreeSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/trust") {
-				this.showTrustSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/login" || text.startsWith("/login ")) {
-				const providerRef = text.startsWith("/login ") ? text.slice(7).trim() : undefined;
-				this.editor.setText("");
-				await this.handleLoginCommand(providerRef);
-				return;
-			}
-			if (text === "/logout") {
-				this.showOAuthSelector("logout");
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/new") {
-				this.editor.setText("");
-				await this.handleClearCommand();
-				return;
-			}
-			if (text === "/compact" || text.startsWith("/compact ")) {
-				const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
-				this.editor.setText("");
-				await this.handleCompactCommand(customInstructions);
-				return;
-			}
-			if (text === "/reload") {
-				this.editor.setText("");
-				await this.handleReloadCommand();
-				return;
-			}
-			if (text === "/debug") {
-				this.handleDebugCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/arminsayshi") {
-				this.handleArminSaysHi();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/dementedelves") {
-				this.handleDementedDelves();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/resume") {
-				this.showSessionSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/quit" || text === "/exit") {
-				this.editor.setText("");
-				await this.shutdown();
-				return;
-			}
-			if (this.isExtensionCommand(text)) {
-				this.editor.addToHistory?.(text);
-				this.editor.setText("");
-				const pendingEchoId = this.optimisticUserEchoes.begin(text);
-				try {
-					await this.session.prompt(text, this.optimisticUserEchoes.promptOptions(pendingEchoId));
-				} catch (error) {
-					this.optimisticUserEchoes.reject(pendingEchoId);
-					throw error;
-				}
-				return;
-			}
-
-			// Handle bash command (! for normal, !! for excluded from context)
-			if (text.startsWith("!")) {
-				const isExcluded = text.startsWith("!!");
-				const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
-				if (command) {
-					if (this.session.isBashRunning) {
-						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
-						this.editor.setText(text);
-						return;
-					}
-					this.editor.addToHistory?.(text);
-					await this.handleBashCommand(command, isExcluded);
-					this.isBashMode = false;
-					this.updateEditorBorderColor();
+				// Handle commands
+				if (text === "/settings") {
+					await this.showSettingsSelector();
+					this.editor.setText("");
 					return;
 				}
-			}
-
-			// Queue non-command input during compaction.
-			// Extension commands short-circuit at the isExtensionCommand branch above and
-			// dispatch immediately inside AgentSession.prompt(), so the only text that
-			// reaches this compaction branch is non-command user input, which is queued
-			// for delivery after compaction settles.
-			//
-			// Note: the isExtensionCommand re-check below is already unreachable today
-			// (the branch above returns first) and stays harmless after the
-			// immediate-dispatch hoist in prompt().
-			if (this.session.isCompacting) {
+				if (text === "/favorite-models") {
+					this.editor.setText("");
+					await this.showFavoriteModelsSelector();
+					return;
+				}
+				if (text === "/scoped-models") {
+					this.editor.setText("");
+					this.showScopedModelsSelector();
+					return;
+				}
+				if (text === "/model" || text.startsWith("/model ")) {
+					const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
+					this.editor.setText("");
+					await this.handleModelCommand(searchTerm);
+					return;
+				}
+				if (text === "/export" || text.startsWith("/export ")) {
+					await this.handleExportCommand(text);
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/import" || text.startsWith("/import ")) {
+					await this.handleImportCommand(text);
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/share") {
+					await this.handleShareCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/copy") {
+					await this.handleCopyCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/name" || text.startsWith("/name ")) {
+					await this.handleNameCommand(text);
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/session") {
+					await this.handleSessionCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/changelog") {
+					this.handleChangelogCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/keybindings") {
+					this.editor.setText("");
+					await this.handleKeybindingsCommand();
+					return;
+				}
+				if (text === "/hotkeys") {
+					this.handleHotkeysCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/fork") {
+					await this.showUserMessageSelector();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/clone") {
+					this.editor.setText("");
+					await this.handleCloneCommand();
+					return;
+				}
+				if (text === "/tree") {
+					this.showTreeSelector();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/trust") {
+					this.showTrustSelector();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/login" || text.startsWith("/login ")) {
+					const providerRef = text.startsWith("/login ") ? text.slice(7).trim() : undefined;
+					this.editor.setText("");
+					await this.handleLoginCommand(providerRef);
+					return;
+				}
+				if (text === "/logout") {
+					this.showOAuthSelector("logout");
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/new") {
+					this.editor.setText("");
+					await this.handleClearCommand();
+					return;
+				}
+				if (text === "/compact" || text.startsWith("/compact ")) {
+					const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
+					this.editor.setText("");
+					await this.handleCompactCommand(customInstructions);
+					return;
+				}
+				if (text === "/reload") {
+					this.editor.setText("");
+					await this.handleReloadCommand();
+					return;
+				}
+				if (text === "/debug") {
+					this.handleDebugCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/arminsayshi") {
+					this.handleArminSaysHi();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/dementedelves") {
+					this.handleDementedDelves();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/resume") {
+					this.showSessionSelector();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/quit" || text === "/exit") {
+					this.editor.setText("");
+					await this.shutdown();
+					return;
+				}
 				if (this.isExtensionCommand(text)) {
 					this.editor.addToHistory?.(text);
 					this.editor.setText("");
@@ -4206,53 +4174,97 @@ export class InteractiveMode {
 						this.optimisticUserEchoes.reject(pendingEchoId);
 						throw error;
 					}
-				} else {
-					this.queueCompactionSubmission(text, "steer");
+					return;
 				}
-				return;
-			}
 
-			// If streaming, use prompt() with steer behavior.
-			// Extension commands are dispatched immediately by AgentSession.prompt()
-			// (short-circuited at the isExtensionCommand branch above); the steer
-			// behavior here applies only to ordinary text, prompt template expansion,
-			// and queueing.
-			if (this.session.isStreaming) {
-				// Resolve BEFORE setText(""): the editor's prune chain fires
-				// onImageMarkersChanged([]) and destroys pendingImages.
+				// Handle bash command (! for normal, !! for excluded from context)
+				if (text.startsWith("!")) {
+					const isExcluded = text.startsWith("!!");
+					const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
+					if (command) {
+						if (this.session.isBashRunning) {
+							this.showWarning("A bash command is already running. Press Esc to cancel it first.");
+							this.editor.setText(text);
+							return;
+						}
+						this.editor.addToHistory?.(text);
+						await this.handleBashCommand(command, isExcluded);
+						this.isBashMode = false;
+						this.updateEditorBorderColor();
+						return;
+					}
+				}
+
+				// Queue non-command input during compaction.
+				// Extension commands short-circuit at the isExtensionCommand branch above and
+				// dispatch immediately inside AgentSession.prompt(), so the only text that
+				// reaches this compaction branch is non-command user input, which is queued
+				// for delivery after compaction settles.
+				//
+				// Note: the isExtensionCommand re-check below is already unreachable today
+				// (the branch above returns first) and stays harmless after the
+				// immediate-dispatch hoist in prompt().
+				if (this.session.isCompacting) {
+					if (this.isExtensionCommand(text)) {
+						this.editor.addToHistory?.(text);
+						this.editor.setText("");
+						const pendingEchoId = this.optimisticUserEchoes.begin(text);
+						try {
+							await this.session.prompt(text, this.optimisticUserEchoes.promptOptions(pendingEchoId));
+						} catch (error) {
+							this.optimisticUserEchoes.reject(pendingEchoId);
+							throw error;
+						}
+					} else {
+						this.queueCompactionSubmission(text, "steer");
+					}
+					return;
+				}
+
+				// If streaming, use prompt() with steer behavior.
+				// Extension commands are dispatched immediately by AgentSession.prompt()
+				// (short-circuited at the isExtensionCommand branch above); the steer
+				// behavior here applies only to ordinary text, prompt template expansion,
+				// and queueing.
+				if (this.session.isStreaming) {
+					// Resolve BEFORE setText(""): the editor's prune chain fires
+					// onImageMarkersChanged([]) and destroys pendingImages.
+					const images = preResolvedImages ?? this.takeSubmissionImages(text);
+					this.editor.addToHistory?.(text);
+					this.editor.setText("");
+					const pendingEchoId = this.optimisticUserEchoes.begin(text);
+					try {
+						await this.session.prompt(text, {
+							streamingBehavior: "steer",
+							...(images.length > 0 ? { images } : {}),
+							...this.optimisticUserEchoes.promptOptions(pendingEchoId),
+						});
+					} catch (error) {
+						this.optimisticUserEchoes.reject(pendingEchoId);
+						throw error;
+					}
+					this.updatePendingMessagesDisplay();
+					this.ui.requestRender();
+					return;
+				}
+
+				// Normal message submission
+				// First, move any pending bash components to chat
+				this.flushPendingBashComponents();
+
 				const images = preResolvedImages ?? this.takeSubmissionImages(text);
-				this.editor.addToHistory?.(text);
-				this.editor.setText("");
 				const pendingEchoId = this.optimisticUserEchoes.begin(text);
-				try {
-					await this.session.prompt(text, {
-						streamingBehavior: "steer",
-						...(images.length > 0 ? { images } : {}),
-						...this.optimisticUserEchoes.promptOptions(pendingEchoId),
-					});
-				} catch (error) {
-					this.optimisticUserEchoes.reject(pendingEchoId);
-					throw error;
+				const submission: InteractiveUserInput =
+					images.length > 0 ? { text, images, pendingEchoId } : { text, pendingEchoId };
+				if (this.onInputCallback) {
+					this.onInputCallback(submission);
+				} else {
+					this.pendingUserInputs.push(submission);
 				}
-				this.updatePendingMessagesDisplay();
-				this.ui.requestRender();
-				return;
+				this.editor.addToHistory?.(text);
+			} catch (error) {
+				this.showError(error instanceof Error ? error.message : String(error));
 			}
-
-			// Normal message submission
-			// First, move any pending bash components to chat
-			this.flushPendingBashComponents();
-
-			const images = preResolvedImages ?? this.takeSubmissionImages(text);
-			const pendingEchoId = this.optimisticUserEchoes.begin(text);
-			const submission: InteractiveUserInput =
-				images.length > 0 ? { text, images, pendingEchoId } : { text, pendingEchoId };
-			if (this.onInputCallback) {
-				this.onInputCallback(submission);
-			} else {
-				this.pendingUserInputs.push(submission);
-			}
-			this.editor.addToHistory?.(text);
 		};
 	}
 
@@ -8149,7 +8161,7 @@ export class InteractiveMode {
 		}
 
 		await this.session.setSessionName(name);
-		const sessionName = this.sessionManager.getSessionName();
+		const sessionName = this.session.sessionName;
 		if (sessionName !== name) {
 			this.showWarning(`Session name was normalized from ${JSON.stringify(name)} to ${JSON.stringify(sessionName)}`);
 		}
@@ -8478,7 +8490,7 @@ export class InteractiveMode {
 			);
 
 			// Record the result in session
-			this.session.recordBashResult(command, result, { excludeFromContext });
+			void this.session.recordBashResult(command, result, { excludeFromContext });
 			this.bashComponent = undefined;
 			this.ui.requestRender();
 			return;

@@ -121,28 +121,36 @@ class RemoteInteractiveRuntime {
 		await this.#client.stop();
 		await this.#local.dispose();
 	}
-	async newSession(): Promise<{ cancelled: boolean }> {
-		this.#beforeSessionInvalidate?.();
-		const result = await this.#client.newSession();
-		if (!result.cancelled) await this.#refreshAndRebind();
+	async newSession(options?: { parentSession?: string }): Promise<{ cancelled: boolean }> {
+		const result = await this.#client.newSession(options?.parentSession);
+		if (!result.cancelled) {
+			this.#beforeSessionInvalidate?.();
+			await this.#refreshAndRebind();
+		}
 		return result;
 	}
-	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
-		this.#beforeSessionInvalidate?.();
-		const result = await this.#client.switchSession(sessionPath);
-		if (!result.cancelled) await this.#refreshAndRebind();
+	async switchSession(sessionPath: string, options?: { cwdOverride?: string }): Promise<{ cancelled: boolean }> {
+		const result = await this.#client.switchSession(sessionPath, options);
+		if (!result.cancelled) {
+			this.#beforeSessionInvalidate?.();
+			await this.#refreshAndRebind();
+		}
 		return result;
 	}
-	async fork(entryId: string): Promise<{ cancelled: boolean; selectedText?: string }> {
-		this.#beforeSessionInvalidate?.();
-		const result = await this.#client.fork(entryId);
-		if (!result.cancelled) await this.#refreshAndRebind();
+	async fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ cancelled: boolean; selectedText?: string }> {
+		const result = await this.#client.fork(entryId, options);
+		if (!result.cancelled) {
+			this.#beforeSessionInvalidate?.();
+			await this.#refreshAndRebind();
+		}
 		return { cancelled: result.cancelled, selectedText: result.text };
 	}
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
-		this.#beforeSessionInvalidate?.();
 		const result = await this.#client.importJsonl(inputPath, cwdOverride);
-		if (!result.cancelled) await this.#refreshAndRebind();
+		if (!result.cancelled) {
+			this.#beforeSessionInvalidate?.();
+			await this.#refreshAndRebind();
+		}
 		return result;
 	}
 
@@ -173,19 +181,42 @@ function createRemoteSessionProxy(
 			cause: error,
 		});
 	};
-	let state = initialState;
+	let state = { ...initialState, steering: [] as string[], followUp: [] as string[] };
 	let bashChunk: ((chunk: string) => void) | undefined;
 	let sessionManager = local.sessionManager;
+	const remoteSessionManager = new Proxy({} as SessionManager, {
+		get(_target, property, receiver) {
+			if (property === "appendLabelChange") {
+				return (entryId: string, label?: string) => void client.setLabel(entryId, label);
+			}
+			return Reflect.get(sessionManager, property, receiver);
+		},
+	});
 	let streamingAssistant: Extract<AgentSession["messages"][number], { role: "assistant" }> | undefined;
 	const listeners = new Set<AgentSessionEventListener>();
 	client.onEvent((wireEvent) => {
-		if (wireEvent.type === "agent_settled") state = { ...state, isStreaming: false };
+		if (wireEvent.type === "agent_settled") state = { ...state, isStreaming: false, retryAttempt: 0 };
+		if (wireEvent.type === "bash_start") state = { ...state, isBashRunning: true };
+		if (wireEvent.type === "bash_end") state = { ...state, isBashRunning: false };
 		if (wireEvent.type === "bash_execution_update") bashChunk?.(wireEvent.delta);
 		if (wireEvent.type === "agent_start") state = { ...state, isStreaming: true };
+		if (wireEvent.type === "compaction_start") state = { ...state, isCompacting: true };
+		if (wireEvent.type === "compaction_end") state = { ...state, isCompacting: false };
+		if (wireEvent.type === "auto_retry_start") state = { ...state, retryAttempt: wireEvent.attempt };
+		if (wireEvent.type === "auto_retry_end") state = { ...state, retryAttempt: 0 };
+		if (wireEvent.type === "queue_update") {
+			state = {
+				...state,
+				steering: [...wireEvent.steering],
+				followUp: [...wireEvent.followUp],
+				pendingMessageCount: wireEvent.steering.length + wireEvent.followUp.length,
+			};
+		}
 		if (wireEvent.type === "model_changed") {
 			state = { ...state, model: wireEvent.model, thinkingLevel: wireEvent.thinkingLevel };
 		}
 		if (wireEvent.type === "thinking_level_changed") state = { ...state, thinkingLevel: wireEvent.level };
+		if (wireEvent.type === "session_info_changed") state = { ...state, sessionName: wireEvent.name };
 		if (wireEvent.type === "message_start") {
 			if (wireEvent.message.role === "assistant") streamingAssistant = structuredClone(wireEvent.message);
 			local.agent.state.messages.push(structuredClone(wireEvent.message));
@@ -210,7 +241,7 @@ function createRemoteSessionProxy(
 	});
 	const refresh = async (): Promise<void> => {
 		const nextState = await client.getState();
-		state = stateFromRpc(nextState);
+		state = { ...stateFromRpc(nextState), steering: [], followUp: [] };
 		let messages: AgentSession["messages"];
 		if (nextState.sessionFile) {
 			sessionManager = SessionManager.open(nextState.sessionFile);
@@ -274,11 +305,14 @@ function createRemoteSessionProxy(
 				return async (
 					command: string,
 					onChunk?: (chunk: string) => void,
-					options?: { excludeFromContext?: boolean },
+					options?: { excludeFromContext?: boolean; operations?: Record<string, unknown> },
 				) => {
 					bashChunk = onChunk;
 					try {
-						return await client.bash(command, { excludeFromContext: options?.excludeFromContext });
+						return await client.bash(command, {
+							excludeFromContext: options?.excludeFromContext,
+							operations: options?.operations,
+						});
 					} finally {
 						bashChunk = undefined;
 					}
@@ -308,6 +342,22 @@ function createRemoteSessionProxy(
 			if (property === "isStreaming") return state.isStreaming;
 			if (property === "isCompacting") return state.isCompacting;
 			if (property === "pendingMessageCount") return state.pendingMessageCount;
+			if (property === "getSteeringMessages") return () => state.steering;
+			if (property === "getFollowUpMessages") return () => state.followUp;
+			if (property === "clearQueue")
+				return (options?: { abortWillFollow: boolean }) => {
+					const result = { steering: [...state.steering], followUp: [...state.followUp] };
+					void client.clearQueue(options).catch(reportActionFailure("clearQueue"));
+					return result;
+				};
+			if (property === "abortBranchSummary") return () => void client.abortBranchSummary();
+			if (property === "recordBashResult")
+				return (
+					command: string,
+					result: Parameters<AgentSession["recordBashResult"]>[1],
+					options?: { excludeFromContext?: boolean },
+				) => void client.recordBashResult(command, result, options?.excludeFromContext);
+			if (property === "set_label") return undefined;
 			if (property === "retryAttempt") return state.retryAttempt;
 			if (property === "isBashRunning") return state.isBashRunning;
 			if (property === "reload") return (_options?: Parameters<AgentSession["reload"]>[0]) => client.reload();
@@ -323,11 +373,13 @@ function createRemoteSessionProxy(
 					model: state.model ?? localState.model,
 					thinkingLevel: state.thinkingLevel,
 					isStreaming: state.isStreaming,
+					isCompacting: state.isCompacting,
 				};
 			}
 			if (property === "sessionFile") return state.sessionFile;
 			if (property === "sessionId") return state.sessionId;
-			if (property === "sessionManager") return sessionManager;
+			if (property === "sessionName") return state.sessionName;
+			if (property === "sessionManager") return remoteSessionManager;
 			if (property === "messages") return target.messages;
 			if (property === "model") return state.model ?? target.model;
 			if (property === "thinkingLevel") return state.thinkingLevel;
@@ -378,6 +430,7 @@ function stateFromRpc(state: {
 	isBashRunning: boolean;
 	sessionFile?: string;
 	sessionId: string;
+	sessionName?: string;
 }) {
 	return state;
 }
