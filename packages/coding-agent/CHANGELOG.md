@@ -14,43 +14,7 @@
 
 ### Fixed
 
-### Removed
-
-## [2026.8.28] - 2026-08-28
-
-### Breaking Changes
-
-### Added
-
-- Bun-compiled binaries now embed the imagegen bundled skill so resource discovery remains available after compilation.
-
-- `/account <provider> [list | pin <name> | unpin | remove <name>]` manages any provider's credential accounts, the TUI footer shows the active account as `(provider@account)` whenever a provider pools more than one credential, `auth check --json` reports a non-secret `accounts` array, and the account RPC/app-server surfaces (`get_provider_accounts`, `account_pin`, `account_remove`, `account/providerAccounts/*`) now work for every provider instead of only the Claude lane.
-
-### Changed
-
-### Fixed
-
-- Shared interactive host sessions no longer print `Thinking level: [object Promise]` on Shift+Tab: the TUI awaits the four session reads the shared-host proxy answers over RPC (`cycleThinkingLevel`, `getAvailableThinkingLevels`, `getSessionStats`, `getUserMessagesForForking`), the thinking-level status and footer render from the `thinking_level_changed` event so every attached client converges, and `/settings` thinking options, `/fork`, and `/session` work again.
-- User messages no longer render twice in shared-host sessions: the RPC prompt success response now carries `data.disposition` (`started`/`queued`/`handled`), delivered through client response hooks that run synchronously inside frame dispatch, so optimistic user echoes resolve exactly like the local path; `streamingBehavior` and `thinkingLevel` are forwarded again, so mid-stream submissions queue instead of failing.
-- Resuming a session that a live shared host already holds no longer fails with `session_path_in_use`: `open_session` on a fully-open path now attaches to the existing session (same handle, `attached: true`), and the runtime is torn down only when the last attachment closes.
-- Fire-and-forget session setters proxied to the shared host (thinking level, steering/follow-up mode, auto-compaction, session name, bash abort) now surface RPC failures through a typed warning instead of vanishing silently.
-
-- Imagegen missing-skill diagnostics now go to stderr, keeping RPC NDJSON stdout clean when a compiled binary lacks the optional skill asset.
-
-### Removed
-
-## [2026.8.27] - 2026-08-27
-
-### Breaking Changes
-
-### Added
-
-- Any provider holding more than one credential now rotates between them inside a single request: a conversation sticks to one account through session-stable HRW affinity, a 429 or 401 on one account fails over to a healthy sibling before the model fallback chain is consulted, and cooldowns persist across restarts with absolute deadlines. Rotation is transparent only before committed output - a failure after streaming has begun is never replayed. Providers with a single credential are unaffected.
-- A second credential can be added with one environment variable (`OPENAI_API_KEY_2` and up, for any provider's primary key variable) or declared per provider in `models.json` under a validated `credentials` policy block (`rotation`, `affinity`, cooldown bounds, and named slot references). The block holds policy and references only; key material stays in `auth.json` or the environment.
-
-### Fixed
-
-- Goal tool results (`create_goal`, `update_goal`, `get_goal`) now render as a TUI widget — status-colored header with compact token and elapsed usage, objective preview (full objective plus created/updated timestamps when expanded), and the blocked reason — instead of dumping the raw JSON payload into the transcript. The model-facing JSON result text is unchanged.
+- The interactive fast-mode indicator and RPC fast-mode state now clear when a session switches from a Codex model to a non-Codex model, instead of retaining a stale `⚡` marker from the previous provider.
 - Native todo lists with an explicit empty `todos: []` payload now clear persisted todo state and remove the `todo-sidebar`, while absent payloads remain ignored and lists with pending work remain visible.
 - Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and late filesystem
   close failures, waiting for the stream's terminal `close` event and failing only the tool call
@@ -71,6 +35,41 @@
 ### Changed
 
 ### Removed
+
+## [2026.8.28] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+- Bun-compiled binaries now embed the imagegen bundled skill so resource discovery remains available after compilation.
+
+- `/account <provider> [list | pin <name> | unpin | remove <name>]` manages any provider's credential accounts, the TUI footer shows the active account as `(provider@account)` whenever a provider pools more than one credential, `auth check --json` reports a non-secret `accounts` array, and the account RPC/app-server surfaces (`get_provider_accounts`, `account_pin`, `account_remove`, `account/providerAccounts/*`) now work for every provider instead of only the Claude lane.
+
+### Changed
+
+### Fixed
+
+- Shared interactive host sessions no longer print `Thinking level: [object Promise]` on Shift+Tab: the TUI awaits the four session reads the shared-host proxy answers over RPC (`cycleThinkingLevel`, `getAvailableThinkingLevels`, `getSessionStats`, `getUserMessagesForForking`), the thinking-level status and footer render from the `thinking_level_changed` event so every attached client converges, and `/settings` thinking options, `/fork`, and `/session` work again.
+- User messages no longer render twice in shared-host sessions: the RPC prompt success response now carries `data.disposition` (`started`/`queued`/`handled`), delivered through client response hooks that run synchronously inside frame dispatch, so optimistic user echoes resolve exactly like the local path; `streamingBehavior` and `thinkingLevel` are forwarded again, so mid-stream submissions queue instead of failing.
+- Resuming a session that a live shared host already holds no longer fails with `session_path_in_use`: `open_session` on a fully-open path now attaches to the existing session (same handle, `attached: true`), and the runtime is torn down only when the last attachment closes.
+- Fire-and-forget session setters proxied to the shared host (thinking level, steering/follow-up mode, auto-compaction, session name, bash abort) now surface RPC failures through a typed warning instead of vanishing silently.
+- Imagegen missing-skill diagnostics now go to stderr, keeping RPC NDJSON stdout clean when a compiled binary lacks the optional skill asset.
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+### Breaking Changes
+
+### Added
+
+- Any provider holding more than one credential now rotates between them inside a single request: a conversation sticks to one account through session-stable HRW affinity, a 429 or 401 on one account fails over to a healthy sibling before the model fallback chain is consulted, and cooldowns persist across restarts with absolute deadlines. Rotation is transparent only before committed output - a failure after streaming has begun is never replayed. Providers with a single credential are unaffected.
+- A second credential can be added with one environment variable (`OPENAI_API_KEY_2` and up, for any provider's primary key variable) or declared per provider in `models.json` under a validated `credentials` policy block (`rotation`, `affinity`, cooldown bounds, and named slot references). The block holds policy and references only; key material stays in `auth.json` or the environment.
+
+### Fixed
+
+- Goal tool results (`create_goal`, `update_goal`, `get_goal`) now render as a TUI widget — status-colored header with compact token and elapsed usage, objective preview (full objective plus created/updated timestamps when expanded), and the blocked reason — instead of dumping the raw JSON payload into the transcript. The model-facing JSON result text is unchanged.
 
 ## [2026.8.26-2] - 2026-08-26
 
