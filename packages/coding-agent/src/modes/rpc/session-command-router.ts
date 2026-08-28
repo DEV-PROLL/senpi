@@ -9,7 +9,12 @@ import {
 } from "./rpc-types.ts";
 import { createRpcSessionBinding, type RpcSessionBinding } from "./session-binding.ts";
 import type { SessionEventWriter } from "./session-event-writer.ts";
-import type { OpenRpcSession, RpcSessionLaunchProfile, RpcSessionRegistry } from "./session-registry.ts";
+import type {
+	OpenRpcSession,
+	RpcSessionEntry,
+	RpcSessionLaunchProfile,
+	RpcSessionRegistry,
+} from "./session-registry.ts";
 import { RpcSessionRegistryError } from "./session-registry.ts";
 
 const controls = new Set(["get_protocol_info", "open_session", "close_session", "list_sessions"]);
@@ -86,7 +91,7 @@ export class SessionCommandRouter {
 	async dispose(): Promise<void> {
 		await Promise.all(
 			[...this.bindings.entries()].map(async ([sessionId, binding]) => {
-				let entry;
+				let entry: RpcSessionEntry | undefined;
 				try {
 					entry = this.registry.beginClose(sessionId);
 				} catch {
