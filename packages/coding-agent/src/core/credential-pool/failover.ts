@@ -30,7 +30,10 @@ export type RunCredentialFailoverOptions<TEvent, TSlot extends RunSlot> = {
 	 * does not recognize must count as committed output.
 	 */
 	isCommittedOutput: (event: TEvent) => boolean;
-	classify?: (error: unknown, context: { failureCount: number }) => CredentialAction;
+	classify?: (
+		error: unknown,
+		context: { failureCount: number; cooldownBaseMs?: number; cooldownCapMs?: number },
+	) => CredentialAction;
 	errorFromEvent?: (event: TEvent) => unknown | undefined;
 	/** Persisted BEFORE a replacement slot is selected so a crash never forgets a block. */
 	persistBlock: (slot: TSlot, block: CredentialBlock) => void | Promise<void>;
@@ -130,7 +133,9 @@ export async function* runCredentialFailover<TEvent, TSlot extends RunSlot>(
 		} catch (error) {
 			if (attemptStream) await settle(attemptStream);
 			const failureCount = (slot.failureCount ?? 0) + (retriesBySlot.get(slot.name) ?? 0);
-			const action = classify(error, { failureCount });
+			const action = classify(error, {
+				failureCount,
+			});
 			lastOriginal = error;
 
 			if (action.kind === "retry_same" && !committedOutput) {
