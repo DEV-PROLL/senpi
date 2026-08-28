@@ -188,12 +188,14 @@ function createRemoteSessionProxy(
 	};
 	let state = { ...initialState };
 	let bashChunk: ((chunk: string) => void) | undefined;
+	let localBashAbortController: AbortController | undefined;
 	let sessionManager = local.sessionManager;
 	const remoteSessionManager = new Proxy({} as SessionManager, {
 		get(_target, property, receiver) {
 			if (property === "appendLabelChange") {
 				return (entryId: string, label?: string) => void client.setLabel(entryId, label);
 			}
+			if (property === "getSessionName") return () => state.sessionName;
 			return Reflect.get(sessionManager, property, receiver);
 		},
 	});
@@ -214,6 +216,7 @@ function createRemoteSessionProxy(
 				...state,
 				steering: [...wireEvent.steering],
 				followUp: [...wireEvent.followUp],
+				ordered: [...wireEvent.ordered],
 				pendingMessageCount: wireEvent.steering.length + wireEvent.followUp.length,
 			};
 		}
@@ -333,14 +336,24 @@ function createRemoteSessionProxy(
 					options?: { excludeFromContext?: boolean; operations?: BashOperations | Record<string, unknown> },
 				) => {
 					if (options?.operations && typeof options.operations.exec === "function") {
-						const result = await executeBashWithOperations(
-							command,
-							state.cwd,
-							options.operations as BashOperations,
-							{ onChunk },
-						);
-						await client.recordBashResult(command, result, options.excludeFromContext);
-						return result;
+						const abortController = new AbortController();
+						localBashAbortController = abortController;
+						state = { ...state, isBashRunning: true };
+						const prefix = local.settingsManager.getShellCommandPrefix();
+						const resolvedCommand = prefix ? `${prefix}\n${command}` : command;
+						try {
+							const result = await executeBashWithOperations(
+								resolvedCommand,
+								state.cwd,
+								options.operations as BashOperations,
+								{ onChunk, signal: abortController.signal },
+							);
+							await client.recordBashResult(command, result, options.excludeFromContext);
+							return result;
+						} finally {
+							localBashAbortController = undefined;
+							state = { ...state, isBashRunning: false };
+						}
 					}
 					bashChunk = onChunk;
 					try {
@@ -352,7 +365,11 @@ function createRemoteSessionProxy(
 						bashChunk = undefined;
 					}
 				};
-			if (property === "abortBash") return () => void client.abortBash().catch(reportActionFailure("abortBash"));
+			if (property === "abortBash")
+				return () => {
+					if (localBashAbortController) localBashAbortController.abort();
+					else void client.abortBash().catch(reportActionFailure("abortBash"));
+				};
 			if (property === "getSessionStats") return () => client.getSessionStats();
 			if (property === "exportToHtml")
 				return (outputPath?: string) => client.exportHtml(outputPath).then((result) => result.path);

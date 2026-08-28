@@ -393,6 +393,7 @@ export type AgentSessionEvent =
 			type: "queue_update";
 			steering: readonly string[];
 			followUp: readonly string[];
+			ordered: readonly { text: string; mode: "steer" | "followUp"; enqueueOrder: number }[];
 	  }
 	| { type: "compaction_start"; reason: CompactionReason; requestId?: string }
 	| {
@@ -1525,6 +1526,7 @@ export class AgentSession {
 			type: "queue_update",
 			steering: [...this._steeringMessages],
 			followUp: [...this._followUpMessages],
+			ordered: [...this._queuedInputOrder].sort((a, b) => a.enqueueOrder - b.enqueueOrder),
 		});
 	}
 

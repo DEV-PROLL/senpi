@@ -17,7 +17,6 @@ import {
 	type DeferredCancelOptions,
 	type DeferredFetchOptions,
 	type DeferredHandle,
-	getApiKeyEnvVars,
 	lazyStream,
 	type Model,
 	type Models,
@@ -44,6 +43,7 @@ import { APP_NAME, BRAND, getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
 import { envValue } from "./brand.ts";
+import { discoverEnvSlots } from "./credential-pool/env-slots.ts";
 import type { RotationSources } from "./credential-pool/rotation-stream.ts";
 import { ModelConfig } from "./model-config.ts";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
@@ -108,23 +108,6 @@ export interface ModelRuntimeAuthOverrides extends AuthOperationOptions {
  */
 export type CredentialRotationStreamOptions = StreamOptions & ModelsRequestTransforms & { affinityKey?: string };
 
-/**
- * Cheap pre-check answering "could this provider hold more than one credential
- * at all?" without loading the credential pool. A stored entry pools only
- * through `accounts`; env slots participate only when nothing is stored, and a
- * lone primary variable is still a single credential.
- */
-function mightHoldEnvCredentialPool(providerId: string, env: (name: string) => string | undefined): boolean {
-	const envVars = getApiKeyEnvVars(providerId);
-	const primary = envVars?.find((name) => name.endsWith("_API_KEY")) ?? envVars?.[0];
-	if (primary === undefined) return false;
-	let found = env(primary) ? 1 : 0;
-	for (let index = 2; index <= 16 && found < 2; index++) {
-		if (env(`${primary}_${index}`)) found++;
-	}
-	return found > 1;
-}
-
 function mightHoldCredentialPool(
 	providerId: string,
 	credential: Credential | undefined,
@@ -135,7 +118,7 @@ function mightHoldCredentialPool(
 		const accounts = Object.entries(credential).find(([key]) => key === "accounts")?.[1];
 		return (Array.isArray(accounts) && accounts.length > 1) || Object.keys(policySlots ?? {}).length > 0;
 	}
-	return mightHoldEnvCredentialPool(providerId, env) || Object.keys(policySlots ?? {}).length > 1;
+	return discoverEnvSlots(providerId, env).length + Object.keys(policySlots ?? {}).length > 1;
 }
 
 export type CredentialSynchronizationOperation = "login" | "logout" | "setRuntimeApiKey" | "removeRuntimeApiKey";
@@ -796,7 +779,7 @@ export class ModelRuntime implements Models {
 		const env = (name: string) => options?.env?.[name] ?? process.env[name];
 		if (this.snapshot.storedProviders.has(model.provider)) return true;
 		const policySlots = this.config.getProvider(model.provider)?.credentials?.slots;
-		return Object.keys(policySlots ?? {}).length > 1 || mightHoldEnvCredentialPool(model.provider, env);
+		return discoverEnvSlots(model.provider, env).length + Object.keys(policySlots ?? {}).length > 1;
 	}
 
 	private async credentialRotationSources(

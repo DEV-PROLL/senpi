@@ -1,12 +1,14 @@
 # changes
 
+- Shared-host replacement and name readback closure: refreshed session managers retain the host-effective cwd (including a differing override when the stored cwd is unavailable), and all `getSessionName()` consumers read the mirrored `session_info_changed` name.
+
 ## Shared-host interactive parity regressions (2026-08-28)
 
 - Shared-host session replacement now refreshes the client proxy after /new, /fork, /import, and /resume; tree navigation, reload/veto, compaction abort, queue recovery ordering, bash options/output, model prompt metadata, and JSONL export route to the authoritative host session.
 - RPC state mirrors host compaction, retry, bash, and pending-queue lifecycle fields so TUI interrupt and reload guards do not consult the bootstrap session. Queue reads/clear, branch-summary abort, extension-handled bash persistence, and tree labels also route to the host.
 - Extension binding remains client-local under the shared host by design: extension UI callbacks and context objects contain local TUI resources that cannot be serialized over JSONL. Session replacement refreshes the proxy identity before rebinding, while no RPC binding route is introduced.
-- Bash `operations` are not serialized as executable callbacks. Shared-host interactive execution keeps client-local operations on the client, streams their output to the TUI, and sends only the resulting `record_bash_result` mutation to the host; serializable or absent operations continue through the host bash route. Host-side extension dispatch remains unchanged.
-- Shared-host queue state now hydrates on attach/refresh, preserves the host's ordered clear result as the proxy's non-enumerable `ordered` property, and carries the host-effective cwd through replacement refreshes.
+- Bash `operations` are not serialized as executable callbacks. Shared-host interactive execution keeps client-local operations on the client, streams their output to the TUI, and sends only the resulting `record_bash_result` mutation to the host; client-local execution preserves shell prefixes, abort-controller lifecycle, and proxy `isBashRunning` state. Serializable or absent operations continue through the host bash route. Host-side extension dispatch remains unchanged.
+- Shared-host queue state now hydrates on attach/refresh, mirrors ordered chronology on every host `queue_update`, preserves the host's ordered clear result as the proxy's non-enumerable `ordered` property, carries the host-effective cwd through replacement refreshes, and routes `getSessionName()` consumers through mirrored host state.
 
 ## Shared-host session replacement refreshes the interactive proxy (2026-08-28)
 
