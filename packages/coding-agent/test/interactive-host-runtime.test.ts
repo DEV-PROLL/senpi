@@ -435,6 +435,51 @@ describe("interactive host runtime", () => {
 			await fake.close();
 		}
 	});
+
+	// `/tree` and the double-Escape tree action both funnel into showTreeSelector(), whose only data
+	// source is session.sessionManager.getTree()/getLeafId(). When the shared-host proxy kept serving the
+	// stale bootstrap manager after a switch, that read returned the old (here: empty) tree and the
+	// selector bailed out with "No entries in session", which is what users saw as "/tree stopped working".
+	it("exposes the target session tree through the shared-host proxy after a switch", async () => {
+		const qa = scratch("tree");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const localSessionManager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: localSessionManager,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		const targetManager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const targetPath = targetManager.getSessionFile();
+		if (!targetPath) throw new Error("Expected persisted target session path");
+		targetManager.appendMessage({ role: "user", content: "tree-entry-from-target", timestamp: 1 });
+		targetManager.appendMessage(fauxAssistantMessage("tree-response-from-target"));
+
+		// The bootstrap session's tree never contains the target session's entries, so a proxy that keeps
+		// serving the stale bootstrap manager is distinguishable from one that adopted the target manager.
+		expect(JSON.stringify(localSessionManager.getTree())).not.toContain("tree-entry-from-target");
+
+		try {
+			await runtime.switchSession(targetPath);
+
+			const tree = runtime.session.sessionManager.getTree();
+			const contents = JSON.stringify(tree);
+			expect(tree.length).toBeGreaterThan(0);
+			expect(contents).toContain("tree-entry-from-target");
+			expect(runtime.session.sessionManager.getLeafId()).not.toBeNull();
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
 });
 
 async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
