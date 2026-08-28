@@ -234,7 +234,9 @@ function createRemoteSessionProxy(
 	let localBashRunning = false;
 	let hostBashRunning = initialState.isBashRunning;
 	let sessionManager = local.sessionManager;
-	let settingsManager = local.settingsManager;
+	let settingsManager = SettingsManager.create(initialState.cwd, agentDir, {
+		projectTrusted: initialState.projectTrusted,
+	});
 	const updateBashState = () => {
 		state = { ...state, isBashRunning: localBashRunning || hostBashRunning };
 	};
@@ -581,6 +583,7 @@ function stateFromRpc(state: {
 	sessionId: string;
 	sessionName?: string;
 	cwd: string;
+	projectTrusted: boolean;
 	steering: string[];
 	followUp: string[];
 	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
