@@ -272,6 +272,8 @@ export interface RpcSessionState {
 	cwd: string;
 	/** Whether project-scoped settings and resources are trusted by the host. */
 	projectTrusted: boolean;
+	/** Authoritative entries for setup-only sessions whose deferred file does not exist yet. */
+	entries?: SessionEntry[];
 	steering: string[];
 	followUp: string[];
 	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
