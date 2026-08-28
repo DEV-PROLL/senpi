@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CONFIG_DIR_NAME } from "../src/config.ts";
 import {
 	type AgentSessionRuntime,
 	createAgentSessionFromServices,
@@ -434,8 +435,20 @@ describe("interactive host runtime", () => {
 		const initialSessionId = runtime.session.sessionId;
 
 		try {
-			await runtime.switchSession(targetPath);
+			const trustFactory = vi.fn<(cwd: string) => void>();
+			let callbackSessionFile: string | undefined;
+			await runtime.switchSession(targetPath, {
+				projectTrustContextFactory: (cwd) => {
+					trustFactory(cwd);
+					return {} as never;
+				},
+				withSession: async (ctx) => {
+					callbackSessionFile = ctx.sessionManager.getSessionFile();
+				},
+			});
 
+			expect(trustFactory).toHaveBeenCalledWith(qa.cwd);
+			expect(callbackSessionFile).toBe(targetPath);
 			expect(runtime.session.sessionFile).toBe(targetPath);
 			expect(runtime.session.sessionId).not.toBe(initialSessionId);
 			expect(runtime.session.sessionManager.getSessionFile()).toBe(targetPath);
@@ -535,7 +548,13 @@ describe("interactive host runtime", () => {
 			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
 			const firstFile = runtime.session.sessionFile;
 			const firstId = runtime.session.sessionId;
-			await runtime.newSession();
+			let callbackSessionFile: string | undefined;
+			await runtime.newSession({
+				withSession: async (ctx) => {
+					callbackSessionFile = ctx.sessionManager.getSessionFile();
+				},
+			});
+			expect(callbackSessionFile).toBe(runtime.session.sessionFile);
 			expect(runtime.session.sessionFile).not.toBe(firstFile);
 			expect(runtime.session.sessionId).not.toBe(firstId);
 			expect(runtime.session.sessionManager.getSessionFile()).toBe(runtime.session.sessionFile);
@@ -785,6 +804,157 @@ describe("interactive host runtime", () => {
 			await execution;
 			expect(observedSignal?.aborted).toBe(true);
 			expect(runtime.session.isBashRunning).toBe(false);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("composes local and host bash lifecycle state", async () => {
+		const qa = scratch("bash-lifecycle");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		const observer = new RpcClient({ socketPath: qa.socket });
+		await observer.start();
+		await observer.openSession({ sessionPath: runtime.session.sessionFile!, cwd: qa.cwd });
+		try {
+			let resolveLocal!: () => void;
+			const localDone = new Promise<void>((resolve) => (resolveLocal = resolve));
+			const hostStarted = new Promise<void>((resolve) => {
+				observer.onEvent((event) => {
+					if (event.type === "bash_start") resolve();
+				});
+			});
+			const hostBash = observer.bash("sleep 1");
+			await hostStarted;
+			const localBash = runtime.session.executeBash("local", undefined, {
+				operations: {
+					exec: async (_command, _cwd, { onData }) => {
+						onData(Buffer.from("local"));
+						await localDone;
+						return { exitCode: 0 };
+					},
+				},
+			});
+			await new Promise<void>((resolve) => queueMicrotask(resolve));
+			expect(runtime.session.isBashRunning).toBe(true);
+			resolveLocal();
+			await localBash;
+			expect(runtime.session.isBashRunning).toBe(true);
+			await hostBash;
+			expect(runtime.session.isBashRunning).toBe(false);
+		} finally {
+			await observer.stop();
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("aborts local bash when switching sessions and does not record on the replacement", async () => {
+		const qa = scratch("replacement-abort");
+		qa.socket = `/tmp/senpi-w6-abort-${process.pid}.sock`;
+		const projectB = join(qa.root, "project-b");
+		mkdirSync(projectB, { recursive: true });
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const target = SessionManager.create(projectB, qa.sessionDir);
+		const targetPath = target.getSessionFile()!;
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			let resolveStarted!: () => void;
+			const started = new Promise<void>((resolve) => (resolveStarted = resolve));
+			let observedSignal!: AbortSignal;
+			const execution = runtime.session.executeBash("old-command", undefined, {
+				operations: {
+					exec: async (_command, _cwd, options) => {
+						observedSignal = options.signal!;
+						resolveStarted();
+						await new Promise<void>((resolve) =>
+							options.signal?.addEventListener("abort", () => resolve(), { once: true }),
+						);
+						return { exitCode: null };
+					},
+				},
+			});
+			await started;
+			await runtime.switchSession(targetPath);
+			await execution;
+			expect(observedSignal.aborted).toBe(true);
+			const observer = new RpcClient({ socketPath: qa.socket });
+			await observer.start();
+			try {
+				await observer.openSession({ sessionPath: targetPath, cwd: projectB });
+				expect((await observer.getEntries()).entries).not.toContainEqual(
+					expect.objectContaining({ command: "old-command" }),
+				);
+			} finally {
+				await observer.stop();
+			}
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("uses the replacement session cwd settings for local bash prefixes", async () => {
+		const qa = scratch("replacement-prefix");
+		qa.socket = `/tmp/senpi-w6-prefix-${process.pid}.sock`;
+		const projectB = join(qa.root, "project-b");
+		mkdirSync(join(projectB, CONFIG_DIR_NAME), { recursive: true });
+		writeFileSync(
+			join(projectB, CONFIG_DIR_NAME, "settings.json"),
+			JSON.stringify({ shellCommandPrefix: "prefix-b" }),
+		);
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const targetManager = SessionManager.create(projectB, qa.sessionDir);
+		targetManager.appendMessage({ role: "user", content: "target", timestamp: 1 });
+		const targetPath = targetManager.getSessionFile()!;
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			await runtime.switchSession(targetPath, { cwdOverride: projectB });
+			expect(runtime.session.sessionManager.getCwd()).toBe(projectB);
+			let observedCommand = "";
+			await runtime.session.executeBash("echo current", undefined, {
+				operations: {
+					exec: async (command) => {
+						observedCommand = command;
+						return { exitCode: 0 };
+					},
+				},
+			});
+			expect(observedCommand).toBe("prefix-b\necho current");
 		} finally {
 			await runtime.dispose();
 			await fake.close();
