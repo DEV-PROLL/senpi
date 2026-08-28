@@ -1,5 +1,10 @@
 # changes
 
+- Shared-host proxy refresh now carries the host's project trust state into local settings, preventing untrusted project-scoped shell prefixes from leaking into client-local bash (NF-3).
+- Shared-host setup callbacks refresh the replacement proxy's mirrored agent messages after setup mutations.
+- Replacement callback contexts route sendMessage/sendUserMessage through the shared host prompt path instead of retaining bootstrap-session closures.
+- The RPC surface has no host-honored project-trust command or replacement trust payload. Shared-host trust is host-authoritative: the client-side projectTrustContextFactory remains a compatibility callback but cannot override host trust; no new wire protocol is introduced (N4-B9).
+
 - Shared-host bash lifecycle now composes client-local and host-owned running state, so another client's bash events cannot clear a local operation (NF-1).
 - Shared-host replacement wrappers preserve client-side `setup`, `withSession`, and `projectTrustContextFactory` callbacks after host confirmation and proxy refresh, matching beta.22 callback ordering (N4-B9).
 - Successful shared-host session replacements abort in-flight client-local custom bash and guard result persistence against the replacement session (NF-2).

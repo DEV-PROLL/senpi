@@ -257,6 +257,8 @@ export interface RpcSessionState {
 	sessionId: string;
 	sessionName?: string;
 	cwd: string;
+	/** Whether project-scoped settings and resources are trusted by the host. */
+	projectTrusted: boolean;
 	steering: string[];
 	followUp: string[];
 	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;

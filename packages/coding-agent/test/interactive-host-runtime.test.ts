@@ -14,6 +14,7 @@ import {
 import { createGoal, updateGoal } from "../src/core/extensions/builtin/goal/store.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { ProjectTrustStore } from "../src/core/trust-manager.ts";
 import {
 	createInteractiveHostRuntime,
 	INTERACTIVE_HOST_FALLBACK_WARNING,
@@ -917,49 +918,56 @@ describe("interactive host runtime", () => {
 		}
 	});
 
-	it("uses the replacement session cwd settings for local bash prefixes", async () => {
-		const qa = scratch("replacement-prefix");
-		qa.socket = `/tmp/senpi-w6-prefix-${process.pid}.sock`;
-		const projectB = join(qa.root, "project-b");
-		mkdirSync(join(projectB, CONFIG_DIR_NAME), { recursive: true });
-		writeFileSync(
-			join(projectB, CONFIG_DIR_NAME, "settings.json"),
-			JSON.stringify({ shellCommandPrefix: "prefix-b" }),
-		);
-		const fake = await startFakeModelServer();
-		writeRpcModelsJson(qa.agentDir, fake.origin);
-		const host = spawnHost(qa);
-		await waitForHost(host, qa.socket);
-		const targetManager = SessionManager.create(projectB, qa.sessionDir);
-		targetManager.appendMessage({ role: "user", content: "target", timestamp: 1 });
-		const targetPath = targetManager.getSessionFile()!;
-		const runtime = await createInteractiveHostRuntime(
-			await createAgentSessionRuntimeFixture({
-				cwd: qa.cwd,
-				agentDir: qa.agentDir,
-				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
-				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
-			}),
-			{ socket: qa.socket, ensureHost: async () => undefined },
-		);
-		try {
-			await runtime.switchSession(targetPath, { cwdOverride: projectB });
-			expect(runtime.session.sessionManager.getCwd()).toBe(projectB);
-			let observedCommand = "";
-			await runtime.session.executeBash("echo current", undefined, {
-				operations: {
-					exec: async (command) => {
-						observedCommand = command;
-						return { exitCode: 0 };
+	it.each([
+		{ projectTrusted: true, expectedCommand: "prefix-b\necho current" },
+		{ projectTrusted: false, expectedCommand: "echo current" },
+	])(
+		"uses host trust=$projectTrusted when refreshing replacement bash settings",
+		async ({ projectTrusted, expectedCommand }) => {
+			const qa = scratch(`replacement-prefix-${projectTrusted}`);
+			qa.socket = `/tmp/senpi-w7-prefix-${projectTrusted}-${process.pid}.sock`;
+			const projectB = join(qa.root, "project-b");
+			mkdirSync(join(projectB, CONFIG_DIR_NAME), { recursive: true });
+			writeFileSync(
+				join(projectB, CONFIG_DIR_NAME, "settings.json"),
+				JSON.stringify({ shellCommandPrefix: "prefix-b" }),
+			);
+			if (projectTrusted) new ProjectTrustStore(qa.agentDir).set(projectB, true);
+			const fake = await startFakeModelServer();
+			writeRpcModelsJson(qa.agentDir, fake.origin);
+			const host = spawnHost(qa);
+			await waitForHost(host, qa.socket);
+			const targetManager = SessionManager.create(projectB, qa.sessionDir);
+			targetManager.appendMessage({ role: "user", content: "target", timestamp: 1 });
+			const targetPath = targetManager.getSessionFile()!;
+			const runtime = await createInteractiveHostRuntime(
+				await createAgentSessionRuntimeFixture({
+					cwd: qa.cwd,
+					agentDir: qa.agentDir,
+					sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+					settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+				}),
+				{ socket: qa.socket, ensureHost: async () => undefined },
+			);
+			try {
+				await runtime.switchSession(targetPath, { cwdOverride: projectB });
+				expect(runtime.session.sessionManager.getCwd()).toBe(projectB);
+				let observedCommand = "";
+				await runtime.session.executeBash("echo current", undefined, {
+					operations: {
+						exec: async (command) => {
+							observedCommand = command;
+							return { exitCode: 0 };
+						},
 					},
-				},
-			});
-			expect(observedCommand).toBe("prefix-b\necho current");
-		} finally {
-			await runtime.dispose();
-			await fake.close();
-		}
-	});
+				});
+				expect(observedCommand).toBe(expectedCommand);
+			} finally {
+				await runtime.dispose();
+				await fake.close();
+			}
+		},
+	);
 
 	it("refreshes a missing stored cwd from a switch override", async () => {
 		const qa = scratch("cwd-override");
