@@ -795,7 +795,8 @@ export class ModelRuntime implements Models {
 		if (this.config.getProvider(model.provider)?.credentials?.rotation === false) return false;
 		const env = (name: string) => options?.env?.[name] ?? process.env[name];
 		if (this.snapshot.storedProviders.has(model.provider)) return true;
-		return mightHoldEnvCredentialPool(model.provider, env);
+		const policySlots = this.config.getProvider(model.provider)?.credentials?.slots;
+		return Object.keys(policySlots ?? {}).length > 1 || mightHoldEnvCredentialPool(model.provider, env);
 	}
 
 	private async credentialRotationSources(
@@ -816,7 +817,7 @@ export class ModelRuntime implements Models {
 			repository: pool.repository,
 			policy,
 		};
-		const slots = await pool.rotation.listRotationSlots(sources);
+		const slots = await pool.rotation.listRotationSlots(sources, { acquireLeases: false });
 		return slots.length > 1 ? sources : undefined;
 	}
 
