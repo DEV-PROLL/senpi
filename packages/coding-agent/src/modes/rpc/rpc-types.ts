@@ -38,7 +38,10 @@ type RpcSessionCommand =
 	| { id?: string; type: "abort_compaction" }
 	| { id?: string; type: "reload" }
 	| { id?: string; type: "check_reload_veto" }
-	| { id?: string; type: "clear_queue" }
+	| { id?: string; type: "clear_queue"; abortWillFollow?: boolean }
+	| { id?: string; type: "get_steering_messages" }
+	| { id?: string; type: "get_follow_up_messages" }
+	| { id?: string; type: "abort_branch_summary" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 
 	// State
@@ -71,8 +74,16 @@ type RpcSessionCommand =
 	| { id?: string; type: "abort_retry" }
 
 	// Bash
-	| { id?: string; type: "bash"; command: string; excludeFromContext?: boolean }
+	| {
+			id?: string;
+			type: "bash";
+			command: string;
+			excludeFromContext?: boolean;
+			operations?: Record<string, unknown>;
+	  }
+	| { id?: string; type: "record_bash_result"; command: string; result: BashResult; excludeFromContext?: boolean }
 	| { id?: string; type: "abort_bash" }
+	| { id?: string; type: "set_label"; entryId: string; label?: string }
 	| {
 			id?: string;
 			type: "navigate_tree";

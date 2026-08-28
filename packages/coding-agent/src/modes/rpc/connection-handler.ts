@@ -817,8 +817,22 @@ export function createRpcConnectionHandler(
 			}
 
 			case "clear_queue": {
-				return success(id, "clear_queue", session.clearQueue());
+				return success(
+					id,
+					"clear_queue",
+					session.clearQueue({ abortWillFollow: command.abortWillFollow ?? false }),
+				);
 			}
+
+			case "get_steering_messages":
+				return success(id, "get_steering_messages", { messages: [...session.getSteeringMessages()] });
+
+			case "get_follow_up_messages":
+				return success(id, "get_follow_up_messages", { messages: [...session.getFollowUpMessages()] });
+
+			case "abort_branch_summary":
+				session.abortBranchSummary();
+				return success(id, "abort_branch_summary");
 
 			case "new_session": {
 				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
@@ -996,24 +1010,41 @@ export function createRpcConnectionHandler(
 				return success(id, "navigate_tree", result);
 			}
 
-			case "bash": {
-				const eventResult = await session.extensionRunner.emitUserBash({
-					type: "user_bash",
-					command: command.command,
-					excludeFromContext: command.excludeFromContext ?? false,
-					cwd: session.sessionManager.getCwd(),
-				});
-				if (eventResult?.result) {
-					session.recordBashResult(command.command, eventResult.result, {
-						excludeFromContext: command.excludeFromContext,
-					});
-					return success(id, "bash", eventResult.result);
-				}
-				const result = await session.executeBash(command.command, undefined, {
+			case "record_bash_result":
+				session.recordBashResult(command.command, command.result, {
 					excludeFromContext: command.excludeFromContext,
-					operations: eventResult?.operations,
 				});
-				return success(id, "bash", result);
+				return success(id, "record_bash_result");
+
+			case "set_label":
+				session.sessionManager.appendLabelChange(command.entryId, command.label);
+				return success(id, "set_label");
+
+			case "bash": {
+				outputEvent({ type: "bash_start" });
+				try {
+					const eventResult = await session.extensionRunner.emitUserBash({
+						type: "user_bash",
+						command: command.command,
+						excludeFromContext: command.excludeFromContext ?? false,
+						cwd: session.sessionManager.getCwd(),
+					});
+					if (eventResult?.result) {
+						session.recordBashResult(command.command, eventResult.result, {
+							excludeFromContext: command.excludeFromContext,
+						});
+						return success(id, "bash", eventResult.result);
+					}
+					const result = await session.executeBash(command.command, undefined, {
+						excludeFromContext: command.excludeFromContext,
+						// Functions cannot cross JSONL. Host extensions may still provide the
+						// executable operations object; client-supplied data is only a wire-safe hint.
+						operations: eventResult?.operations,
+					});
+					return success(id, "bash", result);
+				} finally {
+					outputEvent({ type: "bash_end" });
+				}
 			}
 
 			case "abort_bash": {
