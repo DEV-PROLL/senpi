@@ -1,5 +1,23 @@
 # goal Extension Changes
 
+## 2026-08-27 - TUI widget rendering for goal tool results
+
+### What changed
+
+- `renderers.ts` (new): `renderGoalToolCall` / `renderGoalToolResult` render the goal tools as
+  a widget instead of the raw `JSON.stringify({goal:...})` dump — status-colored header
+  (glyph + status + compact tokens + elapsed), objective preview (collapsed: first two
+  non-empty lines, 120-col shorten, `… +N more lines`) or the full objective plus
+  `created/updated` ISO timestamps (expanded), a `⚠ <blockedReason>` line, and the
+  objective-truncation notice. Falls back to parsing the legacy JSON text when `details`
+  are absent (old sessions), and to the raw text when nothing parses.
+- `format.ts`: adds `GoalToolRenderDetails` + `goalToolRenderDetails()` so tool results
+  carry the snapshot in `details` for the renderer.
+- `tool-registration.ts`: `create_goal` / `update_goal` / `get_goal` register
+  `renderCall`/`renderResult` and attach the render details. The model-facing JSON text
+  result is unchanged.
+- Tests: `test/goal-renderers.test.ts`.
+
 ## 2026-08-27 - unattended continuation backstop (#1139)
 
 ### What changed

@@ -18,19 +18,20 @@
 import * as crypto from "node:crypto";
 import { basename, dirname, extname } from "node:path";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
-import type { AgentSession } from "../../core/agent-session.ts";
+import { VERSION } from "../../config.ts";
+import type { AgentSession, PromptDisposition } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
+import {
+	getCredentialAccounts,
+	pinCredentialAccount,
+	removeCredentialAccount,
+} from "../../core/credential-accounts.ts";
 import {
 	emitProviderAccountsChanged,
 	subscribeProviderAccountEvents,
 } from "../../core/extensions/builtin/claude-sdk-oauth/account-events.ts";
-import {
-	CLAUDE_SDK_OAUTH_PROVIDER_ID,
-	getProviderAccounts,
-	pinProviderAccount,
-	removeProviderAccount,
-} from "../../core/extensions/builtin/claude-sdk-oauth/account-management.ts";
+import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "../../core/extensions/builtin/claude-sdk-oauth/account-management.ts";
 import {
 	isMcpControlInventoryChanged,
 	MCP_CONTROL_INVENTORY_CHANGED_EVENT,
@@ -732,7 +733,12 @@ export function createRpcConnectionHandler(
 					type: "response",
 					command: "get_protocol_info",
 					success: true,
-					data: { protocolVersion: 1, capabilities: ["multi_session"], mode: "classic" },
+					data: {
+						protocolVersion: 1,
+						serverVersion: VERSION,
+						capabilities: [...new Set(["multi_session", ...(options.capabilities ?? [])])],
+						mode: "classic",
+					},
 				};
 			case "open_session":
 				return error(id, "open_session", "multi_session_disabled");
@@ -751,17 +757,23 @@ export function createRpcConnectionHandler(
 				}
 				// Start prompt handling immediately, but emit the authoritative response only after
 				// prompt preflight succeeds. Queued and immediately handled prompts also count as success.
+				// The disposition is captured for the wire: AgentSession always fires promptDisposition
+				// strictly before preflightResult(true), so the success frame carries the final value.
 				let preflightSucceeded = false;
+				let disposition: PromptDisposition | undefined;
 				void session
 					.prompt(command.message, {
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
 						thinkingLevel: command.thinkingLevel,
 						source: "rpc",
+						promptDisposition: (nextDisposition) => {
+							disposition = nextDisposition;
+						},
 						preflightResult: (didSucceed) => {
 							if (didSucceed && !preflightSucceeded) {
 								preflightSucceeded = true;
-								output(success(id, "prompt"));
+								output(success(id, "prompt", { ...(disposition !== undefined ? { disposition } : {}) }));
 							}
 						},
 					})
@@ -1138,17 +1150,17 @@ export function createRpcConnectionHandler(
 			}
 
 			case "get_provider_accounts": {
-				const accounts = getProviderAccounts(session.modelRegistry.authStorage, command.provider);
+				const accounts = await getCredentialAccounts(session.modelRegistry.authStorage, command.provider);
 				return success(id, "get_provider_accounts", { accounts });
 			}
 
 			case "account_pin": {
-				await pinProviderAccount(session.modelRegistry.authStorage, command.provider, command.name);
+				await pinCredentialAccount(session.modelRegistry.authStorage, command.provider, command.name);
 				return success(id, "account_pin");
 			}
 
 			case "account_remove": {
-				await removeProviderAccount(session.modelRegistry.authStorage, command.provider, command.name);
+				await removeCredentialAccount(session.modelRegistry.authStorage, command.provider, command.name);
 				return success(id, "account_remove");
 			}
 

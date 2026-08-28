@@ -1,6 +1,6 @@
-import type { AssistantMessage } from "../src/types.ts";
 import { describe, expect, it } from "vitest";
 import { ensureUniqueCursorExecToolCallId } from "../src/api/cursor-agent.ts";
+import type { AssistantMessage } from "../src/types.ts";
 
 function assistantWithToolCallIds(ids: string[]): AssistantMessage {
 	return {

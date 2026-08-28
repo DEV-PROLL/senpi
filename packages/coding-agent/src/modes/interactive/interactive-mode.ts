@@ -62,7 +62,7 @@ import {
 	getShareViewerUrl,
 	VERSION,
 } from "../../config.ts";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
+import { type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import { isApiKeyLoginProvider } from "../../core/auth-providers.ts";
 import { envValue } from "../../core/brand.ts";
@@ -196,6 +196,7 @@ import { expandEditorSubmission, expandSubmittedText, transferEditorContent } fr
 import { formatExtensionErrorHeadline, sanitizeTuiErrorMessage } from "./extension-error-format.ts";
 import { editFileInExternalEditor, editInExternalEditor } from "./external-editor.ts";
 import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
+import type { InteractiveSession } from "./interactive-host-runtime.ts";
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
 import { applyKeybindingsFileEdit, seedKeybindingsFile } from "./keybindings-command.ts";
 import { refreshModelCatalogs } from "./model-catalog-refresh.ts";
@@ -956,7 +957,9 @@ export class InteractiveMode {
 	private themeController: InteractiveThemeController;
 
 	// Convenience accessors
-	private get session(): AgentSession {
+	// The session may be the local AgentSession or the shared-host RPC proxy; the
+	// four reads widened on InteractiveSession must be awaited at every call site.
+	private get session(): InteractiveSession {
 		return this.runtimeHost.session;
 	}
 	private get sessionManager() {
@@ -4326,6 +4329,7 @@ export class InteractiveMode {
 			case "thinking_level_changed":
 				this.footer.invalidate();
 				this.updateEditorBorderColor();
+				this.showStatus(`Thinking level: ${event.level}`);
 				break;
 
 			case "high_reasoning_warning":
@@ -5751,14 +5755,14 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private cycleThinkingLevel(): void {
-		const newLevel = this.session.cycleThinkingLevel();
+	private async cycleThinkingLevel(): Promise<void> {
+		// The shared-host proxy answers this over RPC. The level itself is rendered
+		// from the thinking_level_changed event (single path for local and remote,
+		// and for changes made by OTHER attached clients); the awaited value only
+		// distinguishes "model does not support thinking".
+		const newLevel = await this.session.cycleThinkingLevel();
 		if (newLevel === undefined) {
 			this.showStatus("Current model does not support thinking");
-		} else {
-			this.footer.invalidate();
-			this.updateEditorBorderColor();
-			this.showStatus(`Thinking level: ${newLevel}`);
 		}
 	}
 
@@ -6308,7 +6312,9 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private showSettingsSelector(): void {
+	private async showSettingsSelector(): Promise<void> {
+		// Awaited at the boundary: the shared-host proxy answers this over RPC.
+		const availableThinkingLevels = await this.session.getAvailableThinkingLevels();
 		this.showSelector((done) => {
 			let selector: SettingsSelectorComponent | undefined;
 			selector = new SettingsSelectorComponent(
@@ -6324,7 +6330,7 @@ export class InteractiveMode {
 					transport: this.settingsManager.getTransport(),
 					httpIdleTimeoutMs: this.settingsManager.getHttpIdleTimeoutMs(),
 					thinkingLevel: this.session.thinkingLevel,
-					availableThinkingLevels: this.session.getAvailableThinkingLevels(),
+					availableThinkingLevels,
 					currentTheme: this.themeController.getThemeSelection() || "dark",
 					terminalTheme: this.themeController.getTerminalTheme(),
 					availableThemes: getAvailableThemes(),
@@ -6977,8 +6983,9 @@ export class InteractiveMode {
 		});
 	}
 
-	private showUserMessageSelector(): void {
-		const userMessages = this.session.getUserMessagesForForking();
+	private async showUserMessageSelector(): Promise<void> {
+		// Awaited at the boundary: the shared-host proxy answers this over RPC.
+		const userMessages = await this.session.getUserMessagesForForking();
 
 		if (userMessages.length === 0) {
 			this.showStatus("No messages to fork from");
@@ -8133,8 +8140,9 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private handleSessionCommand(): void {
-		const stats = this.session.getSessionStats();
+	private async handleSessionCommand(): Promise<void> {
+		// Awaited at the boundary: the shared-host proxy answers this over RPC.
+		const stats = await this.session.getSessionStats();
 		const sessionName = this.sessionManager.getSessionName();
 		const entries = this.sessionManager.getEntries();
 		const cacheWaste = computeCacheWaste(entries, this.session.modelRuntime);

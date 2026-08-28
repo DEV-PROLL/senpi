@@ -1,5 +1,44 @@
 # changes
 
+## Shared-host sessions await async session reads and render thinking level from the event (2026-08-28)
+
+### What changed
+
+- `interactive-host-runtime.ts`: new `InteractiveSession` type — the TUI-facing session contract that widens `cycleThinkingLevel`, `getAvailableThinkingLevels`, `getSessionStats`, and `getUserMessagesForForking` to `T | Promise<T>` so the shared-host proxy is honestly typed. The proxy's `prompt` now forwards `streamingBehavior`, `thinkingLevel`, and the optimistic-echo `promptDisposition`/`preflightResult` callbacks across the wire, and fire-and-forget setters report RPC failures through a new `interactive_host_action_failed` warning instead of swallowing them.
+- `interactive-mode.ts`: the Shift+Tab handler awaits the cycle and only renders the unsupported-model branch; the level status/footer render from the `thinking_level_changed` event (single path for local, remote, and other attached clients). `/settings` thinking levels, `/fork` message list, and `/session` stats await their reads. No more `Thinking level: [object Promise]`.
+- `components/footer.ts`, `grok/chrome.ts`, `grok/footer.ts`: session parameters accept `InteractiveSession`.
+
+### Why
+
+- Since the shared RPC host became the default for interactive sessions, the proxy answered these four reads with Promises while the TUI consumed them synchronously: Shift+Tab printed `[object Promise]`, the settings selector lost low/med/high options, and `/fork` + `/session` broke. Event-driven level rendering also fixes multi-client convergence (desktop + terminal on one host session).
+
+### Why an extension could not handle it
+
+- The session contract and key-dispatch handlers are core interactive wiring; extensions cannot retype or resequence them.
+
+### Expected merge conflict zones
+
+- MEDIUM: `interactive-mode.ts` handler/event-case edits and the session getter type.
+- LOW: proxy setter overrides in `interactive-host-runtime.ts`.
+
+## Footer shows the active credential account (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/footer.ts`: when the active provider pools more than one credential slot, the footer's provider prefix becomes `(provider@account)` - the pinned slot when present, else the session's HRW winner computed with the same sha256 hash the rotation engine uses. Flat single credentials render exactly as before, and a credential-storage read failure never breaks footer rendering. Exported `accountFooterSuffix` keeps the logic unit-testable.
+
+### Why
+
+- With rotation on by default, the operator needs to see WHICH account a session is riding without opening /account; mirroring the provider-only-when->1 rule keeps single-account setups noise-free.
+
+### Why an extension could not handle it
+
+- The footer is a core interactive component; extensions cannot compose its right-side segments.
+
+### Expected merge conflict zones
+
+- LOW: right-side prefix composition in `formatSegments`.
+
 ## 2026-08-26 - Record uncaught crashes in the brand debug log
 
 ### What changed
@@ -2713,3 +2752,23 @@ The tip line was teaching a small slice of the product while most of the surface
 ### Expected merge conflict zones
 
 - NONE: the upstream-only Radius session-share artifact remains excluded from the fork tree.
+
+## 2026-08-27 - render JSON tool results as a styled key-value fallback
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/tool-execution-fallback.ts`: `createToolResultFallback()` now inspects the rendered text output before styling it. When the trimmed text starts with `{` or `[`, parses as JSON, and yields a non-null object or array, the fallback renders a bounded `key: value` view (keys in `muted`, string values in `toolOutput`, numbers/booleans in `accent`, `null` in `dim`) with 2-space indentation per nesting level. Anything else — prose, logs, malformed JSON — keeps the previous `theme.fg("toolOutput", output)` path byte for byte.
+- The view is bounded so a large payload cannot flood the transcript: max nesting depth 3 (deeper containers collapse to a truncated compact `JSON.stringify`), max 24 rendered rows followed by a single dim `… N more` line, and string values truncated to 100 characters with a trailing ellipsis. The function still returns the same `Text` component type as before.
+- `packages/coding-agent/test/tool-execution-fallback-json.test.ts`: new regression suite covering nested objects, prose passthrough, malformed-JSON passthrough, row/string bounds, and top-level primitive arrays.
+
+### Why
+
+- Tools without a `renderResult` hook — MCP-wrapped tools and third-party extensions in particular — commonly return their payload as a JSON string. The fallback dumped that raw string into the transcript, so a single call could paste an unreadable one-line blob across the viewport. A bounded key-value view keeps the same information scannable without asking every tool author to ship a renderer.
+
+### Why an extension could not handle it
+
+- This is the renderer of last resort inside `ToolExecutionComponent` for tools that have no renderer. An extension can only supply `renderResult` for its own tools; it has no hook covering results produced by other extensions or by MCP-bridged tools, which is exactly the population that hits this path.
+
+### Expected merge conflict zones
+
+- LOW: `createToolResultFallback()` in `packages/coding-agent/src/modes/interactive/components/tool-execution-fallback.ts` (additive helpers plus a two-line branch in one small function).

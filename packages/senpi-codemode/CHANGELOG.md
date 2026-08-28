@@ -10,8 +10,37 @@
 
 ### Fixed
 
+### Removed
+
+## [2026.8.28] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- JavaScript and Python eval kernels resolve worker and prelude assets from the executable sidecar in Bun-compiled distributions instead of passing unusable `$bunfs` paths to `Worker` and `python3`.
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- Eval tool description examples are now a JS-first mixed set: set up once in JavaScript, fan out batched `Promise.all` session-tool calls in the next cell, then hop to Python when the JS kernel is busy with a detached cell. The detach paragraph now states in the same sentence that another language can continue.
+
+### Fixed
+
 - Detached-eval same-language busy errors now name each idle enabled kernel and tell the agent to continue the step there (`continue this step in an idle kernel: js`), instead of only pointing at peek and the output tail. A busy Python kernel no longer reads as "eval is unavailable", which previously sent agents to `bash`+`python3` while JavaScript (or another idle kernel) was free. Single-language sessions and fully-busy sessions omit the idle-kernel claim.
 - JavaScript eval cells now persist only top-level declarations, including destructuring bindings and uninitialized variables, without rewriting declaration-shaped text inside literals or comments.
+- Eval completion and detached-cell handling retain explicit lifecycle observability: nested tool counts, wall/kernel timing, detach state, `peek`, `stop`, hard limits, and crash recovery remain bounded and machine-readable for hosts and telemetry consumers.
 
 ### Removed
 

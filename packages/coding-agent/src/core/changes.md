@@ -1,5 +1,87 @@
 # changes
 
+## 2026-08-27 - Default retry policy phase-2 close-out (docs)
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/profile-override.ts`: the `retry.providers.<providerId>` override surface accepts per-provider scheduling-knob overrides validated against `RetryStageOverride` (fields: `enabled`, `maxRetries`, `baseDelayMs`, `growthFactor`, `perAttemptCapMs`, `jitter`, `serverHintMaxDelayMs`). An entire provider entry is rejected atomically when any knob is invalid.
+- Recommended settings snippet for users who configure no fallback chain and want a larger same-model budget:
+  ```jsonc
+  {
+    // Raise the turn retry budget for a single-provider setup.
+    // maxRetries must be a non-negative safe integer.
+    "retry": {
+      "providers": {
+        "<providerId>": {
+          "turn": {
+            "maxRetries": 5
+          }
+        }
+      }
+    }
+  }
+  ```
+- The default same-model turn retry budget stays at 3 retries. This is an intentional non-change: the budget was reviewed during phase-2 close and kept at its existing value for all providers that don't declare their own profile.
+- No new kimi-code observability or telemetry surface was adopted.
+- Regression coverage: `packages/coding-agent/test/suite/regressions/retry-default-no-kimi-leak.test.ts` guards senpi-default against kimi semantics leaking in (no-hint 429 first-failure fallback, 1258000ms hint tier routing, billing 429 pinned fallback, abort during backoff single `auto_retry_end`).
+- Tracked in `packages/ai/src/changes.md` and `packages/coding-agent/src/core/changes.md`.
+
+### Why
+
+- Users running a single provider without a fallback chain benefit from a higher retry budget, but the default stays conservative (3) to avoid masking persistent failures when fallback providers are available. The snippet documents the exact override path so users don't have to read the validation source.
+
+### Why an extension could not handle it
+
+- `retry.providers` overrides are resolved inside `resolveRetryProfile` in `packages/coding-agent/src/core/settings-manager.ts`, before any extension hook. The validation and merge happen at settings load time.
+
+### Expected merge conflict zones
+
+- NONE: doc-only section append; no code files touched.
+
+## Provider-neutral credential accounts (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/core/credential-accounts.ts` (new): provider-neutral account surface over the pool slot algebra - `getCredentialAccounts`/`summarizeCredentialAccounts` list stored slots (env slots only when nothing is stored, mirroring resolution precedence), `pinCredentialAccount` pins/unpins, `removeCredentialAccount` removes a stored slot and drops its sidecar health (env-backed accounts refuse removal). Blocked state reads BOTH sources: a slot's own persisted `blockedUntil`/`blockReason` and the pool sidecar. Mutations emit `emitProviderAccountsChanged` so subscribed clients re-read. Summaries carry names and health only, never key material.
+- `packages/coding-agent/src/main.ts`: `auth check --json` now includes a non-secret `accounts` array (name/source/blocked/pinned) for the checked provider; enrichment failures never turn a readable auth state into an error.
+
+### Why
+
+- Account management was confined to the claude-sdk-oauth lane (`assertManagedProvider` hard-rejected every other provider). Generic multi-credential pools need one surface that works for every provider, and scripts consuming `auth check --json` need account visibility without parsing auth.json.
+
+### Why an extension could not handle it
+
+- The RPC and app-server consumers dispatch these operations inside core connection handling; an extension cannot replace their imports, and account listing needs the auth storage and pool sidecar wiring that live in core.
+
+### Expected merge conflict zones
+
+- LOW: `main.ts` auth-check output composition (one enrichment block); `credential-accounts.ts` is fork-new.
+
+## 2026-08-27 - Credential pool: health sidecar, policy schema, env slots, in-lane rotation
+
+### What changed
+
+- `packages/coding-agent/src/core/credential-pool/state-store.ts` (new): file-locked health sidecar at `<agent-dir>/credential-pool-state.json` (mode 0600, `FILE_STORAGE_LOCK_OPTIONS`) holding ONLY health - absolute cooldown deadlines, permanent auth/billing blocks, half-open probe leases, `lastSuccessAt`, and HMAC-derived env-slot revisions. `CredentialSlotRepository.mutateSlotState` is an atomic read-modify-write with a `stateVersion` increment; `acquireHalfOpenLease` transitions an elapsed cooldown to half-open for exactly one probing caller. An unreadable or schema-invalid document resets to fresh state rather than failing auth resolution.
+- `packages/coding-agent/src/core/credential-pool/classify.ts` (new): concrete provider-error taxonomy over `normalizeProviderError` and the existing 429 retry-hint parser. 401/invalid-key and account-scoped 403 block permanently and fail over; bare 403 fails the request; 429 fails over with a per-slot exponential cooldown floored (never overridden) by the server hint and capped at 48h; billing/quota-exhausted disables the account; 5xx/529/overload/network retry the SAME slot without blocking it; overflow, invalid model, 400, 404, malformed stream, and abort fail the request.
+- `packages/coding-agent/src/core/credential-pool/failover.ts` (new): `runCredentialFailover` re-reads slots before each distinct-credential attempt (so a newly added slot participates), runs at most one failover attempt per slot per request, settles a failed stream before starting the next, persists the block BEFORE selecting a replacement, and requires an `isCommittedOutput` predicate whose contract is default-DENY. Committed output bars rotation and the rethrow carries the existing `senpi:no-turn-retry:` marker.
+- `packages/coding-agent/src/core/credential-pool/env-slots.ts` (new): numbered env credential slots for any provider (`<VAR>`, `<VAR>_2` .. `<VAR>_16`), gap-tolerant, over the canonical `getApiKeyEnvVars` mapping.
+- `packages/coding-agent/src/core/credential-pool/rotation-stream.ts` (new): lists a provider's rotation slots with sidecar health overlaid (stored lane when a credential exists, env lane otherwise), selects by sha256 HRW over the request affinity key, and persists blocks per lane. An env slot's persisted health applies only while its HMAC revision still matches the current value.
+- `packages/coding-agent/src/core/model-runtime.ts`: `ModelRuntime.stream` engages that rotation only when the provider actually holds more than one slot and nothing pins the request to a single credential (runtime key, explicit per-request `apiKey`, or `credentials.rotation: false`); `prepareRequest` accepts a per-attempt slot override, and `ModelRuntimeAuthOverrides.slotName` plumbs slot-scoped resolution.
+- `packages/coding-agent/src/core/model-config-schema.ts`: per-provider `credentials` policy block (`additionalProperties: false`) with `rotation`/`affinity` toggles, cooldown bounds, and named slot references to env vars or command values; `CREDENTIAL_POLICY_DEFAULTS` re-exports the engine constants so schema and runtime cannot drift.
+
+### Why
+
+- Multi-credential rotation needs durable per-slot health that survives restart with absolute deadlines, a taxonomy that distinguishes credential-scoped from provider-scoped faults (blocking a healthy credential for a provider outage only destroys prompt-cache locality), and a request-level runner that exhausts a lane's slots before the model fallback chain above it is consulted. Health cannot live in `auth.json`: that file is credential material under its own lock, and mixing volatile block state into it would rewrite user credentials on every rate limit.
+
+### Why an extension could not handle it
+
+- `ModelRuntime.stream` is the one place where a request's provider auth is resolved and the provider stream is constructed; per-attempt credential selection has to happen inside it. The sidecar likewise needs `getAgentDir()` and the shared file-storage lock policy, neither of which is reachable through the extension API.
+
+### Expected merge conflict zones
+
+- MEDIUM: `model-runtime.ts` `prepareRequest`/`stream` (upstream-owned request construction; the rotation branch is additive and the single-credential path is unchanged).
+- LOW: `model-config-schema.ts` provider block (one optional property); the `credential-pool/` directory is fork-new with no upstream counterpart.
+
 ## 2026-08-26 - Capture bash spill-file errors before the first write
 
 ### What changed

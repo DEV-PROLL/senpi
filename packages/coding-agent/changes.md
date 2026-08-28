@@ -1,5 +1,24 @@
 # Local fork changes
 
+## Bun-compiled runtime assets (2026-08-27)
+
+### What changed
+
+- Bun-compiled coding-agent binaries now embed the imagegen bundled skill through the builtin's file-asset import; Node distributions continue to use the copied `dist` asset.
+
+### Why
+
+- Copying the skill into `dist` does not add it to Bun's compile graph, so compiled binaries lost the skill while emitting a missing-skill diagnostic.
+
+### Why an extension could not handle it
+
+- The compiled asset graph and builtin resource path are established by the package build and extension implementation before an extension can provide resources.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/core/extensions/builtin/imagegen/index.ts` and its asset declaration.
+
+
 ## @anthropic-ai/sdk peer alignment (2026-08-26)
 
 ### What changed
@@ -59,6 +78,10 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 - HIGH: `package.json` and the generated publish/install/platform locks.
 - LOW: the redirect response-body compatibility helper and its regression test.
+
+## 2026-08-25 — Attach compatible shared RPC hosts
+
+`ensureHost` now attaches to any compatible RPC socket, including a host started by another client surface, while retaining typed refusal for incompatible unmanaged owners. Hosts senpi starts continue to use canonical `host.pid` and `settings.json` state; attached hosts are not lifecycle-managed.
 
 ## models.json schema accepts the video input modality (2026-08-23)
 
