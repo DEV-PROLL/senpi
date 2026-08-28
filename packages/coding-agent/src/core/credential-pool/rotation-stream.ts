@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { resolveConfigValue } from "../resolve-config-value.ts";
 import type { AssistantMessageEvent, Credential } from "@earendil-works/pi-ai";
 import { rendezvousOrder, type SlotHasher } from "@earendil-works/pi-ai/auth/pool/select";
 import { listSlots as listCredentialSlots, type PooledCredential } from "@earendil-works/pi-ai/auth/pool/slots";
@@ -28,6 +29,7 @@ export type RotationSources = {
 		affinity?: boolean;
 		cooldownBaseMs?: number;
 		cooldownCapMs?: number;
+		slots?: Record<string, { env?: string; value?: string }>;
 	};
 	now?: () => number;
 };
@@ -52,6 +54,12 @@ function overlayState(slot: RotationSlot, state: CredentialSlotState | undefined
  */
 export async function listRotationSlots(sources: RotationSources): Promise<RotationSlot[]> {
 	const { providerId, credential, env, repository } = sources;
+	const policySlots = Object.entries(sources.policy?.slots ?? {}).flatMap(([name, ref]) => {
+		const envVarName = ref.env ?? `models.json:${name}`;
+		const key = ref.env !== undefined ? env(ref.env) : ref.value !== undefined ? resolveConfigValue(ref.value, {}) : undefined;
+		if (!key) return [];
+		return [{ name, envVarName, key, source: "env" as const }];
+	});
 	if (credential) {
 		const state = await repository.listSlots(providerId, "stored");
 		const slots: RotationSlot[] = [];
@@ -86,10 +94,21 @@ export async function listRotationSlots(sources: RotationSources): Promise<Rotat
 				),
 			);
 		}
-		return slots;
+		if (policySlots.length === 0) return slots;
+		const namedSources: RotationSources = { ...sources, credential: undefined, policy: { ...sources.policy, slots: {} } };
+		const namedSlots = await listEnvRotationSlots(namedSources, policySlots);
+		return [...slots, ...namedSlots];
 	}
-	const envSlots = discoverEnvSlots(providerId, env);
+	const envSlots = [...discoverEnvSlots(providerId, env), ...policySlots];
+	return listEnvRotationSlots(sources, envSlots);
+}
+
+async function listEnvRotationSlots(
+	sources: RotationSources,
+	envSlots: readonly { name: string; envVarName: string; key: string }[],
+): Promise<RotationSlot[]> {
 	if (envSlots.length === 0) return [];
+	const { providerId, repository } = sources;
 	const state = await repository.listSlots(providerId, "env");
 	const slots: RotationSlot[] = [];
 	for (const slot of envSlots) {
@@ -137,10 +156,7 @@ function blockPatch(
 			...base,
 			blockedUntil:
 				now +
-				Math.min(
-					policy?.cooldownCapMs ?? block.cooldownMs,
-					Math.max(policy?.cooldownBaseMs ?? 0, block.cooldownMs),
-				),
+				Math.min(policy?.cooldownCapMs ?? block.cooldownMs, block.cooldownMs),
 			blockReason: "rate_limit",
 		};
 	}
@@ -192,7 +208,12 @@ export function streamWithCredentialRotation(
 		runAttempt,
 		isCommittedOutput: (event) => event.type !== "start",
 		errorFromEvent,
-		classify: classifyCredentialFailure,
+		classify: (error, context) =>
+			classifyCredentialFailure(error, {
+				...context,
+				cooldownBaseMs: sources.policy?.cooldownBaseMs,
+				cooldownCapMs: sources.policy?.cooldownCapMs,
+			}),
 		onSuccess: async (slot) => {
 			await sources.repository.mutateSlotState(sources.providerId, slot.lane, slot.name, (current) =>
 				current

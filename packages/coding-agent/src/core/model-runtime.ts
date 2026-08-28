@@ -129,12 +129,13 @@ function mightHoldCredentialPool(
 	providerId: string,
 	credential: Credential | undefined,
 	env: (name: string) => string | undefined,
+	policySlots?: Record<string, { env?: string; value?: string }>,
 ): boolean {
 	if (credential) {
 		const accounts = Object.entries(credential).find(([key]) => key === "accounts")?.[1];
-		return Array.isArray(accounts) && accounts.length > 1;
+		return (Array.isArray(accounts) && accounts.length > 1) || Object.keys(policySlots ?? {}).length > 0;
 	}
-	return mightHoldEnvCredentialPool(providerId, env);
+	return mightHoldEnvCredentialPool(providerId, env) || Object.keys(policySlots ?? {}).length > 1;
 }
 
 export type CredentialSynchronizationOperation = "login" | "logout" | "setRuntimeApiKey" | "removeRuntimeApiKey";
@@ -805,9 +806,9 @@ export class ModelRuntime implements Models {
 		const credential = await this.credentials.read(model.provider, {
 			signal: options?.signal,
 		});
-		if (!mightHoldCredentialPool(model.provider, credential, env)) return undefined;
-		const pool = await this.loadCredentialPool();
 		const policy = this.config.getProvider(model.provider)?.credentials;
+		if (!mightHoldCredentialPool(model.provider, credential, env, policy?.slots)) return undefined;
+		const pool = await this.loadCredentialPool();
 		const sources: RotationSources = {
 			providerId: model.provider,
 			credential,
@@ -833,7 +834,9 @@ export class ModelRuntime implements Models {
 				const { rotation } = await this.loadCredentialPool();
 				return rotation.streamWithCredentialRotation({
 					sources,
-					...(streamOptions?.affinityKey === undefined ? {} : { affinityKey: streamOptions.affinityKey }),
+					...(streamOptions?.affinityKey ?? streamOptions?.sessionId
+						? { affinityKey: streamOptions.affinityKey ?? streamOptions.sessionId }
+						: {}),
 					runAttempt: async (slot) => {
 						const prepared = await this.prepareRequest(
 							model,
