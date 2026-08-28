@@ -137,7 +137,10 @@ class RemoteInteractiveRuntime {
 		}
 		return result;
 	}
-	async fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ cancelled: boolean; selectedText?: string }> {
+	async fork(
+		entryId: string,
+		options?: { position?: "before" | "at" },
+	): Promise<{ cancelled: boolean; selectedText?: string }> {
 		const result = await this.#client.fork(entryId, options);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();

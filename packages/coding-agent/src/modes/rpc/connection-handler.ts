@@ -303,8 +303,22 @@ export function createRpcConnectionHandler(
 		return { id, type: "response", command, success: true, data } as RpcResponse;
 	};
 
-	const error = (id: string | undefined, command: string, message: string, errorCode?: string, errorData?: unknown): RpcResponse => {
-		return { id, type: "response", command, success: false, error: message, ...(errorCode ? { errorCode } : {}), ...(errorData === undefined ? {} : { errorData }) };
+	const error = (
+		id: string | undefined,
+		command: string,
+		message: string,
+		errorCode?: string,
+		errorData?: unknown,
+	): RpcResponse => {
+		return {
+			id,
+			type: "response",
+			command,
+			success: false,
+			error: message,
+			...(errorCode ? { errorCode } : {}),
+			...(errorData === undefined ? {} : { errorData }),
+		};
 	};
 
 	// Pending extension UI requests waiting for response
@@ -1291,7 +1305,8 @@ export function createRpcConnectionHandler(
 				await waitForRpcBackpressure();
 			}
 		} catch (commandError: unknown) {
-			const missingCwd = commandError instanceof Error && commandError.name === "MissingSessionCwdError" && "issue" in commandError;
+			const missingCwd =
+				commandError instanceof Error && commandError.name === "MissingSessionCwdError" && "issue" in commandError;
 			output(
 				error(
 					command.id,
