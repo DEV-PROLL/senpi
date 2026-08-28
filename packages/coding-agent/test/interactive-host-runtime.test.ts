@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CONFIG_DIR_NAME } from "../src/config.ts";
 import {
 	type AgentSessionRuntime,
 	createAgentSessionFromServices,
@@ -855,6 +856,106 @@ describe("interactive host runtime", () => {
 			expect(runtime.session.isBashRunning).toBe(false);
 		} finally {
 			await observer.stop();
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("aborts local bash when switching sessions and does not record on the replacement", async () => {
+		const qa = scratch("replacement-abort");
+		qa.socket = `/tmp/senpi-w6-abort-${process.pid}.sock`;
+		const projectB = join(qa.root, "project-b");
+		mkdirSync(projectB, { recursive: true });
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const target = SessionManager.create(projectB, qa.sessionDir);
+		const targetPath = target.getSessionFile()!;
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			let resolveStarted!: () => void;
+			const started = new Promise<void>((resolve) => (resolveStarted = resolve));
+			let observedSignal!: AbortSignal;
+			const execution = runtime.session.executeBash("old-command", undefined, {
+				operations: {
+					exec: async (_command, _cwd, options) => {
+						observedSignal = options.signal!;
+						resolveStarted();
+						await new Promise<void>((resolve) =>
+							options.signal?.addEventListener("abort", () => resolve(), { once: true }),
+						);
+						return { exitCode: null };
+					},
+				},
+			});
+			await started;
+			await runtime.switchSession(targetPath);
+			await execution;
+			expect(observedSignal.aborted).toBe(true);
+			const observer = new RpcClient({ socketPath: qa.socket });
+			await observer.start();
+			try {
+				await observer.openSession({ sessionPath: targetPath, cwd: projectB });
+				expect((await observer.getEntries()).entries).not.toContainEqual(
+					expect.objectContaining({ command: "old-command" }),
+				);
+			} finally {
+				await observer.stop();
+			}
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("uses the replacement session cwd settings for local bash prefixes", async () => {
+		const qa = scratch("replacement-prefix");
+		qa.socket = `/tmp/senpi-w6-prefix-${process.pid}.sock`;
+		const projectB = join(qa.root, "project-b");
+		mkdirSync(join(projectB, CONFIG_DIR_NAME), { recursive: true });
+		writeFileSync(
+			join(projectB, CONFIG_DIR_NAME, "settings.json"),
+			JSON.stringify({ shellCommandPrefix: "prefix-b" }),
+		);
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const targetManager = SessionManager.create(projectB, qa.sessionDir);
+		targetManager.appendMessage({ role: "user", content: "target", timestamp: 1 });
+		const targetPath = targetManager.getSessionFile()!;
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			await runtime.switchSession(targetPath, { cwdOverride: projectB });
+			expect(runtime.session.sessionManager.getCwd()).toBe(projectB);
+			let observedCommand = "";
+			await runtime.session.executeBash("echo current", undefined, {
+				operations: {
+					exec: async (command) => {
+						observedCommand = command;
+						return { exitCode: 0 };
+					},
+				},
+			});
+			expect(observedCommand).toBe("prefix-b\necho current");
+		} finally {
 			await runtime.dispose();
 			await fake.close();
 		}
