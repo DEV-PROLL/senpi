@@ -1,5 +1,41 @@
 # changes
 
+## 2026-08-28 - Wildcard fallback lane for chainless models
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/chains.ts`: added the `WILDCARD_CHAIN_KEY` (`"*"`),
+  taught `canonicalizeFallbackChains` to expand and tombstone it (both existing loops skip it because
+  it is not a model selector), gave `resolveChainKey` an opt-in `allowWildcard` fallthrough, and added
+  `hasExplicitFallbackOptOut` so a `[]` tombstone on the current model's exact/base/bare-family key
+  suppresses the lane.
+- `packages/coding-agent/src/core/retry-fallback/settings.ts`: `DEFAULT_FALLBACK_CHAINS` ships a `"*"`
+  lane mirroring the Fable default rungs.
+- `packages/coding-agent/src/core/retry-fallback/controller.ts`: `nextCandidate` resolves in the order
+  own chain -> active episode's `chainKey` -> wildcard (gated on the opt-out check).
+
+### Why
+
+- Desktop thread 487d7c29 (2026-08-28) burned nine consecutive turns on upstream 500s from
+  `apitopia/kimi-k3-unlocked` with zero fallback attempts and wedged terminal `error`; a manual model
+  switch recovered it instantly. `DEFAULT_FALLBACK_CHAINS` only keyed `claude-fable-5`, so the
+  manually selected model resolved no chain and `canTryFallback()` was permanently false.
+- Ordering is load-bearing: an unconditional wildcard fallthrough hijacked sessions already walking a
+  configured chain (their last rung usually has no key either), which the engine suite caught as a
+  7 -> 5 call-count regression.
+- The opt-out gate exists because canonicalization deletes tombstoned keys, which would otherwise let
+  the shipped wildcard silently resurrect fallback for a user who explicitly disabled it.
+
+### Why an extension could not handle it
+
+- Chain resolution and candidate selection are private `RetryFallbackController` state; extensions see
+  fallback events only after the core has already decided not to rotate.
+
+### Expected merge conflict zones
+
+- LOW: the `resolveChainKey` tail and the `canonicalizeFallbackChains` return block in `chains.ts`.
+- LOW: the `chainKey` resolution expression in `controller.ts`.
+
 ## 2026-08-28 - Credential pool runtime wiring
 
 - Normal simple agent streams now use credential rotation, session ids provide affinity, pinned accounts win selection, expired cooldowns use one half-open probe, successful probes persist health, and custom agent directories scope sidecar state.
@@ -14,7 +50,6 @@
 
 - `packages/coding-agent/src/core/session-manager.ts`: added `reloadFromDisk()` to reload `fileEntries`, update internal maps/caches, and rebuild index from `this.sessionFile` if it exists.
 - Enables in-process mirrors (such as interactive host proxy) to synchronize with external changes like host-committed compactions.
-
 ## 2026-08-27 - Default retry policy phase-2 close-out (docs)
 
 ### What changed

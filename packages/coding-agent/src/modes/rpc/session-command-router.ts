@@ -184,20 +184,56 @@ export class SessionCommandRouter {
 		this.sessionsByConnection.delete(connectionId);
 		if (owned === undefined) return;
 		for (const sessionId of owned) {
-			let entry: RpcSessionEntry | undefined;
-			try {
-				entry = this.registry.beginClose(sessionId);
-			} catch {
-				// Already closed or claimed by another lifecycle path; nothing to release.
+			// Headless completion contract: a turn survives its client's death and
+			// runs to settlement (the host lifecycle keeps the process alive on
+			// active turns even with zero connections). Releasing mid-turn aborts
+			// the run and seals the session before agent_settled reaches the
+			// lifecycle observer, leaking the busy counter so the host never
+			// idle-exits. Defer - never skip - the release until the turn settles,
+			// so the dropped owner's reservation still frees afterwards.
+			const live = this.registry.peek(sessionId);
+			const session = live?.state === "open" ? live.runtime?.session : undefined;
+			if (session?.isStreaming) {
+				let released = false;
+				const unsubscribe = session.subscribe((event) => {
+					if (event.type !== "agent_settled" && event.type !== "agent_idle") return;
+					if (released) return;
+					released = true;
+					unsubscribe();
+					void this.releaseOwnedSession(sessionId).catch((cause) => {
+						process.stderr.write(
+							`senpi rpc deferred release for session ${sessionId} failed: ${String(cause)}\n`,
+						);
+					});
+				});
 				continue;
 			}
-			try {
-				if (entry.state === "closing") await this.bindings.get(sessionId)?.dispose();
-			} finally {
-				if (entry.state === "closing") {
-					this.bindings.delete(sessionId);
-					await this.registry.closeMarked(sessionId);
-				}
+			await this.releaseOwnedSession(sessionId);
+		}
+	}
+
+	/**
+	 * One owned handle's refcounted close: the same sequence as an explicit
+	 * close_session, tolerant of races with other lifecycle paths (an entry
+	 * already closed or claimed elsewhere is simply skipped). Disposal and
+	 * binding removal happen only when this was the LAST attachment (the entry
+	 * transitioned to "closing"): surviving attachments keep the shared binding
+	 * and their event stream.
+	 */
+	private async releaseOwnedSession(sessionId: string): Promise<void> {
+		let entry: RpcSessionEntry | undefined;
+		try {
+			entry = this.registry.beginClose(sessionId);
+		} catch {
+			// Already closed or claimed by another lifecycle path; nothing to release.
+			return;
+		}
+		try {
+			if (entry.state === "closing") await this.bindings.get(sessionId)?.dispose();
+		} finally {
+			if (entry.state === "closing") {
+				this.bindings.delete(sessionId);
+				await this.registry.closeMarked(sessionId);
 			}
 		}
 	}

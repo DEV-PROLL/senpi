@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import { ModelRuntime } from "../src/core/model-runtime.ts";
 import {
 	acquireHalfOpenLease,
 	CredentialSlotRepository,
 	credentialPoolStatePath,
 	slotHealth,
 } from "../src/core/credential-pool/state-store.ts";
+import { ModelRuntime } from "../src/core/model-runtime.ts";
 
 const NOW = 1_756_000_000_000;
 
@@ -86,8 +86,16 @@ describe("credential pool state sidecar", () => {
 	test("two custom agent directories give ModelRuntime isolated repositories", async () => {
 		const one = join(dir, "one");
 		const two = join(dir, "two");
-		const runtimeOne = await ModelRuntime.create({ credentials: AuthStorage.inMemory(), modelsPath: null, agentDir: one });
-		const runtimeTwo = await ModelRuntime.create({ credentials: AuthStorage.inMemory(), modelsPath: null, agentDir: two });
+		const runtimeOne = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath: null,
+			agentDir: one,
+		});
+		const runtimeTwo = await ModelRuntime.create({
+			credentials: AuthStorage.inMemory(),
+			modelsPath: null,
+			agentDir: two,
+		});
 		const repoOne = (await (runtimeOne as any).loadCredentialPool()).repository as CredentialSlotRepository;
 		const repoTwo = (await (runtimeTwo as any).loadCredentialPool()).repository as CredentialSlotRepository;
 		await repoOne.mutateSlotState("openai", "stored", "work", () => ({ failureCount: 2 }));

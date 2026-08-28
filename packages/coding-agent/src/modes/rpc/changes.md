@@ -1,5 +1,30 @@
 # changes
 
+## 2026-08-28 - Dropped-connection release defers while a turn is streaming
+
+### What changed
+
+- `session-command-router.ts`: `releaseConnection()` now checks the live entry
+  (`registry.peek`) and, when the owned session's turn is still streaming,
+  defers the refcounted close until `agent_settled`/`agent_idle` via a one-shot
+  session subscription instead of tearing the runtime down immediately. Idle
+  sessions release exactly as before. The per-session guarded close moved into
+  `releaseOwnedSession()`; the deferred path reuses it and tolerates races with
+  an explicit `close_session` (beginClose already-closed guard).
+- `session-registry.ts`: added the read-only `peek(handle)` lookup (no state
+  transitions, no attachment accounting) for lifecycle decisions.
+
+### Why
+
+- The 2026-08-28 release-a-dropped-connection's-sessions change closed owned
+  sessions on socket close even mid-turn. That aborts the run and seals the
+  session before `agent_settled` reaches the host-lifecycle observer, leaking
+  the busy-session counter, so the supervisor saw a permanently active turn and
+  the host never idle-exited (`rpc-host-lifecycle` "does not exit while a turn
+  is active" turned red on main). Deferring - never skipping - keeps both
+  contracts: the headless turn runs to completion, and the dead owner's path
+  reservation still frees right after settlement.
+
 ## Terminal monitor snapshots ride `extension_event` (2026-08-28)
 
 ### What changed

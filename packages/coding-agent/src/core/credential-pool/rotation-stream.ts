@@ -1,63 +1,46 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AssistantMessageEvent, Credential } from "@earendil-works/pi-ai";
-import {
-  rendezvousOrder,
-  type SlotHasher,
-} from "@earendil-works/pi-ai/auth/pool/select";
+import { rendezvousOrder, type SlotHasher } from "@earendil-works/pi-ai/auth/pool/select";
 import { listSlots as listCredentialSlots, type PooledCredential } from "@earendil-works/pi-ai/auth/pool/slots";
 import { type CredentialBlock, classifyCredentialFailure } from "./classify.ts";
 import { discoverEnvSlots } from "./env-slots.ts";
 import { type RunSlot, runCredentialFailover } from "./failover.ts";
-import {
-  acquireHalfOpenLease,
-  type CredentialSlotRepository,
-  type CredentialSlotState,
-} from "./state-store.ts";
+import { acquireHalfOpenLease, type CredentialSlotRepository, type CredentialSlotState } from "./state-store.ts";
 
 /** The exact hash the claude-sdk-oauth affinity oracle uses, so pools never remap. */
-export const sha256SlotHasher: SlotHasher = (input) =>
-  createHash("sha256").update(input).digest().readBigUInt64BE(0);
+export const sha256SlotHasher: SlotHasher = (input) => createHash("sha256").update(input).digest().readBigUInt64BE(0);
 
 export type RotationLane = "stored" | "env";
 
 export type RotationSlot = RunSlot & {
-  lane: RotationLane;
-  /** Env-lane key material for the attempt; never serialized or persisted. */
-  envKey?: string;
-  envVarName?: string;
+	lane: RotationLane;
+	/** Env-lane key material for the attempt; never serialized or persisted. */
+	envKey?: string;
+	envVarName?: string;
 };
 
 export type RotationSources = {
-  providerId: string;
-  credential: Credential | undefined;
-  env: (name: string) => string | undefined;
-  repository: CredentialSlotRepository;
-  policy?: {
-    affinity?: boolean;
-    cooldownBaseMs?: number;
-    cooldownCapMs?: number;
-  };
-  now?: () => number;
+	providerId: string;
+	credential: Credential | undefined;
+	env: (name: string) => string | undefined;
+	repository: CredentialSlotRepository;
+	policy?: {
+		affinity?: boolean;
+		cooldownBaseMs?: number;
+		cooldownCapMs?: number;
+	};
+	now?: () => number;
 };
 
-function overlayState(
-  slot: RotationSlot,
-  state: CredentialSlotState | undefined,
-): RotationSlot {
-  if (!state) return slot;
-  return {
-    ...slot,
-    ...(state.blockedUntil === undefined
-      ? {}
-      : { blockedUntil: state.blockedUntil }),
-    ...(state.blockReason === undefined
-      ? {}
-      : { blockReason: state.blockReason }),
-    ...(state.failureCount === undefined
-      ? {}
-      : { failureCount: state.failureCount }),
-    ...(state.lease === undefined ? {} : { lease: state.lease }),
-  };
+function overlayState(slot: RotationSlot, state: CredentialSlotState | undefined): RotationSlot {
+	if (!state) return slot;
+	return {
+		...slot,
+		...(state.blockedUntil === undefined ? {} : { blockedUntil: state.blockedUntil }),
+		...(state.blockReason === undefined ? {} : { blockReason: state.blockReason }),
+		...(state.failureCount === undefined ? {} : { failureCount: state.failureCount }),
+		...(state.lease === undefined ? {} : { lease: state.lease }),
+	};
 }
 
 /**
@@ -67,121 +50,109 @@ function overlayState(
  * persisted health applies only while its HMAC revision still matches the
  * current env value, so rotating a key in place clears its own stale block.
  */
-export async function listRotationSlots(
-  sources: RotationSources,
-): Promise<RotationSlot[]> {
-  const { providerId, credential, env, repository } = sources;
-  if (credential) {
-    const state = await repository.listSlots(providerId, "stored");
-    const slots: RotationSlot[] = [];
-    for (const slot of listCredentialSlots(credential)) {
-      const current = state[slot.name];
-      if (
-        current?.blockedUntil !== undefined &&
-        current.blockedUntil <= (sources.now ?? Date.now)()
-      ) {
-        const lease = await acquireHalfOpenLease(
-          repository,
-          providerId,
-          "stored",
-          slot.name,
-          { now: (sources.now ?? Date.now)() },
-        );
-        if (!lease) continue;
-        const leased = await repository.listSlots(providerId, "stored");
-        slots.push(
-          overlayState(
-            {
-              name: slot.name,
-              lane: "stored",
-              pinned: (credential as PooledCredential).pinned === slot.name,
-            },
-            leased[slot.name],
-          ),
-        );
-        continue;
-      }
-      slots.push(
-        overlayState(
-          {
-            name: slot.name,
-            lane: "stored",
-            pinned: (credential as PooledCredential).pinned === slot.name,
-          },
-          current,
-        ),
-      );
-    }
-    return slots;
-  }
-  const envSlots = discoverEnvSlots(providerId, env);
-  if (envSlots.length === 0) return [];
-  const state = await repository.listSlots(providerId, "env");
-  const slots: RotationSlot[] = [];
-  for (const slot of envSlots) {
-    const persisted = state[slot.name];
-    const revision = await repository.envCredentialRevision(
-      slot.envVarName,
-      slot.key,
-    );
-    const applicable =
-      persisted?.credentialRevision === revision ? persisted : undefined;
-    slots.push(
-      overlayState(
-        {
-          name: slot.name,
-          lane: "env",
-          envKey: slot.key,
-          envVarName: slot.envVarName,
-        },
-        applicable,
-      ),
-    );
-  }
-  return slots;
+export async function listRotationSlots(sources: RotationSources): Promise<RotationSlot[]> {
+	const { providerId, credential, env, repository } = sources;
+	if (credential) {
+		const state = await repository.listSlots(providerId, "stored");
+		const slots: RotationSlot[] = [];
+		for (const slot of listCredentialSlots(credential)) {
+			const current = state[slot.name];
+			if (current?.blockedUntil !== undefined && current.blockedUntil <= (sources.now ?? Date.now)()) {
+				const lease = await acquireHalfOpenLease(repository, providerId, "stored", slot.name, {
+					now: (sources.now ?? Date.now)(),
+				});
+				if (!lease) continue;
+				const leased = await repository.listSlots(providerId, "stored");
+				slots.push(
+					overlayState(
+						{
+							name: slot.name,
+							lane: "stored",
+							pinned: (credential as PooledCredential).pinned === slot.name,
+						},
+						leased[slot.name],
+					),
+				);
+				continue;
+			}
+			slots.push(
+				overlayState(
+					{
+						name: slot.name,
+						lane: "stored",
+						pinned: (credential as PooledCredential).pinned === slot.name,
+					},
+					current,
+				),
+			);
+		}
+		return slots;
+	}
+	const envSlots = discoverEnvSlots(providerId, env);
+	if (envSlots.length === 0) return [];
+	const state = await repository.listSlots(providerId, "env");
+	const slots: RotationSlot[] = [];
+	for (const slot of envSlots) {
+		const persisted = state[slot.name];
+		const revision = await repository.envCredentialRevision(slot.envVarName, slot.key);
+		const applicable = persisted?.credentialRevision === revision ? persisted : undefined;
+		slots.push(
+			overlayState(
+				{
+					name: slot.name,
+					lane: "env",
+					envKey: slot.key,
+					envVarName: slot.envVarName,
+				},
+				applicable,
+			),
+		);
+	}
+	return slots;
 }
 
 function blockPatch(
-  block: CredentialBlock,
-  current: CredentialSlotState | undefined,
-  now: number,
-  credentialRevision?: string,
-  policy?: { cooldownBaseMs?: number; cooldownCapMs?: number },
+	block: CredentialBlock,
+	current: CredentialSlotState | undefined,
+	now: number,
+	credentialRevision?: string,
+	policy?: { cooldownBaseMs?: number; cooldownCapMs?: number },
 ): Omit<CredentialSlotState, "stateVersion"> {
-  const failureCount = (current?.failureCount ?? 0) + 1;
-  const base = {
-    failureCount,
-    ...(credentialRevision === undefined ? {} : { credentialRevision }),
-    ...(current?.lastSuccessAt === undefined
-      ? {}
-      : { lastSuccessAt: current.lastSuccessAt }),
-  };
-  if (block.reason === "rate_limit") {
-    return {
-      ...base,
-      blockedUntil: now + Math.min(policy?.cooldownCapMs ?? block.cooldownMs, Math.max(policy?.cooldownBaseMs ?? 0, block.cooldownMs)),
-      blockReason: "rate_limit",
-    };
-  }
-  return { ...base, blockReason: block.reason };
+	const failureCount = (current?.failureCount ?? 0) + 1;
+	const base = {
+		failureCount,
+		...(credentialRevision === undefined ? {} : { credentialRevision }),
+		...(current?.lastSuccessAt === undefined ? {} : { lastSuccessAt: current.lastSuccessAt }),
+	};
+	if (block.reason === "rate_limit") {
+		return {
+			...base,
+			blockedUntil:
+				now +
+				Math.min(
+					policy?.cooldownCapMs ?? block.cooldownMs,
+					Math.max(policy?.cooldownBaseMs ?? 0, block.cooldownMs),
+				),
+			blockReason: "rate_limit",
+		};
+	}
+	return { ...base, blockReason: block.reason };
 }
 
 export type CredentialRotationOptions = {
-  sources: RotationSources;
-  /** Stable session key keeps a session on its slot; absent, each request distributes. */
-  affinityKey?: string;
-  hasher?: SlotHasher;
-  runAttempt: (
-    slot: RotationSlot,
-  ) =>
-    | AsyncIterable<AssistantMessageEvent>
-    | Promise<AsyncIterable<AssistantMessageEvent>>;
+	sources: RotationSources;
+	/** Stable session key keeps a session on its slot; absent, each request distributes. */
+	affinityKey?: string;
+	hasher?: SlotHasher;
+	runAttempt: (
+		slot: RotationSlot,
+	) => AsyncIterable<AssistantMessageEvent> | Promise<AsyncIterable<AssistantMessageEvent>>;
 };
 
 function errorFromEvent(event: AssistantMessageEvent): unknown {
-  if (event.type !== "error") return undefined;
-  const message = event.error.errorMessage ?? "provider stream error";
-  return new Error(message);
+	if (event.type !== "error") return undefined;
+	const message = event.error.errorMessage ?? "provider stream error";
+	return new Error(message);
 }
 
 /**
@@ -191,68 +162,51 @@ function errorFromEvent(event: AssistantMessageEvent): unknown {
  * after output carry the turn-retry suppression marker.
  */
 export function streamWithCredentialRotation(
-  options: CredentialRotationOptions,
+	options: CredentialRotationOptions,
 ): AsyncGenerator<AssistantMessageEvent> {
-  const { sources, runAttempt } = options;
-  const hasher = options.hasher ?? sha256SlotHasher;
-  const affinityKey = options.affinityKey ?? randomUUID();
-  const useAffinity = sources.policy?.affinity !== false;
-  const now = sources.now ?? Date.now;
+	const { sources, runAttempt } = options;
+	const hasher = options.hasher ?? sha256SlotHasher;
+	const affinityKey = options.affinityKey ?? randomUUID();
+	const useAffinity = sources.policy?.affinity !== false;
+	const now = sources.now ?? Date.now;
 
-  return runCredentialFailover<AssistantMessageEvent, RotationSlot>({
-    listSlots: () => listRotationSlots(sources),
-    select: (candidates) => {
-      const pinned = candidates.find((candidate) => candidate.pinned === true);
-      if (pinned) return pinned;
-      const ordered = useAffinity
-        ? rendezvousOrder(affinityKey, candidates, hasher)
-        : candidates;
+	return runCredentialFailover<AssistantMessageEvent, RotationSlot>({
+		listSlots: () => listRotationSlots(sources),
+		select: (candidates) => {
+			const pinned = candidates.find((candidate) => candidate.pinned === true);
+			if (pinned) return pinned;
+			const ordered = useAffinity ? rendezvousOrder(affinityKey, candidates, hasher) : candidates;
 
-      const winner = ordered[0];
-      if (!winner)
-        throw new Error(
-          "credential rotation selected from an empty candidate set",
-        );
-      return winner;
-    },
-    runAttempt,
-    isCommittedOutput: (event) => event.type !== "start",
-    errorFromEvent,
-    classify: classifyCredentialFailure,
-    onSuccess: async (slot) => {
-      await sources.repository.mutateSlotState(
-        sources.providerId,
-        slot.lane,
-        slot.name,
-        (current) =>
-          current
-            ? {
-                ...current,
-                lastSuccessAt: now(),
-                lease: undefined,
-                blockedUntil: undefined,
-                blockReason: undefined,
-              }
-            : undefined,
-      );
-    },
-    persistBlock: async (slot, block) => {
-      const revision =
-        slot.lane === "env" &&
-        slot.envVarName !== undefined &&
-        slot.envKey !== undefined
-          ? await sources.repository.envCredentialRevision(
-              slot.envVarName,
-              slot.envKey,
-            )
-          : undefined;
-      await sources.repository.mutateSlotState(
-        sources.providerId,
-        slot.lane,
-        slot.name,
-        (current) => blockPatch(block, current, now(), revision, sources.policy),
-      );
-    },
-    now,
-  });
+			const winner = ordered[0];
+			if (!winner) throw new Error("credential rotation selected from an empty candidate set");
+			return winner;
+		},
+		runAttempt,
+		isCommittedOutput: (event) => event.type !== "start",
+		errorFromEvent,
+		classify: classifyCredentialFailure,
+		onSuccess: async (slot) => {
+			await sources.repository.mutateSlotState(sources.providerId, slot.lane, slot.name, (current) =>
+				current
+					? {
+							...current,
+							lastSuccessAt: now(),
+							lease: undefined,
+							blockedUntil: undefined,
+							blockReason: undefined,
+						}
+					: undefined,
+			);
+		},
+		persistBlock: async (slot, block) => {
+			const revision =
+				slot.lane === "env" && slot.envVarName !== undefined && slot.envKey !== undefined
+					? await sources.repository.envCredentialRevision(slot.envVarName, slot.envKey)
+					: undefined;
+			await sources.repository.mutateSlotState(sources.providerId, slot.lane, slot.name, (current) =>
+				blockPatch(block, current, now(), revision, sources.policy),
+			);
+		},
+		now,
+	});
 }
