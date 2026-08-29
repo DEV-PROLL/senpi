@@ -70,6 +70,7 @@ export function normalizeWarpWslShiftEnterInput(
 	data: string,
 	env: NodeJS.ProcessEnv = process.env,
 	platform: NodeJS.Platform = process.platform,
+	socketExists: (socketPath: string) => boolean = fs.existsSync,
 ): string {
 	if (data !== "\n" || platform !== "linux") return data;
 	if (
@@ -80,13 +81,12 @@ export function normalizeWarpWslShiftEnterInput(
 	) {
 		return data;
 	}
-	const isWarp =
-		env.WARP_SESSION_ID?.trim() ||
-		env.WARP_TERMINAL_SESSION_UUID?.trim() ||
-		env.TERM_PROGRAM === "WarpTerminal";
+	const isWarp = Boolean(env.WARP_SESSION_ID?.trim() || env.WARP_TERMINAL_SESSION_UUID?.trim());
+	const interopPath = env.WSL_INTEROP?.trim();
 	const isWsl =
-		env.WSL_INTEROP?.trim().startsWith("/run/WSL/") ||
-		(Boolean(env.WSL_DISTRO_NAME?.trim()) && Boolean(env.WSL_INTEROP?.trim()));
+		interopPath !== undefined &&
+		/^\/run\/WSL\/\d+_interop$/.test(interopPath) &&
+		socketExists(interopPath);
 	return isWarp && isWsl ? NATIVE_SHIFT_ENTER_SEQUENCE : data;
 }
 
