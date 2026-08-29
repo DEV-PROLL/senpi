@@ -11,9 +11,14 @@
   tracked entirely in the interactive layer from observed `compaction_end` events: it starts on an
   external-owner rejection and the one-time notice re-arms on a successful compaction, a model switch
   (selector, keyboard/favorite `cycleModel`, or retry provider failover via `retry_fallback_applied`),
-  a session rebind, or any full transcript rerender (`renderInitialMessages`/`rebuildChatFromMessages`,
-  covering branch/tree navigation, reload, and settings-driven rebuilds); the logic does not depend on
-  repeat rejection events arriving (the core attempt-suppression half of #1174 lands separately). The
+  a session rebind, a session reload, tree/branch navigation rerenders
+  (`renderInitialMessages`), a `model_changed` event (including shared-host/other-client
+  switches), or retry provider failover via `retry_fallback_applied`; cosmetic transcript
+  rebuilds (hide-thinking, cache-notice visibility, output padding via
+  `rebuildChatFromMessages`) deliberately preserve the episode, because post-#1188 core
+  emits no repeat rejection event to restore cleared state. The logic does not depend on
+  repeat rejection events arriving (the core attempt-suppression half of #1174 landed in
+  #1188). The
   external-owner branch is checked before the `aborted` branch because production rejections are
   emitted via `_rejectCompaction(..., true, reason)` and carry `aborted: true`.
 - `components/footer.ts`: the context meter appends an ` (SDK)` marker while a delegation episode is

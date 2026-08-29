@@ -4773,6 +4773,15 @@ export class InteractiveMode {
 				break;
 			}
 
+			case "model_changed":
+				// Shared-host/other-client model switches arrive as model_changed wire
+				// events; the new model must not inherit the previous model's
+				// SDK-delegation episode (post-#1188 core emits no repeat rejection to
+				// self-heal a stale marker).
+				this.externalOwnerCompactionNoticeShown = false;
+				this.footer?.setCompactionDelegated?.(false);
+				break;
+
 			case "retry_fallback_applied": {
 				if (this.pendingZeroDelayRetryIndicator) {
 					this.pendingZeroDelayRetryIndicator.fallbackApplied = true;
@@ -5511,10 +5520,6 @@ export class InteractiveMode {
 	}
 
 	private rebuildChatFromMessages(): void {
-		// Transcript rebuild wipes the rendered notice; re-arm the delegation
-		// episode so the next external-owner rejection surfaces it again.
-		this.externalOwnerCompactionNoticeShown = false;
-		this.footer?.setCompactionDelegated?.(false);
 		try {
 			this.sessionManager?.reloadFromDisk?.();
 		} catch {
@@ -7953,6 +7958,12 @@ export class InteractiveMode {
 			this.resetExtensionUI();
 			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 			this.outputPad = this.settingsManager.getOutputPad();
+			// Reload replaces the session runner: a genuine ownership boundary, so the
+			// external-owner delegation episode ends here (settings-only rebuilds below
+			// go through rebuildChatFromMessages and must NOT reset it — post-#1188 core
+			// emits no repeat rejection event to restore cleared state).
+			this.externalOwnerCompactionNoticeShown = false;
+			this.footer?.setCompactionDelegated?.(false);
 			this.rebuildChatFromMessages();
 			time("chatRebuild", "reload");
 			chatRestoredBeforeSessionStart = true;
