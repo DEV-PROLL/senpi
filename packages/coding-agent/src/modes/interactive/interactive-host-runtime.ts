@@ -84,6 +84,7 @@ export async function createInteractiveHostRuntime(
 			opened.state,
 			options.onWarning,
 		);
+		await remoteSession.refresh();
 		return new RemoteInteractiveRuntime(localRuntime, remoteSession, client) as unknown as AgentSessionRuntime;
 	} catch (cause) {
 		await client.stop().catch(() => {});

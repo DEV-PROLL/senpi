@@ -477,6 +477,49 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("hydrates the session manager when attaching after another client advances the host", async () => {
+		const qa = scratch("attach-hydration");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const localSessionManager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const sessionPath = localSessionManager.getSessionFile();
+		if (!sessionPath) throw new Error("Expected persisted session path");
+		const observer = new RpcClient({ socketPath: qa.socket });
+		await observer.start();
+		await observer.openSession({ sessionPath, cwd: qa.cwd });
+		const settled = new Promise<void>((resolve) => {
+			const unsubscribe = observer.onEvent((event) => {
+				if (event.type !== "agent_settled") return;
+				unsubscribe();
+				resolve();
+			});
+		});
+		await observer.prompt("already-advanced-before-attach");
+		await settled;
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: localSessionManager,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			expect(JSON.stringify(runtime.session.messages)).toContain("already-advanced-before-attach");
+			expect(runtime.session.sessionManager.getEntries()).toEqual(
+				expect.arrayContaining([expect.objectContaining({ type: "message" })]),
+			);
+		} finally {
+			await runtime.dispose();
+			await observer.stop();
+			await fake.close();
+		}
+	});
+
 	it("reports host work through isIdle while streaming", async () => {
 		const qa = scratch("idle-sync");
 		const fake = await startFakeModelServer();
