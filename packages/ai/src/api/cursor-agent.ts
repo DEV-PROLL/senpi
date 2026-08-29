@@ -4133,6 +4133,17 @@ function buildConversationTurns(
 	return turns;
 }
 
+/** Returns the serialized byte cost of Cursor's complete stored history representation. */
+export function measureCursorHistorySerializedBytes(
+	messages: Message[],
+	activeUserMessageIndex = findLastUserMessageIndex(messages),
+): number {
+	return buildCursorHistoryWireBytesForTest(messages, activeUserMessageIndex).reduce(
+		(total, bytes) => total + bytes.byteLength,
+		0,
+	);
+}
+
 /** Exported for tests: returns the encoded Cursor history blob payloads. */
 export function buildCursorHistoryWireBytesForTest(
 	messages: Message[],

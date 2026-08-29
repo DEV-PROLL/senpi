@@ -1,6 +1,6 @@
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { buildCursorHistoryForTest, buildCursorHistoryWireBytesForTest } from "@earendil-works/pi-ai/api/cursor-agent";
+import { buildCursorHistoryWireBytesForTest } from "@earendil-works/pi-ai/api/cursor-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -77,18 +77,13 @@ function cursorPairedMessages(resultTexts: string[]): AgentMessage[] {
 }
 
 function serializedCursorHistoryBytes(messages: AgentMessage[]): number {
-	const history = buildCursorHistoryForTest(messages as never);
-	return (
-		new TextEncoder().encode(JSON.stringify(history.rootPromptMessagesJson)).byteLength +
-		new TextEncoder().encode(JSON.stringify(history.turnUserMessagesJson)).byteLength +
-		new TextEncoder().encode(JSON.stringify(history.turnStepMessagesJson)).byteLength
-	);
+	return buildCursorHistoryWireBytesForTest(messages as never).reduce((total, bytes) => total + bytes.byteLength, 0);
 }
 
 describe("1043 cursor toolResult truncate", () => {
 	const harnesses: Harness[] = [];
 
-	afterEach(() => {
+	afterEach(async () => {
 		while (harnesses.length > 0) harnesses.pop()?.cleanup();
 	});
 	it("caps long toolResult text at a code-point-safe, marker-inclusive boundary", () => {
@@ -219,10 +214,7 @@ describe("1043 cursor toolResult truncate", () => {
 		const result = messages.find((message) => message.role === "toolResult");
 		if (result?.role !== "toolResult") throw new Error("expected tool result");
 		result.content = (imageToolResult(1450) as Extract<AgentMessage, { role: "toolResult" }>).content;
-		const before = buildCursorHistoryWireBytesForTest(messages as never).reduce(
-			(total, bytes) => total + bytes.byteLength,
-			0,
-		);
+		const before = serializedCursorHistoryBytes(messages);
 		expect(before).toBeGreaterThan(CURSOR_TOOL_RESULT_MAX_BYTES);
 
 		const { messages: next, changed } = truncateToolResultBodies(messages);
@@ -233,12 +225,61 @@ describe("1043 cursor toolResult truncate", () => {
 		).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
 	});
 
+	it("accounts for adversarial tool names in Cursor wire history", () => {
+		const messages = cursorPairedMessages(["ok"]);
+		const result = messages.find((message) => message.role === "toolResult");
+		if (result?.role !== "toolResult") throw new Error("expected tool result");
+		result.toolName = "n".repeat(15_000);
+		const call = messages.find((message) => message.role === "assistant");
+		if (call?.role !== "assistant") throw new Error("expected assistant message");
+		const toolCall = call.content.find((part) => part.type === "toolCall");
+		if (toolCall?.type !== "toolCall") throw new Error("expected tool call");
+		toolCall.name = result.toolName;
+		const before = serializedCursorHistoryBytes(messages);
+		expect(before).toBeGreaterThan(CURSOR_TOOL_RESULT_MAX_BYTES);
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		if (!next) throw new Error("expected messages");
+		expect(
+			buildCursorHistoryWireBytesForTest(next as never).reduce((total, bytes) => total + bytes.byteLength, 0),
+		).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+	});
+
+	it("accounts for adversarial tool-call arguments in Cursor wire history", () => {
+		const messages = cursorPairedMessages(["ok"]);
+		const call = messages.find((message) => message.role === "assistant");
+		if (call?.role !== "assistant") throw new Error("expected assistant message");
+		const toolCall = call.content.find((part) => part.type === "toolCall");
+		if (toolCall?.type !== "toolCall") throw new Error("expected tool call");
+		toolCall.arguments = { value: "a".repeat(25_000) };
+		const before = serializedCursorHistoryBytes(messages);
+		expect(before).toBeGreaterThan(CURSOR_TOOL_RESULT_MAX_BYTES);
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		if (!next) throw new Error("expected messages");
+		expect(
+			buildCursorHistoryWireBytesForTest(next as never).reduce((total, bytes) => total + bytes.byteLength, 0),
+		).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+	});
+
+	it("does not evict fitting 68 paired tool turns", () => {
+		const messages = cursorPairedMessages(Array.from({ length: 68 }, () => "1234567890"));
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(false);
+		expect(next).toBe(messages);
+	});
+
+	it("does not evict fitting 97 paired tool turns", () => {
+		const messages = cursorPairedMessages(Array.from({ length: 97 }, () => "1234567890"));
+		expect(serializedCursorHistoryBytes(messages)).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(false);
+		expect(next).toBe(messages);
+	});
+
 	it("bounds aggregate envelopes across 98 paired tool turns", () => {
 		const messages = cursorPairedMessages(Array.from({ length: 98 }, () => "1234567890"));
-		const before = buildCursorHistoryWireBytesForTest(messages as never).reduce(
-			(total, bytes) => total + bytes.byteLength,
-			0,
-		);
+		const before = serializedCursorHistoryBytes(messages);
 		expect(before).toBeGreaterThan(CURSOR_TOOL_RESULT_MAX_BYTES);
 
 		const { messages: next, changed } = truncateToolResultBodies(messages);

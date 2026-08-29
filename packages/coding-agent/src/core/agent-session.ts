@@ -33,6 +33,7 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import { ProviderRetryWatchdogAbortError, prepareAgentToolCall } from "@earendil-works/pi-agent-core";
 import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC, type ThinkingSelection } from "@earendil-works/pi-ai";
+import { measureCursorHistorySerializedBytes } from "@earendil-works/pi-ai/api/cursor-agent";
 import type {
 	Api,
 	AssistantMessage,
@@ -828,12 +829,6 @@ export const MAX_SKILL_EXPANSIONS_PER_PROMPT = 5;
 export const CURSOR_TOOL_RESULT_MAX_CHARS = 2000;
 export const CURSOR_TOOL_RESULT_MAX_BYTES = 50_000;
 const CURSOR_TRUNCATION_MARKER = "\n...[truncated]";
-// Cursor emits each history item in duplicated JSON and protobuf envelopes. Sixteen
-// bounds worst-case JSON escaping (control characters) plus framing and duplication.
-const CURSOR_SERIALIZED_BYTES_PER_RAW_BYTE = 16;
-const CURSOR_CONTENT_ITEM_OVERHEAD_BYTES = 64;
-// Charge the root/turn/message envelopes emitted for every retained tool result.
-const CURSOR_TOOL_RESULT_ENVELOPE_OVERHEAD_BYTES = 512;
 
 export function truncateToolResultBodies(
 	messages: AgentMessage[] | undefined,
@@ -841,82 +836,64 @@ export function truncateToolResultBodies(
 	maxBytes = CURSOR_TOOL_RESULT_MAX_BYTES,
 ): { messages: AgentMessage[] | undefined; changed: boolean } {
 	if (!Array.isArray(messages) || messages.length === 0) return { messages, changed: false };
-	const encoder = new TextEncoder();
-	const byteLength = (text: string): number => encoder.encode(text).byteLength;
-	const serializedCost = (text: string): number =>
-		byteLength(text) * CURSOR_SERIALIZED_BYTES_PER_RAW_BYTE + CURSOR_CONTENT_ITEM_OVERHEAD_BYTES;
 	const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 	const markerChars = [...segmenter.segment(CURSOR_TRUNCATION_MARKER)].length;
-	let usedBytes = 0;
-	let changed = false;
 	const result = messages.slice();
+	let changed = false;
 
-	// Walk newest-to-oldest: the next continuation needs the most recent results.
-	for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
-		const message: AgentMessage = messages[messageIndex];
+	// Apply the per-result character cap first, independent of the aggregate wire cap.
+	for (let messageIndex = result.length - 1; messageIndex >= 0; messageIndex--) {
+		const message = result[messageIndex];
 		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
-		let nextContent: typeof message.content | undefined;
-		const emptiedPartIndexes = new Set<number>();
-		usedBytes += CURSOR_TOOL_RESULT_ENVELOPE_OVERHEAD_BYTES;
-		for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex--) {
-			const part = message.content[partIndex];
-			if (part.type === "image" && typeof part.data === "string") {
-				if (usedBytes + serializedCost(part.data) <= maxBytes) {
-					usedBytes += serializedCost(part.data);
-				} else {
-					nextContent ??= message.content.slice();
-					nextContent[partIndex] = { ...part, data: "" };
-					emptiedPartIndexes.add(partIndex);
-					changed = true;
-				}
-				continue;
-			}
+		let content = message.content;
+		for (let partIndex = content.length - 1; partIndex >= 0; partIndex--) {
+			const part = content[partIndex];
+			if (part.type === "image" && typeof part.data === "string") continue;
 			if (part.type !== "text" || typeof part.text !== "string") continue;
-			const text = part.text;
-			const graphemes = [...segmenter.segment(text)].map((segment) => segment.segment);
-			const fullCost = serializedCost(text);
-			if (graphemes.length <= maxChars && usedBytes + fullCost <= maxBytes) {
-				usedBytes += fullCost;
-				continue;
-			}
-
-			const markerCost = serializedCost(CURSOR_TRUNCATION_MARKER);
-			const markerFits = usedBytes + markerCost <= maxBytes;
-			const availableBytes = markerFits
-				? Math.floor(
-						(maxBytes - usedBytes - markerCost - CURSOR_CONTENT_ITEM_OVERHEAD_BYTES) /
-							CURSOR_SERIALIZED_BYTES_PER_RAW_BYTE,
-					)
-				: 0;
-			let kept = "";
-			if (markerFits) {
-				for (const grapheme of graphemes.slice(0, Math.max(0, maxChars - markerChars))) {
-					if (byteLength(kept + grapheme) > availableBytes) break;
-					kept += grapheme;
-				}
-			}
-			const nextText = markerFits ? kept + CURSOR_TRUNCATION_MARKER : "";
-			nextContent ??= message.content.slice();
-			nextContent[partIndex] = { ...part, text: nextText };
-			if (!markerFits) emptiedPartIndexes.add(partIndex);
-			usedBytes += markerFits ? serializedCost(nextText) : serializedCost("");
+			const graphemes = [...segmenter.segment(part.text)].map((item) => item.segment);
+			if (graphemes.length <= maxChars) continue;
+			const kept = graphemes.slice(0, Math.max(0, maxChars - markerChars)).join("");
+			const nextText = kept + CURSOR_TRUNCATION_MARKER;
+			content = content === message.content ? content.slice() : content;
+			content[partIndex] = { ...part, text: nextText };
+			result[messageIndex] = { ...message, content };
 			changed = true;
 		}
-		// Empty content items still carry a Cursor content-item envelope. Keep one
-		// placeholder for each consecutive run so the tool result remains paired
-		// without allowing rejected items to consume unbounded wire space.
-		if (nextContent && emptiedPartIndexes.size > 1) {
-			const compactedContent: Array<TextContent | ImageContent> = [];
-			let previousWasEmptied = false;
-			for (const [partIndex, part] of nextContent.entries()) {
-				const isEmptied = emptiedPartIndexes.has(partIndex);
-				if (isEmptied && previousWasEmptied) continue;
-				compactedContent.push(part);
-				previousWasEmptied = isEmptied;
-			}
-			nextContent = compactedContent;
-		}
-		if (nextContent) result[messageIndex] = { ...message, content: nextContent };
+	}
+
+	const fits = () => measureCursorHistorySerializedBytes(result as never) <= maxBytes;
+	if (fits()) return { messages: changed ? result : messages, changed };
+
+	// Remove oldest result bodies until the actual Cursor history fits. Measuring the
+	// complete representation accounts for names, ids, MIME types, arguments, and
+	// protobuf/JSON framing without a heuristic envelope charge.
+	for (let messageIndex = 0; messageIndex < result.length && !fits(); messageIndex++) {
+		const message = result[messageIndex];
+		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
+		const emptiedContent = message.content.map((part) =>
+			part.type === "text" ? { ...part, text: "" } : part.type === "image" ? { ...part, data: "" } : part,
+		);
+		const content = emptiedContent.filter((part, index) => {
+			if (index === 0) return true;
+			const previous = emptiedContent[index - 1];
+			const empty = part.type === "text" ? part.text === "" : part.type === "image" && part.data === "";
+			const previousEmpty =
+				previous.type === "text" ? previous.text === "" : previous.type === "image" && previous.data === "";
+			return !empty || !previousEmpty;
+		});
+		result[messageIndex] = { ...message, content };
+		changed = true;
+	}
+
+	// If metadata alone exceeds the cap, discard the oldest complete turn. Keeping
+	// an over-limit tool call would violate the wire bound even with an empty result.
+	while (!fits()) {
+		const firstUser = result.findIndex((message) => message.role === "user");
+		if (firstUser < 0) break;
+		const nextUser = result.findIndex((message, index) => index > firstUser && message.role === "user");
+		const end = nextUser < 0 ? result.length : nextUser;
+		result.splice(firstUser, end - firstUser);
+		changed = true;
 	}
 	return { messages: changed ? result : messages, changed };
 }
@@ -1424,7 +1401,7 @@ export class AgentSession {
 		this.agent.transformContext = async (messages, signal) => {
 			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
 			if (this.model?.provider === "cursor" || this.model?.provider === "cursor-cli-oauth") {
-				return truncateToolResultBodies(transformed).messages ?? transformed;
+				return (await truncateToolResultBodies(transformed)).messages ?? transformed;
 			}
 			return transformed;
 		};
@@ -5383,7 +5360,7 @@ export class AgentSession {
 				return await this._rejectCompaction(request, requestId, operationId, "stale-revision", false);
 			}
 
-			if (this._wouldCompactionOverflow(pathEntries, compactionResult, fromExtension, model)) {
+			if (await this._wouldCompactionOverflow(pathEntries, compactionResult, fromExtension, model)) {
 				return await this._rejectCompaction(request, requestId, operationId, "would-overflow", false);
 			}
 
@@ -5490,12 +5467,12 @@ export class AgentSession {
 		}
 	}
 
-	private _wouldCompactionOverflow(
+	private async _wouldCompactionOverflow(
 		pathEntries: SessionEntry[],
 		compactionResult: CompactionResult,
 		fromExtension: boolean,
 		model: Model<Api>,
-	): boolean {
+	): Promise<boolean> {
 		const currentLeaf = pathEntries[pathEntries.length - 1];
 		if (!currentLeaf) return false;
 

@@ -1,5 +1,24 @@
 # changes
 
+## Measure Cursor tool-result history at the wire representation (2026-08-29)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` admits Cursor context using the actual serialized history bytes, accounting for tool names, call IDs, MIME types, arguments, and framing instead of a fixed envelope estimate. Oldest result bodies are emptied first, with complete oldest turns removed only when metadata alone exceeds the bound.
+- `packages/ai/src/api/cursor-agent.ts` exposes the shared serialized-history measurement used by the admission transform.
+
+### Why
+
+- Cursor history must stay at or below 50,000 serialized bytes without evicting results from histories that genuinely fit.
+
+### Why an extension could not handle it
+
+- Admission occurs in the core Cursor context transform before provider execution.
+
+### Expected merge conflict zones
+
+- LOW: Cursor admission constants and `truncateToolResultBodies()` in `agent-session.ts`.
+
 ## Honor --auto-title-sessions outside interactive mode (2026-08-28)
 
 ### What changed
