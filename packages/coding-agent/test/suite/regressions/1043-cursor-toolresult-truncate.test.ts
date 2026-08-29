@@ -1,6 +1,6 @@
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { buildCursorHistoryForTest } from "@earendil-works/pi-ai/api/cursor-agent";
+import { buildCursorHistoryForTest, buildCursorHistoryWireBytesForTest } from "@earendil-works/pi-ai/api/cursor-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -198,6 +198,27 @@ describe("1043 cursor toolResult truncate", () => {
 		if (!next) throw new Error("expected messages");
 		expect(serializedCursorHistoryBytes(next)).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
 	});
+
+	for (const partCount of [7424, 7500]) {
+		it(`keeps the ${partCount}-part Cursor wire representation within the bound`, () => {
+			const messages = cursorPairedMessages(["placeholder"]);
+			const result = messages.find((message) => message.role === "toolResult");
+			if (result?.role !== "toolResult") throw new Error("expected tool result");
+			result.content = Array.from({ length: partCount }, () => ({ type: "text" as const, text: "abcdefghij" }));
+
+			const { messages: next } = truncateToolResultBodies(messages);
+			if (!next) throw new Error("expected messages");
+			const transformed = next.find((message) => message.role === "toolResult");
+			if (transformed?.role !== "toolResult") throw new Error("expected transformed tool result");
+			expect(transformed.toolCallId).toBe(result.toolCallId);
+			expect(
+				buildCursorHistoryWireBytesForTest(next as never).reduce((total, bytes) => total + bytes.byteLength, 0),
+			).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+			expect(
+				transformed.content.filter((part) => part.type === "text" && part.text === "").length,
+			).toBeLessThanOrEqual(1);
+		});
+	}
 
 	for (const partCount of [3334, 5000]) {
 		it(`does not amplify ${partCount} tiny parts with truncation markers`, () => {

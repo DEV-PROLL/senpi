@@ -851,9 +851,10 @@ export function truncateToolResultBodies(
 
 	// Walk newest-to-oldest: the next continuation needs the most recent results.
 	for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
-		const message = messages[messageIndex];
+		const message: AgentMessage = messages[messageIndex];
 		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
 		let nextContent: typeof message.content | undefined;
+		const emptiedTextIndexes = new Set<number>();
 		for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex--) {
 			const part = message.content[partIndex];
 			if (part.type === "image" && typeof part.data === "string") {
@@ -893,8 +894,23 @@ export function truncateToolResultBodies(
 			const nextText = markerFits ? kept + CURSOR_TRUNCATION_MARKER : "";
 			nextContent ??= message.content.slice();
 			nextContent[partIndex] = { ...part, text: nextText };
+			if (!markerFits) emptiedTextIndexes.add(partIndex);
 			usedBytes += markerFits ? serializedCost(nextText) : serializedCost("");
 			changed = true;
+		}
+		// Empty text items still carry a Cursor content-item envelope. Keep one
+		// placeholder for each consecutive run so the tool result remains paired
+		// without allowing rejected items to consume unbounded wire space.
+		if (nextContent && emptiedTextIndexes.size > 1) {
+			const compactedContent: Array<TextContent | ImageContent> = [];
+			let previousWasEmptied = false;
+			for (const [partIndex, part] of nextContent.entries()) {
+				const isEmptied = emptiedTextIndexes.has(partIndex);
+				if (isEmptied && previousWasEmptied) continue;
+				compactedContent.push(part);
+				previousWasEmptied = isEmptied;
+			}
+			nextContent = compactedContent;
 		}
 		if (nextContent) result[messageIndex] = { ...message, content: nextContent };
 	}

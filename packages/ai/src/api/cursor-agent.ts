@@ -4133,6 +4133,17 @@ function buildConversationTurns(
 	return turns;
 }
 
+/** Exported for tests: returns the encoded Cursor history blob payloads. */
+export function buildCursorHistoryWireBytesForTest(
+	messages: Message[],
+	activeUserMessageIndex = findLastUserMessageIndex(messages),
+): Uint8Array[] {
+	const blobStore = new Map<string, Uint8Array>();
+	buildRootPromptMessagesJson(messages, [], blobStore, activeUserMessageIndex);
+	buildConversationTurns(messages, blobStore, activeUserMessageIndex);
+	return [...blobStore.values()];
+}
+
 /** Exported for tests: decodes Cursor history blobs built from conversation messages. */
 export function buildCursorHistoryForTest(
 	messages: Message[],
