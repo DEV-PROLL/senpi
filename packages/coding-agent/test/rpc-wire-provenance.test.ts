@@ -8,8 +8,10 @@
  * child process is spawned, so these tests do not contend with the host-spawning suites.
  *
  *  1. Session replacement is not broadcast to other attached clients.
+ *  4. User abort provenance is lost across the RPC boundary.
  */
 
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
@@ -74,6 +76,14 @@ function makeSink(): CollectedSink {
 			});
 		},
 	};
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve!: () => void;
+	const promise = new Promise<void>((resolvePromise) => {
+		resolve = resolvePromise;
+	});
+	return { promise, resolve };
 }
 
 /**
@@ -144,6 +154,50 @@ describe("RPC wire provenance", () => {
 			cwd: second.session.sessionManager.getCwd(),
 		});
 		expect(second.session.sessionId).not.toBe(first.session.sessionId);
+
+		await handler.dispose();
+	});
+
+	// Finding 4 -----------------------------------------------------------------
+	it("carries user abort provenance across the RPC boundary in state and the abort event", async () => {
+		const harness = await newHarness();
+		const collected = makeSink();
+		const host = makeRuntimeHost(harness.session);
+		const handler = createRpcConnectionHandler(host.runtimeHost, collected.sink);
+		await handler.ready;
+
+		// Drive a real user abort through the RPC `abort` command so the provenance is
+		// produced by the same path a client uses, not by poking session internals.
+		// The turn is held open by waiting for the first assistant delta rather than by
+		// sleeping, so the abort always lands mid-stream.
+		const streamStarted = deferred();
+		const unsubscribe = harness.session.subscribe((event) => {
+			if (event.type === "message_update" && event.message.role === "assistant") streamStarted.resolve();
+		});
+		harness.setResponses([fauxAssistantMessage("streaming response ".repeat(4_000))]);
+		const streaming = harness.session.prompt("hold");
+		await streamStarted.promise;
+
+		const aborted = collected.waitFor((record) => record.type === "agent_end");
+		await handler.handleInputLine(JSON.stringify({ id: "abort-1", type: "abort" }));
+		await streaming.catch(() => {});
+		unsubscribe();
+
+		// The `agent_end` the RPC connection forwards comes from `session.subscribe`,
+		// which delivers only `{ type, messages, willRetry }` — the abort provenance the
+		// extension hook sees is stripped from it. A client therefore cannot tell a
+		// user-owned abort from a provider one on the wire.
+		expect(await aborted).toMatchObject({ aborted: true, abortSource: "user" });
+
+		// The abort owner ("user") must ALSO be reconstructible from the authoritative
+		// state snapshot, which is what an attached client mirrors host state from. The
+		// live `session.currentAbortSource` getter is transient — it is cleared once the
+		// turn settles — so a snapshot taken after settle must report the LAST turn's
+		// owner, not `undefined`. The renderer selects the "Operation aborted" wording
+		// from exactly this provenance.
+		await handler.handleInputLine(JSON.stringify({ id: "state-4", type: "get_state" }));
+		const stateResponse = await collected.waitFor((record) => record.id === "state-4");
+		expect((stateResponse.data as Record<string, unknown>).lastAbortSource).toBe("user");
 
 		await handler.dispose();
 	});

@@ -7,6 +7,7 @@
 
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
+import type { AgentAbortSource } from "../../core/agent-abort-provenance.ts";
 import type { PromptDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
@@ -259,6 +260,13 @@ export interface RpcLoadedMcpServer {
 export interface RpcSessionState {
 	model?: Model<any>;
 	thinkingLevel: ThinkingLevel;
+	/**
+	 * Abort owner of the most recent aborted turn, or the in-flight one while it is
+	 * still settling. Retained after settle: the live session getter is transient, so a
+	 * client that snapshots state after the turn ends would otherwise see nothing and
+	 * fall back to generic wording instead of "Operation aborted".
+	 */
+	lastAbortSource?: AgentAbortSource;
 	/** Service tier the session resolved for the active model, if any. */
 	serviceTier?: ServiceTier;
 	/** True when the active model is served at the priority ("fast") tier. */

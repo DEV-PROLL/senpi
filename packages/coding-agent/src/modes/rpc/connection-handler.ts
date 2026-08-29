@@ -20,6 +20,7 @@ import { existsSync } from "node:fs";
 import { basename, dirname, extname } from "node:path";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
 import { VERSION } from "../../config.ts";
+import type { AgentAbortSource } from "../../core/agent-abort-provenance.ts";
 import type { AgentSession, PromptDisposition } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
@@ -151,11 +152,16 @@ function loadedMcpStatus(server: McpWireStatusServer): RpcMcpServerStatus {
  * Shared with `open_session` (session-command-router) so both surfaces answer with the SAME
  * fields: a second hand-rolled literal silently drifts, which is how `serviceTier`/`fastMode`
  * would otherwise be missing from an opened session's initial state.
+ *
+ * `lastAbortSource` is passed in rather than read from the session: `session.currentAbortSource`
+ * is cleared once the turn settles, so only the caller that observed `agent_end` still knows
+ * who owned the abort.
  */
-export function buildRpcSessionState(session: AgentSession): RpcSessionState {
+export function buildRpcSessionState(session: AgentSession, lastAbortSource?: AgentAbortSource): RpcSessionState {
 	return {
 		model: session.model,
 		thinkingLevel: session.thinkingLevel,
+		...(lastAbortSource ? { lastAbortSource } : {}),
 		serviceTier: session.effectiveServiceTier,
 		fastMode: session.isFastModeActive(),
 		isStreaming: session.isStreaming,
@@ -239,6 +245,8 @@ export function createRpcConnectionHandler(
 	let unsubscribeLoadedSurfaces: (() => void) | undefined;
 	let unsubscribeExtensionEvents: (() => void) | undefined;
 	let mcpWireStatus: McpWireStatusSnapshot = { servers: [] };
+	/** Abort owner of the last settled turn; `session.currentAbortSource` clears on settle. */
+	let lastAbortSource: AgentAbortSource | undefined;
 	let loadedSurfacesDigest: string | undefined;
 	let rpcCommandsDigest: string | undefined;
 	let suppressLoadedSurfaceEvents = false;
@@ -631,6 +639,7 @@ export function createRpcConnectionHandler(
 		const replacedSession = session !== runtimeHost.session;
 		session = runtimeHost.session;
 		if (replacedSession) {
+			lastAbortSource = undefined;
 			// A replacement can be driven by ANY attached client, so every connection must be
 			// told the live binding moved and given the new authoritative identity. Emitted
 			// before the derived-surface refresh so a client cannot act on the old identity in
@@ -707,6 +716,16 @@ export function createRpcConnectionHandler(
 				}
 				if (event.type === "command_invocation") {
 					outputEvent(event satisfies RpcCommandInvocationEvent);
+					return;
+				}
+				if (event.type === "agent_end") {
+					// The subscribe-path `agent_end` carries only { type, messages, willRetry };
+					// the abort provenance the extension hook receives is stripped from it. Read
+					// it from the session, which still reports the owner at this point, and retain
+					// it for `get_state` because the getter clears once the turn settles.
+					const abortSource = session.currentAbortSource;
+					if (abortSource !== undefined) lastAbortSource = abortSource;
+					outputEvent(abortSource === undefined ? event : { ...event, aborted: true, abortSource });
 					return;
 				}
 				outputEvent(event);
@@ -947,7 +966,7 @@ export function createRpcConnectionHandler(
 			// =================================================================
 
 			case "get_state":
-				return success(id, "get_state", buildRpcSessionState(session));
+				return success(id, "get_state", buildRpcSessionState(session, lastAbortSource));
 
 			// =================================================================
 			// Model
