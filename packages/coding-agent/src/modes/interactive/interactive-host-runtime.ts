@@ -140,6 +140,7 @@ export class RemoteInteractiveRuntime {
 	async dispose(): Promise<void> {
 		const errors: unknown[] = [];
 		for (const cleanup of [
+			() => this.#remoteSession.abortLocalBash(),
 			() => this.#client.closeSession(),
 			() => this.#client.stop(),
 			() => this.#local.dispose(),

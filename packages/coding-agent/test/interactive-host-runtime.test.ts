@@ -557,6 +557,54 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("aborts client-local bash when the runtime is disposed", async () => {
+		const qa = scratch("dispose-bash");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		let started = false;
+		let aborted = false;
+		const operation = new Promise<{ exitCode: number | null }>((resolve) => {
+			void runtime.session.executeBash("local-bash", undefined, {
+				operations: {
+					exec: async (_command: string, _cwd: string, options: { signal?: AbortSignal }) => {
+						started = true;
+						if (options.signal?.aborted) aborted = true;
+						else
+							options.signal?.addEventListener(
+								"abort",
+								() => {
+									aborted = true;
+									resolve({ exitCode: null });
+								},
+								{ once: true },
+							);
+						return await new Promise<{ exitCode: number | null }>(() => {});
+					},
+				},
+			});
+		});
+		try {
+			while (!started) await new Promise((resolve) => setImmediate(resolve));
+			await runtime.dispose();
+			expect(aborted).toBe(true);
+		} finally {
+			void operation;
+			await fake.close();
+		}
+	});
+
 	it("reports host work through isIdle while streaming", async () => {
 		const qa = scratch("idle-sync");
 		const fake = await startFakeModelServer();
