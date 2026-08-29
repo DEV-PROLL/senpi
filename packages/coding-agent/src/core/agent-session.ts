@@ -7588,12 +7588,13 @@ export class AgentSession {
 				options?.operations ?? createLocalBashOperations({ shellPath }),
 				{
 					onChunk: (delta) => {
-						onChunk?.(delta);
+						const callbackResult = onChunk?.(delta);
 						this._emit({
 							type: "bash_execution_update",
 							id: options?.id,
 							delta,
 						});
+						return callbackResult;
 					},
 					signal: abortController.signal,
 				},
