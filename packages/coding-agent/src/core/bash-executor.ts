@@ -63,6 +63,7 @@ export async function executeBashWithOperations(
 		: callbackAbortController.signal;
 	let callbackError: unknown;
 	let hasCallbackError = false;
+	let callbacksAbandoned = false;
 	const callbackPromises = new Set<Promise<void>>();
 	const waitForCallbacks = async (allowAbandonment: boolean): Promise<boolean> => {
 		if (callbackPromises.size === 0) return true;
@@ -238,6 +239,12 @@ export async function executeBashWithOperations(
 								callbackError = error;
 								hasCallbackError = true;
 							}
+							if (callbacksAbandoned) {
+								process.emitWarning(
+									`Bash output callback rejected after the command timeout: ${error instanceof Error ? error.message : String(error)}`,
+									{ code: "BASH_CALLBACK_ERROR" },
+								);
+							}
 							callbackAbortController.abort();
 							throw error;
 						},
@@ -320,6 +327,7 @@ export async function executeBashWithOperations(
 	// abandonment, so its spill is cleaned before the caller is released.
 	const callbacksSettled = await waitForCallbacks(false);
 	if (!callbacksSettled) {
+		callbacksAbandoned = true;
 		return await closeTempFileAndCleanup(
 			new Error(`Bash output callback did not settle within ${NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS}ms`),
 		);
