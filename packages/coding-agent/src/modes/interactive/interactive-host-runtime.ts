@@ -39,6 +39,13 @@ export type InteractiveSession = Omit<
 		| Promise<ReturnType<AgentSession["getUserMessagesForForking"]>>;
 };
 
+export type InteractiveHostUiHandler = (
+	request: import("../rpc/rpc-types.ts").RpcExtensionUIRequest,
+) =>
+	| Promise<import("../rpc/rpc-types.ts").RpcExtensionUIResponse | undefined>
+	| import("../rpc/rpc-types.ts").RpcExtensionUIResponse
+	| undefined;
+
 export interface InteractiveHostRuntimeOptions {
 	readonly socket: string;
 	readonly agentDir?: string;
@@ -126,6 +133,9 @@ class RemoteInteractiveRuntime {
 	setRebindSession(callback?: () => Promise<void>): void {
 		this.#rebindSession = callback;
 	}
+	setHostUiHandler(callback?: InteractiveHostUiHandler): void {
+		this.#remoteSession.setHostUiHandler(callback);
+	}
 	async dispose(): Promise<void> {
 		await this.#client.closeSession();
 		await this.#client.stop();
@@ -204,6 +214,7 @@ class RemoteInteractiveRuntime {
 
 interface RemoteSessionProxy {
 	readonly session: AgentSession;
+	setHostUiHandler(callback?: InteractiveHostUiHandler): void;
 	refresh(): Promise<void>;
 	abortLocalBash(): void;
 	createReplacedSessionContext(): ReplacedSessionContext;
@@ -228,6 +239,8 @@ function createRemoteSessionProxy(
 	};
 	let state = { ...initialState };
 	let bashChunk: ((chunk: string) => void) | undefined;
+	let hostUiHandler: InteractiveHostUiHandler | undefined;
+	const pendingUiRequests: import("../rpc/rpc-types.ts").RpcExtensionUIRequest[] = [];
 	let localBashAbortController: AbortController | undefined;
 	let localBashRunning = false;
 	let hostBashRunning = initialState.isBashRunning;
@@ -253,6 +266,15 @@ function createRemoteSessionProxy(
 	let mirroredCurrentAssistantUsage = false;
 	const listeners = new Set<AgentSessionEventListener>();
 	client.onEvent((wireEvent) => {
+		if ((wireEvent as { type?: string }).type === "extension_ui_request") {
+			const request = wireEvent as import("../rpc/rpc-types.ts").RpcExtensionUIRequest;
+			if (hostUiHandler)
+				void Promise.resolve(hostUiHandler(request)).then(
+					(response) => response && client.sendExtensionUIResponse(response),
+				);
+			else pendingUiRequests.push(request);
+			return;
+		}
 		if (wireEvent.type === "agent_settled") state = { ...state, isStreaming: false, retryAttempt: 0 };
 		if (wireEvent.type === "bash_start") {
 			hostBashRunning = true;
@@ -548,6 +570,14 @@ function createRemoteSessionProxy(
 	});
 	return {
 		session,
+		setHostUiHandler: (callback) => {
+			hostUiHandler = callback;
+			if (callback)
+				for (const request of pendingUiRequests.splice(0))
+					void Promise.resolve(callback(request)).then(
+						(response) => response && client.sendExtensionUIResponse(response),
+					);
+		},
 		refresh,
 		abortLocalBash: () => localBashAbortController?.abort(),
 		createReplacedSessionContext: () => {

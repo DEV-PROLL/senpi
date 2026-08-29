@@ -242,6 +242,46 @@ describe("multi-session RPC event writer", () => {
 		expect(resolvedB).toBe(true);
 	});
 
+	it("broadcasts unsolicited extension UI state while targeting dialog requests", async () => {
+		const chunks: string[] = [];
+		const scheduled: Array<() => void> = [];
+		const writer = new SessionEventWriter(
+			(chunk) => chunks.push(chunk),
+			(flush) => scheduled.push(flush),
+		);
+		writer.registerConnection("a", { writeRaw: (chunk) => chunks.push(chunk), waitForBackpressure: async () => {} });
+		writer.registerConnection("b", { writeRaw: (chunk) => chunks.push(chunk), waitForBackpressure: async () => {} });
+		writer.withConnection("a", () =>
+			writer.enqueue("session", { type: "extension_ui_request", id: "dialog", method: "confirm" }),
+		);
+		writer.withConnection("a", () =>
+			writer.enqueue("session", { type: "extension_ui_request", id: "status", method: "setStatus" }),
+		);
+		await scheduled[0]!();
+		const output = records(chunks);
+		expect(output.filter((record) => record.id === "dialog")).toHaveLength(1);
+		expect(output.filter((record) => record.id === "status")).toHaveLength(2);
+	});
+
+	it("cancels all pending extension UI requests with matching ids", () => {
+		const requests = new SessionExtensionUiRequests();
+		const cancelled: string[] = [];
+		requests.set("one", {
+			resolve: (response) => {
+				if ("cancelled" in response) cancelled.push(response.id);
+			},
+			reject: () => {},
+		});
+		requests.set("two", {
+			resolve: (response) => {
+				if ("cancelled" in response) cancelled.push(response.id);
+			},
+			reject: () => {},
+		});
+		requests.cancelAll();
+		expect(cancelled).toEqual(["one", "two"]);
+	});
+
 	it("does not emit after a session is sealed, while allowing its terminal close response", async () => {
 		const chunks: string[] = [];
 		const writer = new SessionEventWriter(

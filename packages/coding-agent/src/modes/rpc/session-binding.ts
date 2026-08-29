@@ -12,6 +12,7 @@ import type { RpcSessionEntry } from "./session-registry.ts";
 /** A session-owned adapter around the classic command and extension-UI wiring. */
 export interface RpcSessionBinding {
 	handle(command: object): Promise<void>;
+	cancelPendingExtensionUiRequests?(): void;
 	dispose(): Promise<void>;
 }
 
@@ -48,6 +49,8 @@ export async function createRpcSessionBinding(
 	await handler.ready;
 	return {
 		handle: (command) => runWithProviderScope(entry.scope, () => handler.handleInputLine(JSON.stringify(command))),
+		cancelPendingExtensionUiRequests: () =>
+			runWithProviderScope(entry.scope, () => handler.cancelPendingExtensionUiRequests()),
 		dispose: () => runWithProviderScope(entry.scope, () => handler.dispose()),
 	};
 }

@@ -998,6 +998,7 @@ export class InteractiveMode {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 			await this.themeController.applyFromSettings();
 		});
+		this.runtimeHost.setHostUiHandler((request) => this.handleHostUiRequest(request as any));
 		this.version = DISPLAY_VERSION;
 		this.renderer = createInteractiveTui({
 			tuiMode,
@@ -2742,6 +2743,74 @@ export class InteractiveMode {
 	/**
 	 * Set extension status text in the footer.
 	 */
+	private async handleHostUiRequest(request: {
+		id: string;
+		method: string;
+		title?: string;
+		options?: string[];
+		message?: string;
+		prefill?: string;
+		placeholder?: string;
+		statusKey?: string;
+		statusText?: string;
+		widgetKey?: string;
+		widgetLines?: string[];
+		widgetPlacement?: "aboveEditor" | "belowEditor";
+		text?: string;
+	}): Promise<
+		| { type: "extension_ui_response"; id: string; value: string }
+		| { type: "extension_ui_response"; id: string; confirmed: boolean }
+		| { type: "extension_ui_response"; id: string; cancelled: true }
+		| undefined
+	> {
+		switch (request.method) {
+			case "select": {
+				const value = await this.showExtensionSelector(request.title ?? "", request.options ?? []);
+				return value === undefined
+					? { type: "extension_ui_response", id: request.id, cancelled: true }
+					: { type: "extension_ui_response", id: request.id, value };
+			}
+			case "confirm":
+				return {
+					type: "extension_ui_response",
+					id: request.id,
+					confirmed: await this.showExtensionConfirm(request.title ?? "", request.message ?? ""),
+				};
+			case "input": {
+				const value = await this.showExtensionInput(request.title ?? "", request.placeholder);
+				return value === undefined
+					? { type: "extension_ui_response", id: request.id, cancelled: true }
+					: { type: "extension_ui_response", id: request.id, value };
+			}
+			case "editor": {
+				const value = await this.showExtensionEditor(request.title ?? "", request.prefill);
+				return value === undefined
+					? { type: "extension_ui_response", id: request.id, cancelled: true }
+					: { type: "extension_ui_response", id: request.id, value };
+			}
+			case "notify":
+				this.showExtensionNotify(request.message ?? "");
+				return undefined;
+			case "setStatus":
+				this.setExtensionStatus(request.statusKey ?? "", request.statusText);
+				return undefined;
+			case "setTitle":
+				this.extensionTerminalTitle = request.title ?? "";
+				this.applyTerminalTitle();
+				return undefined;
+			case "set_editor_text":
+				this.editor.setText(request.text ?? "");
+				return undefined;
+			case "setWidget":
+				this.setExtensionWidget(request.widgetKey ?? "", request.widgetLines, {
+					placement: request.widgetPlacement,
+				});
+				return undefined;
+			default:
+				return undefined;
+		}
+	}
+
 	private setExtensionStatus(key: string, text: string | undefined): void {
 		this.footerDataProvider.setExtensionStatus(key, text);
 		this.ui.requestRender();
