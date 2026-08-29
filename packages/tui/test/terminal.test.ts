@@ -150,10 +150,15 @@ describe("normalizeWarpWslShiftEnterInput", () => {
 	it("does not check the WSL socket when Warp is not detected", () => {
 		let socketChecks = 0;
 		assert.equal(
-			normalizeWarpWslShiftEnterInput("\n", { WSL_INTEROP: "/run/WSL/321_interop" }, "linux", () => {
-				socketChecks += 1;
-				return true;
-			}),
+			normalizeWarpWslShiftEnterInput(
+				"\n",
+				{ WSL_INTEROP: "/run/WSL/321_interop" },
+				"linux",
+				() => {
+					socketChecks += 1;
+					return true;
+				},
+			),
 			"\n",
 		);
 		assert.equal(socketChecks, 0);
@@ -209,99 +214,60 @@ describe("normalizeWarpWslShiftEnterInput", () => {
 
 	it("rewrites Warp-on-WSL LF as explicit Shift+Enter", () => {
 		assert.equal(
-			normalizeWarpWslShiftEnterInput(
-				"\n",
-				{
-					TERM_PROGRAM: "WarpTerminal",
-					WARP_SESSION_ID: "session",
-					WSL_DISTRO_NAME: "Ubuntu",
-					WSL_INTEROP: "/run/WSL/1_interop",
-				},
-				"linux",
-				() => true,
-			),
+			normalizeWarpWslShiftEnterInput("\n", {
+				TERM_PROGRAM: "WarpTerminal",
+				WARP_SESSION_ID: "session",
+				WSL_DISTRO_NAME: "Ubuntu",
+				WSL_INTEROP: "/run/WSL/1_interop",
+			}, "linux", () => true),
 			"\x1b[13;2u",
 		);
 		assert.equal(
-			normalizeWarpWslShiftEnterInput(
-				"\n",
-				{
-					WARP_SESSION_ID: "session",
-					WSL_INTEROP: "/run/WSL/1_interop",
-				},
-				"linux",
-				() => true,
-			),
+			normalizeWarpWslShiftEnterInput("\n", {
+				WARP_SESSION_ID: "session",
+				WSL_INTEROP: "/run/WSL/1_interop",
+			}, "linux", () => true),
 			"\x1b[13;2u",
 		);
 	});
 
 	it("rejects spoofed Warp and WSL markers", () => {
 		const validWsl = { WARP_SESSION_ID: "session", WSL_INTEROP: "/run/WSL/123_interop" };
-		assert.equal(
-			normalizeWarpWslShiftEnterInput("\n", { ...validWsl, WARP_SESSION_ID: "" }, "linux", () => true),
-			"\n",
-		);
-		assert.equal(
-			normalizeWarpWslShiftEnterInput(
-				"\n",
-				{ TERM_PROGRAM: "WarpTerminal", ...validWsl, WARP_SESSION_ID: undefined },
-				"linux",
-				() => true,
-			),
-			"\n",
-		);
-		for (const interop of [
-			"/run/WSL/not-a-real-socket",
-			"/run/WSL/123",
-			"/run/WSL/123_interop-extra",
-			"/tmp/123_interop",
-		]) {
-			assert.equal(
-				normalizeWarpWslShiftEnterInput("\n", { ...validWsl, WSL_INTEROP: interop }, "linux", () => true),
-				"\n",
-				interop,
-			);
+		assert.equal(normalizeWarpWslShiftEnterInput("\n", { ...validWsl, WARP_SESSION_ID: "" }, "linux", () => true), "\n");
+		assert.equal(normalizeWarpWslShiftEnterInput("\n", { TERM_PROGRAM: "WarpTerminal", ...validWsl, WARP_SESSION_ID: undefined }, "linux", () => true), "\n");
+		for (const interop of ["/run/WSL/not-a-real-socket", "/run/WSL/123", "/run/WSL/123_interop-extra", "/tmp/123_interop"]) {
+			assert.equal(normalizeWarpWslShiftEnterInput("\n", { ...validWsl, WSL_INTEROP: interop }, "linux", () => true), "\n", interop);
 		}
-		assert.equal(
-			normalizeWarpWslShiftEnterInput("\n", validWsl, "linux", () => false),
-			"\n",
-		);
+		assert.equal(normalizeWarpWslShiftEnterInput("\n", validWsl, "linux", () => false), "\n");
 	});
 
 	it("does not treat empty or non-Linux WSL markers as a target session", () => {
 		assert.equal(
-			normalizeWarpWslShiftEnterInput(
-				"\n",
-				{
-					TERM_PROGRAM: "WarpTerminal",
-					WSL_DISTRO_NAME: "",
-				},
-				"linux",
-			),
+			normalizeWarpWslShiftEnterInput("\n", {
+				TERM_PROGRAM: "WarpTerminal",
+				WSL_DISTRO_NAME: "",
+			},
+			"linux",
+		),
 			"\n",
 		);
 		assert.equal(
-			normalizeWarpWslShiftEnterInput(
-				"\n",
-				{
-					TERM_PROGRAM: "WarpTerminal",
-					WSL_INTEROP: "/run/WSL/1_interop",
-				},
-				"darwin",
-				() => true,
-			),
+			normalizeWarpWslShiftEnterInput("\n", {
+				TERM_PROGRAM: "WarpTerminal",
+				WSL_INTEROP: "/run/WSL/1_interop",
+			},
+			"darwin",
+			() => true,
+		),
 			"\n",
 		);
 		assert.equal(
-			normalizeWarpWslShiftEnterInput(
-				"\n",
-				{
-					TERM_PROGRAM: "WarpTerminal",
-					WSL_INTEROP: "spoofed",
-				},
-				"linux",
-			),
+			normalizeWarpWslShiftEnterInput("\n", {
+				TERM_PROGRAM: "WarpTerminal",
+				WSL_INTEROP: "spoofed",
+			},
+			"linux",
+		),
 			"\n",
 		);
 	});
