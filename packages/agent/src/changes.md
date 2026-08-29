@@ -1,5 +1,23 @@
 # Changes
 
+## 2026-08-29 - Propagate asynchronous shell capture callbacks
+
+### What changed
+
+- `packages/agent/src/harness/types.ts`, `packages/agent/src/harness/env/nodejs.ts`, and `packages/agent/src/harness/utils/shell-output.ts` now observe asynchronous stdout, stderr, and capture callbacks, terminate execution on rejection, and preserve the original rejection as the execution error cause.
+
+### Why
+
+- Exported shell capture callbacks could reject while large-output commands still resolved successfully, leaving spill files and an unhandled rejection.
+
+### Why an extension could not handle it
+
+- Stream callback dispatch and process cleanup occur inside the harness execution environment before tool or agent extension hooks run.
+
+### Expected merge conflict zones
+
+- LOW: shell stream callback types and dispatch in the Node execution environment and shell capture adapter.
+
 ## 2026-08-27 - Optional postMutate seam inside the file mutation queue
 
 ### What changed

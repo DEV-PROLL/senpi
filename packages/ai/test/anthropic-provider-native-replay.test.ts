@@ -660,9 +660,9 @@ describe("Anthropic provider-native replay", () => {
 		);
 		const closedAssistant = closed.messages?.find((message) => message.role === "assistant");
 		expect(closedAssistant?.content).not.toContainEqual(pendingUse);
-		const closedUser = (closed.messages ?? []).find(
-			(message) => message.role === "user" && Array.isArray(message.content),
-		);
+		const closedUser = [...(closed.messages ?? [])]
+			.reverse()
+			.find((message) => message.role === "user" && Array.isArray(message.content));
 		expect(JSON.stringify(closedUser?.content)).toContain("tool_reference");
 	});
 

@@ -1103,6 +1103,7 @@ export function createRpcConnectionHandler(
 					}
 					const result = await session.executeBash(command.command, undefined, {
 						excludeFromContext: command.excludeFromContext,
+						id: command.executionId,
 						// Functions cannot cross JSONL. Host extensions may still provide the
 						// executable operations object; client-supplied data is only a wire-safe hint.
 						operations: eventResult?.operations,
@@ -1117,6 +1118,10 @@ export function createRpcConnectionHandler(
 				session.abortBash();
 				return success(id, "abort_bash");
 			}
+
+			case "cleanup_bash_output":
+				await session.cleanupBashOutput(command.path);
+				return success(id, "cleanup_bash_output");
 
 			// =================================================================
 			// Session

@@ -176,6 +176,10 @@ export type PackageSource =
 			hooks?: string[];
 	  };
 
+export interface ExperimentalSettings {
+	bashEvalOnly?: boolean;
+}
+
 export interface Settings {
 	lastChangelogVersion?: string;
 	defaultProvider?: string;
@@ -241,6 +245,7 @@ export interface Settings {
 	tuiMode?: TuiMode; // default: "regular"
 	fullscreenExitOutput?: FullscreenExitOutput; // default: "transcript"; no effect in regular TUI mode
 	fullscreenScrollbar?: ScrollViewScrollbar; // default: "auto"; no effect in regular TUI mode
+	experimental?: ExperimentalSettings;
 }
 
 function isMergeableObject(value: unknown): value is Record<string, unknown> {
@@ -2026,6 +2031,10 @@ export class SettingsManager {
 	getDefaultTools(): string[] | undefined {
 		const tools = this.settings.defaultTools;
 		return tools ? [...tools] : undefined;
+	}
+
+	getExperimentalBashEvalOnly(): boolean {
+		return this.settings.experimental?.bashEvalOnly === true;
 	}
 
 	setEnabledModels(patterns: string[] | undefined): void {

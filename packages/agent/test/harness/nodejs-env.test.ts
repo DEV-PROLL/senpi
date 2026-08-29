@@ -496,6 +496,36 @@ describe("NodeExecutionEnv", () => {
 		if (!result.ok) expect(result.error).toMatchObject({ code: "aborted" });
 	});
 
+	it.each([
+		["stdout", "harness async stdout failed"],
+		["stdout", { stream: "stdout", failure: true }],
+		["stdout", new Error("harness async stdout failed")],
+		["stderr", "harness async stderr failed"],
+		["stderr", { stream: "stderr", failure: true }],
+		["stderr", new Error("harness async stderr failed")],
+	])("returns %s async onChunk failures without an unhandled rejection (%s)", async (stream, callbackError) => {
+		const root = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: root });
+		let unhandledRejection: unknown;
+		const onUnhandledRejection = (reason: unknown) => {
+			unhandledRejection = reason;
+		};
+		process.once("unhandledRejection", onUnhandledRejection);
+		try {
+			const redirect = stream === "stderr" ? " >&2" : "";
+			const result = await executeShellWithCapture(env, `head -c 100001 /dev/zero | tr '\\0' x${redirect}`, {
+				onChunk: async () => {
+					throw callbackError;
+				},
+			});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.error.cause).toBe(callbackError);
+			expect(unhandledRejection).toBeUndefined();
+		} finally {
+			process.removeListener("unhandledRejection", onUnhandledRejection);
+		}
+	});
+
 	it("captures large shell output to a full output file through the execution env", async () => {
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });

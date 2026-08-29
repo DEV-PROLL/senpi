@@ -92,10 +92,12 @@ type RpcSessionCommand =
 			type: "bash";
 			command: string;
 			excludeFromContext?: boolean;
+			executionId?: string;
 			operations?: Record<string, unknown>;
 	  }
 	| { id?: string; type: "record_bash_result"; command: string; result: BashResult; excludeFromContext?: boolean }
 	| { id?: string; type: "abort_bash" }
+	| { id?: string; type: "cleanup_bash_output"; path: string }
 	| { id?: string; type: "set_label"; entryId: string; label?: string }
 	| {
 			id?: string;

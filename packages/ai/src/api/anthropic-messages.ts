@@ -1034,6 +1034,48 @@ function isCacheableUserContentBlock(
 	return block?.type === "text" || block?.type === "image" || block?.type === "tool_result";
 }
 
+function appendUserBlocks(params: MessageParam[], newBlocks: ContentBlockParam[]): void {
+	if (newBlocks.length === 0) return;
+	const lastParam = params[params.length - 1];
+	if (lastParam?.role === "user") {
+		if (typeof lastParam.content === "string") {
+			lastParam.content = [{ type: "text", text: lastParam.content }, ...newBlocks];
+		} else if (Array.isArray(lastParam.content)) {
+			(lastParam.content as ContentBlockParam[]).push(...newBlocks);
+		}
+	} else {
+		params.push({ role: "user", content: newBlocks });
+	}
+}
+
+function isToolLoopContinuation(messages: MessageParam[]): boolean {
+	const tail = messages[messages.length - 1];
+	const preceding = messages[messages.length - 2];
+	return (
+		tail?.role === "user" &&
+		Array.isArray(tail.content) &&
+		tail.content.some((block) => block.type === "tool_result") &&
+		preceding?.role === "assistant" &&
+		Array.isArray(preceding.content) &&
+		preceding.content.some((block) => block.type === "tool_use")
+	);
+}
+
+function markUserMessageCacheCheckpoint(message: MessageParam, cacheControl: CacheControlEphemeral): boolean {
+	if (message.role !== "user") return false;
+	if (Array.isArray(message.content)) {
+		const lastBlock = message.content[message.content.length - 1];
+		if (!isCacheableUserContentBlock(lastBlock)) return false;
+		lastBlock.cache_control = cacheControl;
+		return true;
+	}
+	if (typeof message.content === "string") {
+		message.content = [{ type: "text", text: message.content, cache_control: cacheControl }];
+		return true;
+	}
+	return false;
+}
+
 const ANTHROPIC_MESSAGE_EVENTS: ReadonlySet<string> = new Set([
 	"message_start",
 	"message_delta",
@@ -2012,7 +2054,7 @@ function buildParams(
 			{
 				type: "text",
 				text: "You are Claude Code, Anthropic's official CLI for Claude.",
-				...(cacheControl ? { cache_control: cacheControl } : {}),
+				...(!context.systemPrompt && cacheControl ? { cache_control: cacheControl } : {}),
 			},
 		];
 		if (context.systemPrompt) {
@@ -2224,10 +2266,12 @@ function convertMessages(
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				if (msg.content.trim().length > 0) {
-					params.push({
-						role: "user",
-						content: sanitizeSurrogates(msg.content),
-					});
+					const content = sanitizeSurrogates(msg.content);
+					if (params[params.length - 1]?.role === "user") {
+						appendUserBlocks(params, [{ type: "text", text: content }]);
+					} else {
+						params.push({ role: "user", content });
+					}
 				}
 			} else {
 				const blocks: ContentBlockParam[] = msg.content.map((item) => {
@@ -2263,10 +2307,7 @@ function convertMessages(
 					return true;
 				});
 				if (filteredBlocks.length === 0) continue;
-				params.push({
-					role: "user",
-					content: filteredBlocks,
-				});
+				appendUserBlocks(params, filteredBlocks);
 			}
 		} else if (msg.role === "assistant") {
 			const blocks: ContentBlockParam[] = [];
@@ -2388,30 +2429,15 @@ function convertMessages(
 			if (toolResults.length === 0) continue;
 
 			// Displaced reference-bearing results must follow every tool_result block.
-			params.push({
-				role: "user",
-				content: [...toolResults, ...siblingContent],
-			});
+			appendUserBlocks(params, [...toolResults, ...siblingContent]);
 		}
 	}
 
-	// Add cache_control to the last user message to cache conversation history
-	if (cacheControl && params.length > 0) {
-		const lastMessage = params[params.length - 1];
-		if (lastMessage.role === "user") {
-			if (Array.isArray(lastMessage.content)) {
-				const lastBlock = lastMessage.content[lastMessage.content.length - 1];
-				if (isCacheableUserContentBlock(lastBlock)) {
-					lastBlock.cache_control = cacheControl;
-				}
-			} else if (typeof lastMessage.content === "string") {
-				lastMessage.content = [
-					{
-						type: "text",
-						text: lastMessage.content,
-						cache_control: cacheControl,
-					},
-				];
+	const retainPrecedingCheckpoint = isToolLoopContinuation(params);
+	if (cacheControl && params.length > 0 && markUserMessageCacheCheckpoint(params[params.length - 1], cacheControl)) {
+		if (retainPrecedingCheckpoint) {
+			for (let index = params.length - 2; index >= 0; index--) {
+				if (markUserMessageCacheCheckpoint(params[index], cacheControl)) break;
 			}
 		}
 	}

@@ -208,6 +208,44 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 ## Unreleased
 
+## 2026-08-29 - Cover GLM-5.3 generator negative variants
+
+### What changed
+
+- `packages/ai/src/api/openai-completions.ts`: narrowed the Z.AI always-enabled matcher to the exact `glm-5.3`, `glm-5.3-flash`, and `glm-5.3-highspeed` variants so unsupported variants are not forced into thinking.
+- `scripts/generate-models.ts`: generated Z.AI records for unsupported GLM-5.3 variants omit `thinkingLevelMap` and `compat.supportsReasoningEffort`.
+- `test/generate-models-strict.test.ts`: added an offline generator fixture covering `glm-5.3-turbo`, `glm-5.3-xl`, and `glm-5.3-anything-else`.
+
+### Why
+
+- Unsupported GLM-5.3 variants must not receive reasoning metadata or be forced into enabled thinking; only the validated base, Flash, and Highspeed variants should use the always-enabled Z.AI thinking path.
+
+### Why an extension could not handle it
+
+- Generated model capability metadata and OpenAI Completions request serialization are implemented inside the AI package.
+
+### Expected merge conflict zones
+
+- LOW: `api/openai-completions.ts` and the GLM-5.3 generator regression coverage.
+
+## 2026-08-26 - Coalesce adjacent Anthropic user turns
+
+### What changed
+
+- `api/anthropic-messages.ts` now appends adjacent user content and trailing tool-result blocks to the existing Anthropic user message instead of emitting consecutive `user` roles.
+
+### Why
+
+- Interrupted tool turns and consecutively dispatched user messages could produce adjacent Anthropic user messages, which the API rejects because message roles must alternate.
+
+### Why an extension could not handle it
+
+- Anthropic wire-message serialization occurs inside the provider adapter after extension-visible message handling, so an extension cannot repair the final role sequence safely.
+
+### Expected merge conflict zones
+
+- LOW: `api/anthropic-messages.ts` around `convertMessages()` user and tool-result serialization.
+
 ## 2026-08-25 - Harden bounded retry jitter and provider abort metadata
 
 ### What changed
@@ -3061,3 +3099,17 @@ Detection has to happen inside the Anthropic SSE loop while the stream is still 
 ### Expected merge conflict zones
 
 - OpenAI Completions reasoning conversion and Cloudflare provider generic declarations.
+
+## 2026-08-22 - Stable Anthropic cache checkpoints across tool loops
+
+### What changed
+- `api/anthropic-messages.ts` now marks the newest and immediately preceding cacheable user-message boundaries, retaining a stable Anthropic prompt-cache checkpoint while tool loops append new results. OAuth requests with a context system prompt keep the checkpoint budget available for message history.
+
+### Why
+- Replacing the sole tail marker on every tool turn invalidated the previous cache boundary and caused repeated prefix reprocessing instead of preserving a reusable checkpoint across adjacent loops.
+
+### Why an extension could not handle it
+- Cache markers are attached while the Anthropic wire payload is built inside `pi-ai`; extensions cannot safely rewrite Anthropic-native message blocks after conversion.
+
+### Expected merge conflict zones
+- MEDIUM: `api/anthropic-messages.ts` cache-control placement in `buildParams()` and the final checkpoint pass in `convertMessages()`.

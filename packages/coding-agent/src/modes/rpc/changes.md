@@ -1,5 +1,45 @@
 # changes
 
+## 2026-08-29 - Complete remote bash callback spill cleanup lifecycle
+
+### What changed
+
+- Harness output callbacks now reject through the shell-capture adapter so callback failures activate child-process cancellation instead of being reported as fulfilled execution.
+- Normal bash completion waits for callbacks up to a documented 5-second bound; cancellation retains its shorter abandonment path.
+- A proxy reattach aborts host bash executions that cannot be correlated to the new connection's callback map.
+- Remote spill cleanup falls back to best-effort local removal when the host transport is unavailable.
+
+### Why
+
+- Callback failures must terminate the child promptly, normal completion must not hang forever on a broken observer, and detached/reconnected clients must not strand host-owned spill files or in-flight executions.
+
+### Why an extension could not handle it
+
+- Process cancellation, RPC transport ownership, and reattach correlation are runtime lifecycle concerns below extension callbacks.
+
+### Expected merge conflict zones
+
+- `packages/agent/src/harness/env/nodejs.ts`, `packages/agent/src/harness/utils/shell-output.ts`, `bash-executor.ts`, and `interactive-host-runtime.ts`.
+
+## 2026-08-29 - Namespace remote bash callback executions
+
+### What changed
+
+- `packages/coding-agent/src/modes/rpc/rpc-client.ts` carries execution-scoped bash cleanup requests across attached client proxies.
+- `packages/coding-agent/src/modes/rpc/rpc-types.ts` carries namespaced execution IDs and cleanup requests across the RPC boundary.
+
+### Why
+
+- Attached interactive clients share session event broadcasts; local IDs could collide and route output callbacks across clients, while a client-side callback failure could leave a host-owned spill after successful host completion.
+
+### Why an extension could not handle it
+
+- RPC routing and host spill ownership are transport lifecycle concerns below extension callbacks.
+
+### Expected merge conflict zones
+
+- `rpc-client.ts`, `rpc-types.ts`, and `connection-handler.ts` bash command handling.
+
 ## 2026-08-28 - Hydrate unnamed deferred setup entries
 
 - `get_state` ships deferred (not-yet-persisted) session entries whenever the session holds any entry beyond the auto-appended bootstrap kinds (`model_change`, `thinking_level_change`), no longer gated on a session name, so unnamed custom-only setup mutations hydrate the shared-host proxy mirror before the first provider turn. Plain fresh sessions still omit `entries`, preserving classic/socket state parity; a setup that appends ONLY a bare model/thinking change (and nothing else) stays host-side until the first turn.

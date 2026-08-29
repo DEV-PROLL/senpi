@@ -603,12 +603,13 @@ export class RpcClient {
 	 */
 	async bash(
 		command: string,
-		options?: { excludeFromContext?: boolean; operations?: Record<string, unknown> },
+		options?: { excludeFromContext?: boolean; executionId?: string; operations?: Record<string, unknown> },
 	): Promise<BashResult> {
 		const response = await this.send({
 			type: "bash",
 			command,
 			excludeFromContext: options?.excludeFromContext,
+			executionId: options?.executionId,
 			operations: options?.operations,
 		});
 		return this.getData(response);
@@ -627,6 +628,10 @@ export class RpcClient {
 	 */
 	async abortBash(): Promise<void> {
 		await this.send({ type: "abort_bash" });
+	}
+
+	async cleanupBashOutput(path: string): Promise<void> {
+		await this.send({ type: "cleanup_bash_output", path });
 	}
 
 	/**
