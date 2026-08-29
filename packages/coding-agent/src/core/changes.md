@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-29 - GLM-5.3 model resolver defaults
+
+### What changed
+
+- `packages/coding-agent/src/core/model-resolver.ts`: retain the GLM-5.3 Z.AI global and China default model and prompt-preset resolution introduced by this PR.
+
+### Why
+
+- The new Z.AI model family must remain the default for both coding-plan provider variants after synchronizing with upstream changes.
+
+### Why an extension could not handle it
+
+- Provider defaults and model-pattern resolution are core resolver behavior that runs before extension hooks and cannot be replaced by an extension.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/model-resolver.ts`: provider default mappings and model pattern resolution.
+
 ## 2026-08-29 - Make externally owned compaction delegation sticky
 
 ### What changed
