@@ -46,7 +46,10 @@ function scratch(label: string) {
 	return { root, agentDir, sessionDir, cwd, socket };
 }
 
-function spawnHost(qa: ReturnType<typeof scratch>): ChildProcessWithoutNullStreams {
+function spawnHost(
+	qa: ReturnType<typeof scratch>,
+	model: { provider: string; id: string } = { provider: MOCK_PROVIDER, id: MOCK_MODEL },
+): ChildProcessWithoutNullStreams {
 	const child = spawn(
 		process.execPath,
 		[
@@ -57,9 +60,9 @@ function spawnHost(qa: ReturnType<typeof scratch>): ChildProcessWithoutNullStrea
 			"--listen",
 			`unix://${qa.socket}`,
 			"--provider",
-			MOCK_PROVIDER,
+			model.provider,
 			"--model",
-			MOCK_MODEL,
+			model.id,
 		],
 		{
 			cwd: qa.cwd,
@@ -331,6 +334,57 @@ describe("interactive host runtime", () => {
 			expect(queuedDisposition).toHaveBeenCalledWith("queued");
 			expect(queuedPreflight).toHaveBeenCalledWith(true);
 		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("reflects host service-tier changes in the attached session and footer state", async () => {
+		const qa = scratch("tier-sync");
+		const fake = await startFakeModelServer();
+		const model = { provider: "openai-codex", id: "gpt-5.6-sol" };
+		writeFileSync(
+			join(qa.agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					[model.provider]: {
+						baseUrl: fake.origin,
+						apiKey: "test-key",
+						api: "openai-codex-responses",
+						models: [{ id: model.id, reasoning: true, contextWindow: 128000, maxTokens: 4096 }],
+					},
+				},
+			}),
+		);
+		const host = spawnHost(qa, model);
+		await waitForHost(host, qa.socket);
+		const localSessionManager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const sessionPath = localSessionManager.getSessionFile();
+		if (!sessionPath) throw new Error("Expected persisted session path");
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: localSessionManager,
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+			onWarning: vi.fn(),
+		});
+		const observer = new RpcClient({ socketPath: qa.socket });
+		await observer.start();
+		try {
+			await observer.openSession({ sessionPath, cwd: qa.cwd });
+			expect(runtime.session.isFastModeActive()).toBe(false);
+			expect(runtime.session.serviceTier).toBeUndefined();
+
+			await observer.setFastMode(true);
+
+			expect(runtime.session.isFastModeActive()).toBe(true);
+			expect(runtime.session.serviceTier).toBe("priority");
+		} finally {
+			await observer.stop();
 			await runtime.dispose();
 			await fake.close();
 		}

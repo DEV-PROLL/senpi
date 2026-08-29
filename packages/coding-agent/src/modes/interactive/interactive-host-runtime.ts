@@ -281,6 +281,9 @@ function createRemoteSessionProxy(
 			state = { ...state, model: wireEvent.model, thinkingLevel: wireEvent.thinkingLevel };
 		}
 		if (wireEvent.type === "thinking_level_changed") state = { ...state, thinkingLevel: wireEvent.level };
+		if (wireEvent.type === "service_tier_changed") {
+			state = { ...state, serviceTier: wireEvent.tier, fastMode: wireEvent.fastMode };
+		}
 		if (wireEvent.type === "session_info_changed") state = { ...state, sessionName: wireEvent.name };
 		if (wireEvent.type === "message_start") {
 			if (wireEvent.message.role === "assistant") {
@@ -486,6 +489,7 @@ function createRemoteSessionProxy(
 				};
 			if (property === "isStreaming") return state.isStreaming;
 			if (property === "isCompacting") return state.isCompacting;
+			if (property === "isFastModeActive") return () => state.fastMode;
 			if (property === "pendingMessageCount") return state.pendingMessageCount;
 			if (property === "getSteeringMessages") return () => state.steering;
 			if (property === "getFollowUpMessages") return () => state.followUp;
@@ -533,6 +537,7 @@ function createRemoteSessionProxy(
 			if (property === "sessionFile") return state.sessionFile;
 			if (property === "sessionId") return state.sessionId;
 			if (property === "sessionName") return state.sessionName;
+			if (property === "serviceTier") return state.serviceTier;
 			if (property === "sessionManager") return remoteSessionManager;
 			if (property === "settingsManager") return settingsManager;
 			if (property === "messages") return target.messages;
@@ -621,6 +626,8 @@ function stateFromRpc(state: {
 	sessionName?: string;
 	cwd: string;
 	projectTrusted: boolean;
+	serviceTier?: AgentSession["serviceTier"];
+	fastMode: boolean;
 	entries?: import("../../core/session-manager.ts").SessionEntry[];
 	steering: string[];
 	followUp: string[];
