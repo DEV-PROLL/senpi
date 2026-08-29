@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Preserve GLM-5.3 Flash and Highspeed reasoning effort mappings and Z.AI thinking serialization.
+
 ### Removed
 
 ## [2026.8.29] - 2026-08-29
