@@ -552,6 +552,8 @@ export interface AgentSessionConfig {
 	initialActiveToolNames?: string[];
 	/** Configured built-in defaults; fork-native builtin extension tools outside this set are omitted. */
 	defaultToolNames?: string[];
+	/** Tool names that remain executable only through the registered eval tool. */
+	evalOnlyToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -949,6 +951,7 @@ export class AgentSession {
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _defaultToolNames?: Set<string>;
+	private _evalOnlyToolNames?: ReadonlySet<string>;
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -1061,6 +1064,7 @@ export class AgentSession {
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._defaultToolNames = config.defaultToolNames ? new Set(config.defaultToolNames) : undefined;
+		this._evalOnlyToolNames = config.evalOnlyToolNames ? new Set(config.evalOnlyToolNames) : undefined;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -2763,6 +2767,9 @@ export class AgentSession {
 	): Promise<AgentToolResult<TDetails>> {
 		let activeTools = this.getActiveToolNames();
 		let tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		if (!tool && this._isEvalOnlyPolicyArmed() && this._evalOnlyToolNames?.has(toolName)) {
+			tool = this._toolRegistry.get(toolName);
+		}
 		if (
 			!tool &&
 			options?.activateInactiveTool === true &&
@@ -2864,6 +2871,19 @@ export class AgentSession {
 		return this._lazyToolActivators.some((activate) => activate(toolName));
 	}
 
+	private _isEvalOnlyPolicyArmed(): boolean {
+		return this._evalOnlyToolNames !== undefined && this._toolRegistry.has("eval");
+	}
+
+	/** Publish per-tool eval-only redirect hints so a direct call names its own eval helper. */
+	private _publishEvalOnlyToolHints(): void {
+		if (!this._isEvalOnlyPolicyArmed()) return;
+		for (const name of this._evalOnlyToolNames ?? []) {
+			this.agent.removedToolHints[name] =
+				`Run ${name} inside an eval cell via tool.${name}({ command: "..." }); hooks and permissions still apply.`;
+		}
+	}
+
 	/**
 	 * Set active tools by name.
 	 * Only tools in the registry can be enabled. Unknown tool names are ignored.
@@ -2905,7 +2925,12 @@ export class AgentSession {
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
-		for (const name of toolNames) {
+		const policyArmed = this._isEvalOnlyPolicyArmed();
+		this._publishEvalOnlyToolHints();
+		const filteredToolNames = policyArmed
+			? toolNames.filter((name) => !this._evalOnlyToolNames?.has(name))
+			: toolNames;
+		for (const name of filteredToolNames) {
 			const tool = this._toolRegistry.get(name);
 			if (tool) {
 				tools.push(tool);
@@ -3092,9 +3117,11 @@ export class AgentSession {
 			appendSystemPrompt: loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined,
 		};
 		const basePrompt = loaderSystemPrompt ?? buildDynamicSystemPrompt(this._baseSystemPromptOptions);
-		return loaderAppendSystemPrompt.length > 0
-			? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}`
-			: basePrompt;
+		const prompt =
+			loaderAppendSystemPrompt.length > 0 ? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}` : basePrompt;
+		return this._isEvalOnlyPolicyArmed()
+			? `${prompt}\n\nBash runs ONLY inside eval cells via tool.bash({ command: "..." }); hooks and permissions still apply.`
+			: prompt;
 	}
 
 	/**
@@ -6653,6 +6680,7 @@ export class AgentSession {
 			toolRegistry.set(tool.name, tool);
 		}
 		this._toolRegistry = toolRegistry;
+		this._publishEvalOnlyToolHints();
 		const isDirectlyExposed = (name: string): boolean => {
 			const entry = this._toolDefinitions.get(name);
 			return entry !== undefined && normalizeToolExposure(entry.definition).exposure === "direct";

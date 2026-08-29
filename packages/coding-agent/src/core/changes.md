@@ -19,6 +19,24 @@
 
 - `agent-session.ts`: compaction state, automatic admission methods, rejection handling, model selection invalidation, and tree navigation.
 
+## 2026-08-29 - Experimental bash eval-only policy
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: adds the `experimental.bashEvalOnly` setting and its getter.
+- `packages/coding-agent/src/core/agent-session.ts`: resolves the policy from settings in the constructor and on reload, hides the `bash` and `powershell` tools while the registered `eval` tool is present, executes them through the registry without activation, publishes per-tool eval-cell hints, adds system-prompt guidance, and retains withheld tools so disarming restores direct access.
+
+### Why
+
+- Codemode can keep invoking `bash` and `powershell` from eval cells while preventing those tools from being advertised as direct model tools. The policy is inert when codemode's `eval` tool is unavailable, so shell access is never lost.
+
+### Why an extension could not handle it
+
+- Active tool visibility, lazy activation, the wrapped registry, and the agent-loop removed-tool hint map are coordinated inside `AgentSession`; an extension cannot atomically enforce these boundaries.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: active-tool selection, tool registry refresh, reload, and system-prompt assembly.
 ## 2026-08-29 - Withheld tools are filtered at the advertisement seam
 
 ### What changed
