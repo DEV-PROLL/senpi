@@ -1,5 +1,23 @@
 # changes.md — ai
 
+## 2026-08-29 - Preserve GLM-5.3 variant reasoning controls
+
+### What changed
+
+- `packages/ai/scripts/generate-models.ts`: recognize `glm-5.3` Flash and Highspeed variants as part of the Z.AI GLM-5.3 family so generated metadata retains low/high/max reasoning effort mappings and wire support.
+
+### Why
+
+- Without family matching, explicit reasoning effort selections were dropped for the Flash and Highspeed models and their model controls exposed incorrect levels.
+
+### Why an extension could not handle it
+
+- Model-family metadata and request serialization are built into the AI package generator and provider adapter before extension code can intervene.
+
+### Expected merge conflict zones
+
+- `packages/ai/scripts/generate-models.ts`: Z.AI model-family detection and generated capability metadata.
+
 ## 2026-08-29 - Z.AI GLM-5.3 request and catalog fixes
 
 - GLM-5.3 reasoning-off requests now use the provider's lowest enabled effort instead of sending the rejected disabled-thinking payload; regenerated Z.AI catalogs retain the separate global and China sources and published model metadata.

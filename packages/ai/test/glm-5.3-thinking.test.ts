@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getModel, streamSimple } from "../src/compat.ts";
 import type { Model } from "../src/types.ts";
 
+type Glm53Variant = "glm-5.3-flash" | "glm-5.3-highspeed";
+
 const mockState = vi.hoisted(() => ({
 	lastParams: undefined as unknown,
 }));
@@ -83,7 +85,7 @@ describe("GLM 5.3 openai-completions reasoning effort", () => {
 
 	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])(
 		"maps low effort for the %s through the zai thinking-level map (not raw)",
-		async (id) => {
+		async (id: Glm53Variant) => {
 			const model = getModel("zai", id);
 			expect(model).toBeDefined();
 			const params = await captureParams(model!, "low");
@@ -92,7 +94,7 @@ describe("GLM 5.3 openai-completions reasoning effort", () => {
 	);
 
 	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])(
-		"maps high and max effort for the %s", async (id) => {
+		"maps high and max effort for the %s", async (id: Glm53Variant) => {
 			const model = getModel("zai", id);
 			expect(model).toBeDefined();
 			await expect(captureParams(model!, "high")).resolves.toMatchObject({ reasoning_effort: "high" });
@@ -111,7 +113,7 @@ describe("GLM 5.3 openai-completions reasoning effort", () => {
 	});
 
 	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])(
-		"keeps thinking enabled for %s when reasoning is off", async (id) => {
+		"keeps thinking enabled for %s when reasoning is off", async (id: Glm53Variant) => {
 			const model = getModel("zai", id);
 			expect(model).toBeDefined();
 			const params = await captureParams(model!, "off");
