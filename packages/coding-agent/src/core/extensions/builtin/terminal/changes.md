@@ -1,5 +1,25 @@
 # terminal builtin extension — fork surface
 
+## Add native one-shot file monitors (2026-08-29)
+
+### What changed
+
+- `monitor({ path, event: "create" | "modify" })` now watches a file with a `watch_N` identity.
+- Native watches serialize reconciliation and settlement, handle watcher errors, fence registration during teardown/reload, preserve paused transitions, validate regular files and access errors, detect content-preserving rewrites, share promptly reconciled terminal capacity, use external-directory approval for external paths, and revalidate the approved canonical parent before registration to close symlink retargeting races. Fingerprints sample the first, middle, and last 64 KiB; duplicate hints are coalesced into at most one trailing reconciliation pass per burst, while the 250 ms poll remains the stable-state backstop.
+
+### Why
+
+- Native monitors must deliver exactly once and remain safe across cancellation, reload, permission boundaries, filesystem timestamp limitations, and terminal capacity churn. Replacements that expose a symlink or a hardlink to an already-unrelated inode fail closed; a regular-file rename with `nlink === 1` is indistinguishable from a safe atomic save under this predicate and may be reported as `modify`. A theoretically reusable `(dev, ino)` tuple (inode ABA) cannot be distinguished by this bounded identity check; an observed delete is handled as absence, while an unobserved ABA window is outside the filesystem guarantees of this native monitor.
+
+### Why this cannot be expressed externally
+
+- The watcher, stat reconciliation, lifecycle ownership, and shared terminal reservation are private to the builtin terminal extension.
+
+### Expected merge conflict zones
+
+- LOW: `monitor-registry.ts`, `manager.ts`, and the native monitor regression suite.
+
+
 ## Monitor snapshots cross the RPC wire (2026-08-28)
 
 ### What changed

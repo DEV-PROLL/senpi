@@ -18,11 +18,13 @@ export function createKillBashTool(ctx: TerminalToolContext) {
 		parameters: killBashSchema,
 		async execute(_toolCallId: string, input: KillBashInput, _signal?: AbortSignal): Promise<TerminalToolResult> {
 			if (input.all) {
-				const count = ctx.manager.size;
+				const terminalCount = ctx.manager.size;
+				const fileCount = (await ctx.monitorRegistry?.stopAllFiles()) ?? 0;
 				await ctx.manager.teardown();
-				return textResult(`Killed ${count} terminal session(s).`);
+				return textResult(`Killed ${terminalCount + fileCount} session(s).`);
 			}
 			if (!input.bash_id) return errorResult("Provide `bash_id` or set `all:true`.");
+			if (await ctx.monitorRegistry?.stopFile(input.bash_id)) return textResult(`Killed ${input.bash_id}.`);
 			const runtime = ctx.manager.get(input.bash_id);
 			if (!runtime) return errorResult(`No terminal session found with id: ${input.bash_id}`);
 			await ctx.manager.stop(input.bash_id);
