@@ -1,5 +1,7 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { buildCursorHistoryForTest } from "@earendil-works/pi-ai/api/cursor-agent";
+import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	CURSOR_TOOL_RESULT_MAX_BYTES,
@@ -102,7 +104,7 @@ describe("1043 cursor toolResult truncate", () => {
 		expect(changed).toBe(true);
 		if (!next) throw new Error("expected messages");
 		expect(messageText(next[99])).toMatch(/^99:가+\n\.\.\.\[truncated\]$/);
-		expect(messageText(next[0])).toContain("...[truncated]");
+		expect(messageText(next[0])).toBe("");
 		const bytes = new TextEncoder().encode(next.map(messageText).join("")).byteLength;
 		expect(bytes).toBeLessThanOrEqual(50_000);
 	});
@@ -134,25 +136,42 @@ describe("1043 cursor toolResult truncate", () => {
 		expect(bytes).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
 	});
 
-	it("uses truncated request messages for overflow sizing while persistence stays full", async () => {
-		const harness = await createHarness({ provider: "cursor", models: [{ id: "cursor", contextWindow: 100_000 }] });
+	it("truncates Cursor admission while persisting the full tool result through AgentSession", async () => {
+		let admittedText = "";
+		const largeTool: AgentTool = {
+			name: "large-result",
+			label: "Large result",
+			description: "Returns a large result",
+			parameters: Type.Object({}),
+			execute: async () => ({ content: [{ type: "text", text: "payload ".repeat(20_000) }], details: {} }),
+		};
+		const harness = await createHarness({
+			provider: "cursor",
+			models: [{ id: "cursor", contextWindow: 100_000 }],
+			tools: [largeTool],
+			persistSession: true,
+		});
 		harnesses.push(harness);
-		const fullText = "payload ".repeat(20_000);
-		const persisted = toolResult(fullText, "persisted");
-		harness.sessionManager.appendMessage(persisted as never);
-		harness.agent.state.messages = [persisted];
-		const transformed = await harness.agent.transformContext?.([persisted]);
-		expect(JSON.stringify(transformed)).not.toContain(fullText);
-		expect(JSON.stringify(harness.sessionManager.getEntries())).toContain(fullText);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("large-result", {}), { stopReason: "toolUse" }),
+			(context) => {
+				const result = context.messages.find((message) => message.role === "toolResult");
+				admittedText =
+					result?.role === "toolResult" && result.content[0]?.type === "text" ? result.content[0].text : "";
+				return fauxAssistantMessage("done");
+			},
+		]);
+		await harness.session.prompt("run the large tool");
 
-		const entries = harness.sessionManager.getEntries();
-		const compacted = (harness.session as any)._wouldCompactionOverflow(
-			entries,
-			{ summary: "summary", firstKeptEntryId: entries[0]?.id, tokensBefore: 0, details: {} },
-			false,
-			harness.getModel(),
-		);
-		expect(compacted).toBe(false);
+		expect(admittedText).not.toContain("payload ".repeat(20_000));
+		const persisted = harness.sessionManager
+			.getEntries()
+			.filter((entry): entry is typeof entry & { message: AgentMessage } => "message" in entry)
+			.map((entry) => entry.message)
+			.find((message) => message.role === "toolResult");
+		expect(
+			persisted?.role === "toolResult" && persisted.content[0]?.type === "text" ? persisted.content[0].text : "",
+		).toBe("payload ".repeat(20_000));
 	});
 
 	it("bounds the duplicated decoded Cursor root and turn history for CJK results", () => {
@@ -164,11 +183,49 @@ describe("1043 cursor toolResult truncate", () => {
 		expect(serializedCursorHistoryBytes(next)).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
 	});
 
+	it("truncates newline-heavy parts before their serialized Cursor payload exceeds the cap", () => {
+		const messages = cursorPairedMessages(Array.from({ length: 8 }, () => "\n".repeat(2000)));
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		if (!next) throw new Error("expected messages");
+		expect(serializedCursorHistoryBytes(next)).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+	});
+
+	it("truncates NUL-heavy parts before their serialized Cursor payload exceeds the cap", () => {
+		const messages = cursorPairedMessages(Array.from({ length: 8 }, () => "\0".repeat(2000)));
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		if (!next) throw new Error("expected messages");
+		expect(serializedCursorHistoryBytes(next)).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+	});
+
+	for (const partCount of [3334, 5000]) {
+		it(`does not amplify ${partCount} tiny parts with truncation markers`, () => {
+			const messages = [
+				{
+					...toolResult("", `many-${partCount}`),
+					content: Array.from({ length: partCount }, () => ({ type: "text" as const, text: "abcdefghij" })),
+				},
+			];
+			const { messages: next } = truncateToolResultBodies(messages);
+			if (!next) throw new Error("expected messages");
+			const bytes = new TextEncoder().encode(
+				next[0].role === "toolResult"
+					? next[0].content
+							.filter((part) => part.type === "text")
+							.map((part) => part.text)
+							.join("")
+					: "",
+			).byteLength;
+			expect(bytes).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+		});
+	}
+
 	it("keeps grapheme clusters intact and retains a marker when only marker space remains", () => {
 		const messages = [textMessage("toolResult", "👩‍💻e\u0301".repeat(10))];
 		const { messages: next } = truncateToolResultBodies(messages, 4, 20);
 		const text = next ? messageText(next[0]) : "";
-		expect(text).toContain("...[truncated]");
+		expect(text).toBe("");
 		expect(text).not.toMatch(/👩(?:$|[^‍])/u);
 		expect(text).not.toMatch(/e$/u);
 	});

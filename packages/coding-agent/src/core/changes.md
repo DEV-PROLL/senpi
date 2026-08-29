@@ -1,10 +1,40 @@
 # changes
 
+## 2026-08-29 - Bound Cursor serialized tool-result admissions
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: Cursor tool-result request views now use a conservative escaped/enveloped serialization bound and never amplify output with markers.
+
+### Why
+
+- Cursor duplicates history across JSON and protobuf envelopes, and JSON escaping makes raw-byte heuristics unsafe.
+
+### Why an extension could not handle it
+
+- AgentSession owns provider admission and the request-only transform boundary.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`
+
 ## 2026-08-29 - Make externally owned compaction delegation sticky
 
 ### What changed
 
-- `packages/coding-agent/src/core/agent-session.ts`: Cursor tool-result truncation is immutable and request-scoped, includes image payload bytes, preserves newest results under the aggregate bound, and uses grapheme-safe marker-inclusive cuts.
+- `packages/coding-agent/src/core/agent-session.ts`: Cursor tool-result truncation is immutable and request-scoped, bounds worst-case escaped/enveloped serialized payload cost, preserves newest results under the aggregate bound, and omits the marker when its serialized cost cannot fit.
+
+### Why
+
+- Cursor serializes tool-result history into duplicated JSON and protobuf envelopes; the request view must be bounded before provider admission.
+
+### Why an extension could not handle it
+
+- AgentSession owns provider admission and the request-only transform boundary.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`
 - `packages/coding-agent/src/core/agent-session.ts`: remember the provider and model id after an automatic compaction is rejected by an external owner, suppressing repeated automatic attempts until that key changes, compaction is accepted, or runtime ownership is reconfigured by reload/registry refresh. Manual compaction remains admitted.
 - Added `test/suite/regressions/1174-sticky-delegated-compaction.test.ts` covering repeated turns, manual compaction, and model changes.
 

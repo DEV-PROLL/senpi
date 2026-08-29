@@ -828,6 +828,10 @@ export const MAX_SKILL_EXPANSIONS_PER_PROMPT = 5;
 export const CURSOR_TOOL_RESULT_MAX_CHARS = 2000;
 export const CURSOR_TOOL_RESULT_MAX_BYTES = 50_000;
 const CURSOR_TRUNCATION_MARKER = "\n...[truncated]";
+// Cursor emits each history item in duplicated JSON and protobuf envelopes. Sixteen
+// bounds worst-case JSON escaping (control characters) plus framing and duplication.
+const CURSOR_SERIALIZED_BYTES_PER_RAW_BYTE = 16;
+const CURSOR_CONTENT_ITEM_OVERHEAD_BYTES = 64;
 
 export function truncateToolResultBodies(
 	messages: AgentMessage[] | undefined,
@@ -837,42 +841,10 @@ export function truncateToolResultBodies(
 	if (!Array.isArray(messages) || messages.length === 0) return { messages, changed: false };
 	const encoder = new TextEncoder();
 	const byteLength = (text: string): number => encoder.encode(text).byteLength;
-	const markerBytes = byteLength(CURSOR_TRUNCATION_MARKER);
+	const serializedCost = (text: string): number =>
+		byteLength(text) * CURSOR_SERIALIZED_BYTES_PER_RAW_BYTE + CURSOR_CONTENT_ITEM_OVERHEAD_BYTES;
 	const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 	const markerChars = [...segmenter.segment(CURSOR_TRUNCATION_MARKER)].length;
-	const textPartCount = messages.reduce(
-		(count, message) =>
-			count +
-			(message.role === "toolResult" && Array.isArray(message.content)
-				? message.content.filter((part) => part.type === "text" && typeof part.text === "string").length
-				: 0),
-		0,
-	);
-	const totalBodyBytes = messages.reduce(
-		(total, message) =>
-			total +
-			(message.role === "toolResult" && Array.isArray(message.content)
-				? message.content.reduce(
-						(sum, part) =>
-							sum +
-							(part.type === "text"
-								? byteLength(part.text)
-								: part.type === "image" && typeof part.data === "string"
-									? byteLength(part.data)
-									: 0),
-						0,
-					)
-				: 0),
-		0,
-	);
-	// Cursor serializes history twice (root prompt JSON and turn blobs), with
-	// protobuf/envelope metadata around both copies. Keep a conservative raw
-	// body budget so the representation that reaches the wire stays bounded.
-	const serializedBodyMaxBytes = Math.floor(maxBytes / 2.5);
-	const effectiveMaxBytes =
-		totalBodyBytes > serializedBodyMaxBytes
-			? Math.max(0, serializedBodyMaxBytes - textPartCount * markerBytes)
-			: serializedBodyMaxBytes;
 	let usedBytes = 0;
 	let changed = false;
 	const result = messages.slice();
@@ -885,9 +857,8 @@ export function truncateToolResultBodies(
 		for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex--) {
 			const part = message.content[partIndex];
 			if (part.type === "image" && typeof part.data === "string") {
-				const fullBytes = byteLength(part.data);
-				if (usedBytes + fullBytes <= effectiveMaxBytes) {
-					usedBytes += fullBytes;
+				if (usedBytes + serializedCost(part.data) <= maxBytes) {
+					usedBytes += serializedCost(part.data);
 				} else {
 					nextContent ??= message.content.slice();
 					nextContent[partIndex] = { ...part, data: "" };
@@ -898,22 +869,31 @@ export function truncateToolResultBodies(
 			if (part.type !== "text" || typeof part.text !== "string") continue;
 			const text = part.text;
 			const graphemes = [...segmenter.segment(text)].map((segment) => segment.segment);
-			const fullBytes = byteLength(text);
-			if (graphemes.length <= maxChars && usedBytes + fullBytes <= effectiveMaxBytes) {
-				usedBytes += fullBytes;
+			const fullCost = serializedCost(text);
+			if (graphemes.length <= maxChars && usedBytes + fullCost <= maxBytes) {
+				usedBytes += fullCost;
 				continue;
 			}
 
-			const availableBytes = Math.max(0, effectiveMaxBytes - usedBytes - markerBytes);
+			const markerCost = serializedCost(CURSOR_TRUNCATION_MARKER);
+			const markerFits = usedBytes + markerCost <= maxBytes;
+			const availableBytes = markerFits
+				? Math.floor(
+						(maxBytes - usedBytes - markerCost - CURSOR_CONTENT_ITEM_OVERHEAD_BYTES) /
+							CURSOR_SERIALIZED_BYTES_PER_RAW_BYTE,
+					)
+				: 0;
 			let kept = "";
-			for (const grapheme of graphemes.slice(0, Math.max(0, maxChars - markerChars))) {
-				if (byteLength(kept + grapheme) > availableBytes) break;
-				kept += grapheme;
+			if (markerFits) {
+				for (const grapheme of graphemes.slice(0, Math.max(0, maxChars - markerChars))) {
+					if (byteLength(kept + grapheme) > availableBytes) break;
+					kept += grapheme;
+				}
 			}
-			const nextText = kept + CURSOR_TRUNCATION_MARKER;
+			const nextText = markerFits ? kept + CURSOR_TRUNCATION_MARKER : "";
 			nextContent ??= message.content.slice();
 			nextContent[partIndex] = { ...part, text: nextText };
-			usedBytes += byteLength(nextText);
+			usedBytes += markerFits ? serializedCost(nextText) : serializedCost("");
 			changed = true;
 		}
 		if (nextContent) result[messageIndex] = { ...message, content: nextContent };

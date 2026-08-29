@@ -21,7 +21,7 @@
 
 ### Fixed
 
-- Cursor tool-result request views now truncate text and image payloads without mutating shared agent state or persisted session history; aggregate eviction preserves newest results and remains grapheme-safe (#1043).
+- Cursor tool-result request views now truncate text and image payloads without mutating shared agent state or persisted session history; aggregate eviction preserves newest results, accounts conservatively for escaped/enveloped serialization, never amplifies output with markers, and remains grapheme-safe (#1043).
 
 - `cursor-cli-oauth` no longer mixes Cursor's internal tool-call protocol, arguments, and results into assistant text; Cursor still owns execution, while Senpi now stores and renders only the model's actual prose ([OmO #7169](https://github.com/code-yeongyu/oh-my-openagent/issues/7169)).
 
