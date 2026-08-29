@@ -13,6 +13,7 @@ function makeFakeThis() {
 	const chatContainer = new Container();
 	return {
 		isInitialized: true,
+		externalOwnerCompactionNoticeShown: false,
 		footer: { invalidate: vi.fn(), setCompactionDelegated: vi.fn() },
 		autoCompactionEscapeHandler: undefined as (() => void) | undefined,
 		autoCompactionLoader: undefined as { stop(): void } | undefined,
@@ -33,7 +34,10 @@ function makeFakeThis() {
 					tokensBefore: 1,
 				},
 			]),
+			reloadFromDisk: vi.fn(),
+			countCompactions: vi.fn().mockReturnValue(0),
 		},
+		renderProjectTrustWarningIfNeeded: vi.fn(),
 		rebuildChatFromMessages: vi.fn(),
 		renderSessionEntries: vi.fn(),
 		addMessageToChat: vi.fn(),
@@ -206,23 +210,65 @@ describe("external-owner compaction rejection rendering", () => {
 		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(2);
 	});
 
-	test("transcript rebuilds re-arm the notice so the next rejection renders it again", async () => {
+	test("settings-only transcript rebuilds preserve the active delegation episode", async () => {
+		// Post-#1188 core never re-emits the rejection while delegated, so a cosmetic
+		// rebuild (hide-thinking, cache-notice, output padding) must not lose the
+		// guard or the footer marker.
 		const fakeThis = makeFakeThis();
 		const rebuildChatFromMessages = Reflect.get(InteractiveMode.prototype, "rebuildChatFromMessages") as (
 			this: FakeThis,
 		) => void;
 
 		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(fakeThis.externalOwnerCompactionNoticeShown).toBe(true);
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(true);
+
+		rebuildChatFromMessages.call(fakeThis);
+
+		// Episode state survives the rebuild; the rendered notice was cleared with
+		// the chat, but the marker stays authoritative and the guard still suppresses
+		// any (hypothetical) repeat notice.
+		expect(fakeThis.externalOwnerCompactionNoticeShown).toBe(true);
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(true);
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(0);
+	});
+
+	test("tree navigation rerenders reset the delegation episode", async () => {
+		const fakeThis = makeFakeThis();
+		const renderInitialMessages = Reflect.get(InteractiveMode.prototype, "renderInitialMessages") as (
+			this: FakeThis,
+		) => void;
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
 		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(1);
 
-		// Branch navigation / reload / settings rebuilds clear the chat and rerender.
-		rebuildChatFromMessages.call(fakeThis);
+		// Branch/tree navigation clears the chat and rerenders via renderInitialMessages.
+		fakeThis.chatContainer.clear();
+		renderInitialMessages.call(fakeThis);
 		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(false);
 		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(0);
 
 		await handleEvent.call(fakeThis, externalOwnerEvent());
 		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(1);
 		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(true);
+	});
+
+	test("a model_changed event resets the delegation episode", async () => {
+		const fakeThis = makeFakeThis();
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(fakeThis.externalOwnerCompactionNoticeShown).toBe(true);
+
+		await handleEvent.call(fakeThis, {
+			type: "model_changed",
+			model: { id: "other-model", provider: "other", reasoning: false },
+			thinkingLevel: "off",
+			source: "selector",
+		});
+
+		expect(fakeThis.externalOwnerCompactionNoticeShown).toBe(false);
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(false);
 	});
 
 	test("rebindCurrentSession tolerates harness contexts without a footer", async () => {
