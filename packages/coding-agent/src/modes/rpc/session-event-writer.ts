@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { serializeJsonLine } from "./jsonl.ts";
+import { SocketEventSinkActor } from "./socket-event-fanout.ts";
 
 type RawWriter = (chunk: string) => void;
 type BackpressureWaiter = () => Promise<void>;
@@ -70,7 +71,11 @@ export interface SessionEventWriterConnection {
 
 export class SessionEventWriter {
 	private readonly queues = new Map<string, RecordQueue>();
-	private readonly connections = new Map<string, SessionEventWriterConnection>();
+	private readonly connections = new Map<
+		string,
+		{ connection: SessionEventWriterConnection; actor: SocketEventSinkActor }
+	>();
+	private readonly sessionSnapshots = new Map<string, string[]>();
 	private readonly connectionContext = new AsyncLocalStorage<string>();
 	private readonly controlQueue: RecordQueue = { latestByKey: new Map(), ready: false };
 	private readonly readyQueues: RecordQueue[] = [];
@@ -118,10 +123,17 @@ export class SessionEventWriter {
 	}
 
 	registerConnection(id: string, connection: SessionEventWriterConnection): void {
-		this.connections.set(id, connection);
+		const actor = new SocketEventSinkActor(connection, () => {
+			if (this.connections.get(id)?.actor === actor) this.connections.delete(id);
+		});
+		this.connections.set(id, { connection, actor });
+		for (const snapshot of this.sessionSnapshots.values()) for (const line of snapshot) actor.enqueue(line);
 	}
 
 	unregisterConnection(id: string): void {
+		const registered = this.connections.get(id);
+		if (!registered) return;
+		registered.actor.close();
 		this.connections.delete(id);
 	}
 
@@ -144,10 +156,16 @@ export class SessionEventWriter {
 			record.type === "response" ||
 			(record.type === "extension_ui_request" &&
 				["select", "confirm", "input", "editor"].includes(String(record.method)));
+		const tagged = { ...value, sessionId } as RpcRecord;
+		const line = serializeJsonLine(tagged);
+		this.rememberSnapshot(sessionId, tagged, line);
 		const targets = isTargeted ? [targetId] : this.connections.size > 0 ? [...this.connections.keys()] : [undefined];
 		for (const target of targets) {
 			if (target !== undefined && !this.connections.has(target)) continue;
-			this.appendSessionRecord(sessionId, { ...value, sessionId }, target);
+			const registered = target === undefined ? undefined : this.connections.get(target);
+			if (registered)
+				registered.actor.enqueue(line, compactDelta(tagged) && tagged.message !== null ? MESSAGE_KEY : undefined);
+			else this.appendSessionRecord(sessionId, tagged, target);
 		}
 		this.requestFlush();
 		return true;
@@ -157,6 +175,11 @@ export class SessionEventWriter {
 	enqueueControl(value: object): Promise<void> {
 		if (this.failure !== undefined) return Promise.reject(this.failure);
 		const targetId = this.connectionContext.getStore();
+		const registered = targetId === undefined ? undefined : this.connections.get(targetId);
+		if (registered) {
+			registered.actor.enqueue(serializeJsonLine(value));
+			return Promise.resolve();
+		}
 		const queue = targetId === undefined ? this.controlQueue : this.connectionQueue(targetId);
 		const completion = new Promise<void>((resolve, reject) => {
 			this.append(queue, { ...value }, undefined, resolve, reject);
@@ -177,9 +200,12 @@ export class SessionEventWriter {
 		const targetId = this.connectionContext.getStore();
 		const lifecycle = { type: "session_closed", sessionId };
 		for (const connectionId of this.connections.keys()) {
-			this.appendSessionRecord(sessionId, lifecycle, connectionId);
+			this.connections.get(connectionId)!.actor.enqueue(serializeJsonLine(lifecycle));
 		}
-		this.appendSessionRecord(sessionId, { ...response, sessionId }, targetId);
+		const taggedResponse = { ...response, sessionId };
+		const registered = targetId === undefined ? undefined : this.connections.get(targetId);
+		if (registered) registered.actor.enqueue(serializeJsonLine(taggedResponse));
+		else this.appendSessionRecord(sessionId, taggedResponse, targetId);
 		this.requestFlush();
 	}
 
@@ -188,7 +214,8 @@ export class SessionEventWriter {
 		if (this.failure !== undefined) return Promise.reject(this.failure);
 		this.flushScheduled = false;
 		if (this.drainPromise) return this.drainPromise;
-		if (this.readyQueues.length === 0) return Promise.resolve();
+		if (this.readyQueues.length === 0)
+			return Promise.all([...this.connections.values()].map(({ actor }) => actor.flush())).then(() => undefined);
 		let resolveDrain!: () => void;
 		let rejectDrain!: (cause: unknown) => void;
 		const drain = new Promise<void>((resolve, reject) => {
@@ -213,6 +240,7 @@ export class SessionEventWriter {
 		do {
 			await this.drainReadyQueues();
 		} while (this.readyQueues.length > 0);
+		await Promise.all([...this.connections.values()].map(({ actor }) => actor.flush()));
 	}
 
 	private async drainReadyQueues(): Promise<void> {
@@ -227,7 +255,7 @@ export class SessionEventWriter {
 			try {
 				// D9: exactly one complete record per raw write. The next lane is not
 				// selected until this record has cleared stdout backpressure.
-				const connection = queue.targetId ? this.connections.get(queue.targetId) : undefined;
+				const connection = queue.targetId ? this.connections.get(queue.targetId)?.connection : undefined;
 				const writeRaw = connection?.writeRaw ?? this.writeRaw;
 				const waitForBackpressure = connection?.waitForBackpressure ?? this.waitForBackpressure;
 				if (!connection && queue.targetId) {
@@ -252,6 +280,16 @@ export class SessionEventWriter {
 				}
 			}
 		}
+	}
+
+	private rememberSnapshot(sessionId: string, value: RpcRecord, line: string): void {
+		const event = value.assistantMessageEvent as Record<string, unknown> | undefined;
+		if (value.type === "message_start" || (value.type === "message_update" && event?.type === "text_start")) {
+			this.sessionSnapshots.set(sessionId, [line]);
+		} else if (this.sessionSnapshots.has(sessionId)) {
+			this.sessionSnapshots.get(sessionId)!.push(line);
+		}
+		if (value.type === "message_end") this.sessionSnapshots.delete(sessionId);
 	}
 
 	private connectionQueue(targetId: string): RecordQueue {
