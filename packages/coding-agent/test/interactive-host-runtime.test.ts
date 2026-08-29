@@ -1037,8 +1037,7 @@ describe("interactive host runtime", () => {
 	});
 
 	it("rebinds settingsManager reads to the replacement session", async () => {
-		const qa = scratch("replacement-settings");
-		qa.socket = `/tmp/senpi-replacement-settings-${process.pid}.sock`;
+		const qa = scratch("rs");
 		const projectB = join(qa.root, "project-b");
 		mkdirSync(join(projectB, CONFIG_DIR_NAME), { recursive: true });
 		writeFileSync(
@@ -1051,7 +1050,10 @@ describe("interactive host runtime", () => {
 		const host = spawnHost(qa);
 		await waitForHost(host, qa.socket);
 		const target = SessionManager.create(projectB, qa.sessionDir);
-		const targetPath = target.getSessionFile()!;
+		target.appendMessage({ role: "user", content: "replacement-target", timestamp: 1 });
+		target.appendMessage(fauxAssistantMessage("replacement-target-answer"));
+		const targetPath = target.getSessionFile();
+		if (!targetPath) throw new Error("target session path missing");
 		const runtime = await createInteractiveHostRuntime(
 			await createAgentSessionRuntimeFixture({
 				cwd: qa.cwd,
