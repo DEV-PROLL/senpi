@@ -4134,26 +4134,7 @@ function buildConversationTurns(
 }
 
 /** Returns the serialized byte cost of Cursor's complete stored history representation. */
-export function measureCursorHistorySerializedBytes(
-	messages: Message[],
-	activeUserMessageIndex = findLastUserMessageIndex(messages),
-): number {
-	return buildCursorHistoryWireBytesForTest(messages, activeUserMessageIndex).reduce(
-		(total, bytes) => total + bytes.byteLength,
-		0,
-	);
-}
-
-/** Exported for tests: returns the encoded Cursor history blob payloads. */
-export function buildCursorHistoryWireBytesForTest(
-	messages: Message[],
-	activeUserMessageIndex = findLastUserMessageIndex(messages),
-): Uint8Array[] {
-	const blobStore = new Map<string, Uint8Array>();
-	buildRootPromptMessagesJson(messages, [], blobStore, activeUserMessageIndex);
-	buildConversationTurns(messages, blobStore, activeUserMessageIndex);
-	return [...blobStore.values()];
-}
+export { buildCursorHistoryWireBytesForTest, measureCursorHistorySerializedBytes } from "./cursor-agent/measure.ts";
 
 /** Exported for tests: decodes Cursor history blobs built from conversation messages. */
 export function buildCursorHistoryForTest(
