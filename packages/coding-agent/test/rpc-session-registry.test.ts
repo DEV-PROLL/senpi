@@ -29,6 +29,8 @@ function runtime(
 	return {
 		session: {
 			sessionManager: options.sessionManager,
+			// Projected into the `open_session` wire state, which shares one builder with get_state.
+			isFastModeActive: () => false,
 			extensionRunner: { hasHandlers: () => false, emit: async () => {} },
 			abort: async () => {},
 			abortBash: () => {},
@@ -214,6 +216,72 @@ describe("RPC session registry", () => {
 		const opened = await registry.openSession(profile(dir, join(dir, "closed.jsonl")));
 		await registry.close(opened.sessionId);
 		await expect(registry.close(opened.sessionId)).rejects.toMatchObject({ code: "unknown_session" });
+	});
+
+	test("attaches to an already-open session by path instead of rejecting session_path_in_use", async () => {
+		const { dir, registry } = await createRegistry();
+		const path = join(dir, "attach.jsonl");
+		const first = await registry.openSession(profile(dir, path));
+
+		const attached = await registry.openSession(profile(dir, path));
+
+		expect(attached.sessionId).toBe(first.sessionId);
+		expect(attached.durableSessionId).toBe(first.durableSessionId);
+		expect(attached.attached).toBe(true);
+		expect(registry.list()).toHaveLength(1);
+	});
+
+	test("keeps the runtime alive until the last attachment closes", async () => {
+		const { dir } = await createRegistry();
+		let disposed = false;
+		const registry = new RpcSessionRegistry({
+			agentDir: dir,
+			createRuntime: async (options) => {
+				const result = runtime(options);
+				result.session.dispose = () => {
+					disposed = true;
+				};
+				return result;
+			},
+		});
+		const path = join(dir, "attach-close.jsonl");
+		const first = await registry.openSession(profile(dir, path));
+		await registry.openSession(profile(dir, path));
+
+		await registry.close(first.sessionId);
+		expect(disposed).toBe(false);
+		expect(registry.list()).toHaveLength(1);
+		expect(registry.getForCommand(first.sessionId, "prompt").state).toBe("open");
+
+		await registry.close(first.sessionId);
+		expect(disposed).toBe(true);
+		expect(registry.list()).toHaveLength(0);
+		await expect(registry.openSession(profile(dir, path))).resolves.toMatchObject({ sessionId: expect.any(String) });
+	});
+
+	test("router shutdown drains every shared attachment before disposing the runtime", async () => {
+		const { dir } = await createRegistry();
+		let disposed = 0;
+		const registry = new RpcSessionRegistry({
+			agentDir: dir,
+			createRuntime: async (options) => {
+				const result = runtime(options);
+				result.session.dispose = () => {
+					disposed += 1;
+				};
+				return result;
+			},
+		});
+		const router = new SessionCommandRouter(registry, new SessionEventWriter(() => {}), { cwd: dir }, async () => ({
+			handle: async () => {},
+			dispose: async () => {},
+		}));
+		const path = join(dir, "shutdown.jsonl");
+		await router.handle({ id: "open", type: "open_session", cwd: dir, sessionPath: path });
+		await router.handle({ id: "attach", type: "open_session", cwd: dir, sessionPath: path });
+		await router.dispose();
+		expect(disposed).toBe(1);
+		expect(registry.list()).toEqual([]);
 	});
 
 	test("constructs each opened runtime inside an isolated provider scope", async () => {

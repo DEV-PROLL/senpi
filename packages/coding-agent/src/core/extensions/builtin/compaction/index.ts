@@ -225,6 +225,12 @@ export default function compactionExtension(
 
 	let idleWarmupTimer: ReturnType<typeof setTimeout> | undefined;
 	let idleWarmupAttempt = 0;
+	// True from the `agent_end` idle trigger until the next turn starts (or the
+	// session shuts down). The idle-apply watcher below is fenced on it so a
+	// summary that lands after the user has already prompted is never applied
+	// out from under the turn that is starting; the warm-consume path in
+	// `before_agent_start` owns the job from that point on.
+	let sessionIdleSinceAgentEnd = false;
 
 	function cancelIdleWarmupRetry(): void {
 		if (idleWarmupTimer === undefined) return;
@@ -302,8 +308,62 @@ export default function compactionExtension(
 				invalidateSpeculativeCompaction(ctx);
 				startSpeculativeCompaction(ctx, idle.IDLE_COMPACTION_INSTRUCTIONS);
 				armIdleWarmupRetry(ctx);
+				armIdleApply(ctx);
 			}, idleRetry.IDLE_WARMUP_RETRY_DELAY_MS);
 		});
+	}
+
+	/**
+	 * Apply the idle warm summary as soon as it finishes generating, while the
+	 * session is still idle. Holding it warm until the next `before_agent_start`
+	 * makes the user watch their own prompt wait behind a compaction they could
+	 * not see coming; applying during the idle gap renders the [compaction] block
+	 * first and lets the next message stack below it.
+	 *
+	 * Every guard is re-read at continuation time, because generation takes long
+	 * enough for all of them to change: the session may no longer be idle, the
+	 * job may have been invalidated or claimed, the context may have dropped
+	 * below the threshold, the lane may have been handed to the SDK, or the
+	 * breaker may have tripped. A refused apply (stale anchor/revision) silently
+	 * keeps the warm hold, so the next prompt consumes it exactly as before.
+	 */
+	function armIdleApply(ctx: ExtensionContext): void {
+		const job = speculativeJob;
+		if (!job) return;
+		// Never throws out of the continuation: a retired context, a refused apply,
+		// or a provider failure all resolve into a silent stand-down.
+		void job.promise
+			.then(async (compaction) => {
+				if (!compaction) return;
+				if (speculativeJob !== job) return;
+				if (!sessionIdleSinceAgentEnd) return;
+				if (isContextRetired(ctx)) return;
+				if (!ctx.isIdle()) return;
+				if (lanePolicy.disablesSenpiCompaction(ctx)) return;
+				if (breaker.isTripped(state, Date.now())) return;
+				if (cap.shouldRejectByCap(state).cancel) return;
+				const usage = ctx.getContextUsage();
+				const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+				if (
+					!usage ||
+					!policy.shouldTriggerCompaction(
+						usage,
+						contextWindow,
+						ctx.getCompactionSettings(),
+						state.lastYield ?? undefined,
+					)
+				) {
+					return;
+				}
+				const result = await applyGeneratedCompaction(ctx, job.snapshot, () => speculativeGeneration, compaction);
+				if (!result.applied) return;
+				// The job is consumed: clearing it here is also what stands the idle
+				// retry watcher down for this generation.
+				if (speculativeJob === job) speculativeJob = undefined;
+				cancelIdleWarmupRetry();
+				getLogger(ctx).debug("idle_applied", { generation: job.generation, origin: "speculative" });
+			})
+			.catch(() => {});
 	}
 
 	function isSameModelIdentity(
@@ -400,6 +460,11 @@ export default function compactionExtension(
 		ctx: ExtensionContext,
 		customInstructions: string,
 	): Promise<SpeculativeCompactionResult> {
+		const provider = ctx.model?.provider;
+		if ((provider === "cursor" || provider === "cursor-cli-oauth") && !ctx.isIdle()) {
+			getLogger(ctx).debug("skip_cursor_mid_turn", { route: "blocking" });
+			return { applied: false, reason: "rejected" };
+		}
 		if (breaker.isTripped(state, Date.now())) {
 			getLogger(ctx).debug("skip_breaker", { route: "blocking" });
 			return { applied: false, reason: "rejected" };
@@ -542,6 +607,15 @@ export default function compactionExtension(
 			endCompactionFeedback(ctx, feedbackSignal, result, remoteFallbackReason);
 			return result;
 		} catch (error) {
+			if (feedbackSignal?.aborted) {
+				// An aborted blocking compaction is a cancellation, not a failure: no
+				// red "Compaction failed" line, no breaker debit, no rethrow through
+				// the before_agent_start handler (issue #886). The faux-route flavor
+				// of this contract is pinned by blocking-compaction-review-hardening.
+				getLogger(ctx).debug("blocking_aborted", { route: "blocking" });
+				ctx.endCompaction?.({ reason: "extension", signal: feedbackSignal, aborted: true });
+				return { applied: false, reason: "rejected" };
+			}
 			const message = error instanceof Error ? error.message : String(error);
 			ctx.endCompaction?.({
 				reason: "extension",
@@ -559,6 +633,10 @@ export default function compactionExtension(
 	}
 
 	pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, ctx) => {
+		// A pre-aborted request (superseded admission or user cancel) must stand
+		// down before touching warm-job ownership: core's own post-emit abort
+		// checks turn it into a clean cancellation (issue #886).
+		if (event.signal.aborted) return undefined;
 		const claimedWarmJob = claimWarmSummaryForCoreRoute(event, ctx);
 		// The claim detaches the job without aborting it, so ownership must survive every
 		// exit from this handler - including a throw - or the request it already paid for
@@ -598,12 +676,22 @@ export default function compactionExtension(
 			if (!model) {
 				return undefined;
 			}
-			const remoteCompaction = await runOpenAiRemoteCompaction(
-				ctx,
-				event,
-				(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
-				remoteCompactionDependencies,
-			);
+			let remoteCompaction: Awaited<ReturnType<typeof runOpenAiRemoteCompaction>>;
+			try {
+				remoteCompaction = await runOpenAiRemoteCompaction(
+					ctx,
+					event,
+					(data) => pi.events.emit(SENPI_COMPACTION_EVENT, data),
+					remoteCompactionDependencies,
+				);
+			} catch (error) {
+				// The remote route deliberately rethrows once its signal aborts; the
+				// handler converts that into a silent stand-down so the abort is not
+				// reported as an extension error with a stack (issue #886).
+				if (!event.signal.aborted) throw error;
+				getLogger(ctx).debug("remote_aborted", { route: "core-route", requestId: event.requestId });
+				return undefined;
+			}
 			if (remoteCompaction) {
 				getLogger(ctx).debug("core_route_generated", { route: "core-route", requestId: event.requestId });
 				return { compaction: remoteCompaction };
@@ -779,6 +867,7 @@ export default function compactionExtension(
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
+		sessionIdleSinceAgentEnd = false;
 		cancelIdleWarmupRetry();
 		const message = checkpointState.attachRestorationDirective(
 			restorationDirectiveState,
@@ -923,8 +1012,10 @@ export default function compactionExtension(
 		) {
 			getLogger(ctx).debug("idle_trigger", { contextWindow, tokens: usage?.tokens ?? 0 });
 			idleWarmupAttempt = 0;
+			sessionIdleSinceAgentEnd = true;
 			startSpeculativeCompaction(ctx, idle.IDLE_COMPACTION_INSTRUCTIONS);
 			armIdleWarmupRetry(ctx);
+			armIdleApply(ctx);
 		}
 	});
 
@@ -954,6 +1045,7 @@ export default function compactionExtension(
 	// warm-up watcher down here rather than leaving a timer armed against a
 	// context that is about to start throwing on every read.
 	pi.on("session_shutdown", () => {
+		sessionIdleSinceAgentEnd = false;
 		cancelIdleWarmupRetry();
 		idleWarmupAttempt = 0;
 		speculativeJob?.controller.abort();

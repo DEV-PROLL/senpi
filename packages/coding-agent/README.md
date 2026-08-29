@@ -523,9 +523,9 @@ For non-Node.js integrations, use RPC mode over stdin/stdout:
 pi --mode rpc
 ```
 
-RPC mode uses strict LF-delimited JSONL framing. Clients must split records on `\n` only. Do not use generic line readers like Node `readline`, which also split on Unicode separators inside JSON payloads.
+RPC mode uses strict LF-delimited JSONL framing. Clients must split records on `\n` only. Do not use generic line readers like Node `readline`, which also split on Unicode separators inside JSON payloads. For concurrent clients, use the shared Unix-socket host (`--listen <path-or-unix-url>`); `ensureHost()` provides attach-compatible startup and handshake semantics, with lifecycle supervision for hosts it starts.
 
-See [docs/rpc.md](docs/rpc.md) for the protocol.
+See [docs/rpc.md](docs/rpc.md) for the protocol, socket host, and lifecycle details.
 
 ### App Server Mode
 
@@ -591,7 +591,7 @@ pi config                    # Enable/disable package resources
 | (default) | Interactive mode |
 | `-p`, `--print` | Print response and exit |
 | `--mode json` | Output all events as JSON lines (see [docs/json.md](docs/json.md)) |
-| `--mode rpc` | RPC mode for process integration (see [docs/rpc.md](docs/rpc.md)) |
+| `--mode rpc` | RPC mode for process integration; add `--listen` for the shared multi-session socket host (see [docs/rpc.md](docs/rpc.md)) |
 | `app-server` | Codex-compatible app-server integration (see [docs/app-server.md](docs/app-server.md)) |
 | `--export <in> [out]` | Export session to HTML |
 
@@ -660,6 +660,7 @@ Combine `--no-*` with explicit flags to load exactly what you need, ignoring set
 | `--system-prompt <text>` | Replace default prompt (context files and skills still appended) |
 | `--append-system-prompt <text>` | Append to system prompt |
 | `--tui-mode <mode>` | TUI mode: `regular` (default) or experimental `fullscreen` |
+| `--use-theme <name[/name]>` | Set the initial interactive theme for this run without changing settings |
 | `--verbose` | Force verbose startup |
 | `-a`, `--approve` | Trust project-local files for this run |
 | `-na`, `--no-approve` | Ignore project-local files for this run |

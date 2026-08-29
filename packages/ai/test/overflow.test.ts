@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AssistantMessage } from "../src/types.ts";
-import { isContextOverflow, isRecoverableLength } from "../src/utils/overflow.ts";
+import { isContextOverflow, isCursorQuotaResourceExhausted, isRecoverableLength } from "../src/utils/overflow.ts";
 
 function createErrorMessage(errorMessage: string): AssistantMessage {
 	return {
@@ -73,6 +73,106 @@ describe("isContextOverflow", () => {
 			"Prompt has 5,958,968 tokens, but the configured context size is 256,000 tokens",
 		);
 		expect(isContextOverflow(commaMessage, 256000)).toBe(true);
+	});
+
+	it("detects gateway 413 body-size rejections as byte-size overflow", () => {
+		// Real gateway rejections captured 2026-08-16: a compaction summarization
+		// request whose HTTP body exceeded the provider/gateway limit. These are
+		// byte-size overflows — the same class as Anthropic's request_too_large —
+		// and must route into input-shrinking recovery, not a terminal error.
+		const openAiStyle = createErrorMessage(
+			'413: {"message":"Request body too large","type":"invalid_request_error","code":"body_too_large"}',
+		);
+		expect(isContextOverflow(openAiStyle, 200000)).toBe(true);
+
+		const aiSdkStyle = createErrorMessage(
+			'413: {"message":"Request Entity Too Large","type":"AI_APICallError","param":{"error":"Request Entity Too Large","statusCode":413,"name":"AI_APICallError","message":"Request Entity Too Large","isRetryable":false,"type":"AI_APICallError"}}',
+		);
+		expect(isContextOverflow(aiSdkStyle, 200000)).toBe(true);
+
+		const rfcStyle = createErrorMessage("413 Payload Too Large");
+		expect(isContextOverflow(rfcStyle, 200000)).toBe(true);
+	});
+
+	it("detects kiro-lb local payload guards across both route wrappers and units", () => {
+		const anthropicBytes = createErrorMessage(
+			'400 {"type":"error","error":{"type":"invalid_request_error","message":"Request payload is 1095225 bytes, over the 1085435 byte limit Kiro accepts. Shorten the conversation or send fewer tools."}}',
+		);
+		const openAiTokens = createErrorMessage(
+			'400 {"detail":"Request payload is 800001 tokens, over the 800000 token limit Kiro accepts."}',
+		);
+		expect(isContextOverflow(anthropicBytes, 666667)).toBe(true);
+		expect(isContextOverflow(openAiTokens, 666667)).toBe(true);
+	});
+
+	it("detects Kiro upstream context overflow enhanced by kiro-lb", () => {
+		const upstream = createErrorMessage(
+			'400 {"error":{"type":"kiro_api_error","message":"Model context limit reached. Conversation size exceeds model capacity."}}',
+		);
+		expect(isContextOverflow(upstream, 666667)).toBe(true);
+	});
+
+	it("rejects malformed or unrelated Kiro-like payload-size prose", () => {
+		expect(
+			isContextOverflow(
+				createErrorMessage("Request payload is 1,,225 bytes, over the 1,085 byte limit Kiro accepts."),
+			),
+		).toBe(false);
+		expect(
+			isContextOverflow(
+				createErrorMessage("Request payload is 1,225 bytes, over the 1,085 byte limit Kiro accepts."),
+			),
+		).toBe(false);
+		expect(
+			isContextOverflow(
+				createErrorMessage("Payload 1095225 bytes exceeds the 1085435 byte limit; AUTO_TRIM_PAYLOAD is disabled"),
+			),
+		).toBe(false);
+		expect(isContextOverflow(createErrorMessage("Another provider reports payload size exceeded."))).toBe(false);
+	});
+
+	it("does not treat tiny token-bearing resource_exhausted usage as context overflow", () => {
+		const message = createErrorMessage("Connect error resource_exhausted");
+		message.usage.output = 12;
+		message.usage.totalTokens = 12;
+		expect(isContextOverflow(message, 200_000)).toBe(false);
+	});
+
+	it("treats token-bearing resource_exhausted usage near the context window as overflow", () => {
+		const message = createErrorMessage("gRPC error 8: resource_exhausted");
+		message.usage.totalTokens = 600_000;
+		expect(isContextOverflow(message, 1_048_576)).toBe(true);
+	});
+
+	it("preserves legacy token-bearing resource_exhausted overflow detection without a context window", () => {
+		const message = createErrorMessage("Connect error resource_exhausted");
+		message.usage.totalTokens = 12;
+		expect(isContextOverflow(message)).toBe(true);
+	});
+
+	it("identifies Cursor usage-pool exhaustion below half the context window", () => {
+		const message = createErrorMessage("Connect error resource_exhausted: Error");
+		message.usage.totalTokens = 178_626;
+		expect(isContextOverflow(message, 1_048_576)).toBe(false);
+		expect(isCursorQuotaResourceExhausted(message, 1_048_576)).toBe(true);
+	});
+
+	it("does not identify Cursor context overflow as usage-pool exhaustion", () => {
+		const message = createErrorMessage("Connect error resource_exhausted: Error");
+		message.usage.totalTokens = 600_000;
+		expect(isCursorQuotaResourceExhausted(message, 1_048_576)).toBe(false);
+	});
+
+	it("does not identify zero-token or non-resource-exhausted errors as usage-pool exhaustion", () => {
+		const zeroToken = createErrorMessage("Connect error resource_exhausted: Error");
+		const nonResourceExhausted = createErrorMessage("Connect error unavailable");
+		expect(isCursorQuotaResourceExhausted(zeroToken, 1_048_576)).toBe(false);
+		expect(isCursorQuotaResourceExhausted(nonResourceExhausted, 1_048_576)).toBe(false);
+	});
+
+	it("keeps zero-token resource_exhausted errors out of overflow detection", () => {
+		const message = createErrorMessage("Connect error resource_exhausted: quota exceeded");
+		expect(isContextOverflow(message, 200_000)).toBe(false);
 	});
 
 	it("does not treat generic non-overflow Ollama errors as overflow", () => {

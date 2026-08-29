@@ -6,11 +6,12 @@
  * createAgentSession() options. The SDK does the heavy lifting.
  */
 
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@earendil-works/pi-ai";
 import chalk from "chalk";
 import { handleAppServerCommand } from "./cli/app-server-command.ts";
-import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
+import { type Args, type Mode, normalizeSessionName, parseArgs, printHelp } from "./cli/args.ts";
 import {
 	type AuthCheckResult,
 	checkProviderAuth,
@@ -50,6 +51,7 @@ import {
 import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { envValue } from "./core/brand.ts";
+import { type CredentialAccountSummary, summarizeCredentialAccounts } from "./core/credential-accounts.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
@@ -76,14 +78,17 @@ import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/tru
 import { builtInExtensions } from "./extensions/index.ts";
 import { getFromSourceRealConfigWarning } from "./from-source-config-guard.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
-import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
+import { createInteractiveHostRuntime } from "./modes/interactive/interactive-host-runtime.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
+import { runPrintMode } from "./modes/print-mode.ts";
+import { parseSupervisorArgs, runHostSupervisor } from "./modes/rpc/host-lifecycle.ts";
 import { runMultiSessionHost } from "./modes/rpc/multi-session-host.ts";
+import { runRpcMode } from "./modes/rpc/rpc-mode.ts";
 import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
 
-const EXTENSION_LOAD_FAILURE_HINT = 'Hint: Start without extensions using "pi -ne".';
+const EXTENSION_LOAD_FAILURE_HINT = `Hint: Start without extensions using "${APP_NAME} -ne".`;
 
 /**
  * Read all content from piped stdin.
@@ -115,6 +120,13 @@ function collectSettingsDiagnostics(
 	return settingsManager.drainErrors().map(({ scope, error }) => ({
 		type: "warning",
 		message: `(${context}, ${scope} settings) ${error.message}`,
+	}));
+}
+
+function collectAuthDiagnostics(authStorage: AuthStorage, context: string): AgentSessionRuntimeDiagnostic[] {
+	return authStorage.drainErrors().map((error) => ({
+		type: "warning",
+		message: `(${context}, auth storage) ${error.message}`,
 	}));
 }
 
@@ -162,6 +174,16 @@ function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc"> {
 
 function toProjectTrustMode(appMode: AppMode): AppMode {
 	return appMode === "app-server" ? "print" : appMode;
+}
+
+/**
+ * Interactive launches auto-title by default; every other app mode (RPC with or
+ * without `--multi-session`, print, json, app-server) opts in with
+ * `--auto-title-sessions`. Sessions resumed with existing context messages are
+ * never retitled, whatever the mode or flag.
+ */
+export function resolveAutoTitleSessions(appMode: AppMode, parsed: Args, hasContextMessages: boolean): boolean {
+	return (appMode === "interactive" || parsed.autoTitleSessions === true) && !hasContextMessages;
 }
 
 function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
@@ -237,8 +259,17 @@ async function runAuthCommand(args: string[]): Promise<boolean> {
 				reason: "invalid_state",
 			};
 		}
+		let accounts: CredentialAccountSummary[] = [];
+		if (command.json && result.status !== "invalid") {
+			try {
+				const credentials = command.noRefresh ? new ReadOnlyAuthStorage() : AuthStorage.create();
+				accounts = await summarizeCredentialAccounts(result.provider, await credentials.read(result.provider));
+			} catch {
+				// Account enrichment must never turn a readable auth state into a failure.
+			}
+		}
 		const output = command.json
-			? JSON.stringify({ ...result, ...(credential ? { credentials: credential } : {}) })
+			? JSON.stringify({ ...result, accounts, ...(credential ? { credentials: credential } : {}) })
 			: (credential ?? result.status);
 		process.stdout.write(`${output}\n`);
 		process.exitCode = result.status === "ready" ? 0 : result.status === "not_ready" ? 1 : 2;
@@ -399,7 +430,7 @@ function forkSessionOrExit(sourcePath: string, cwd: string, sessionDir?: string,
 	}
 }
 
-async function createSessionManager(
+export async function createSessionManager(
 	parsed: Args,
 	cwd: string,
 	sessionDir: string | undefined,
@@ -545,6 +576,7 @@ function buildSessionOptions(
 			// Explicit --thinking still takes precedence (applied later).
 			if (!parsed.thinking && resolved.thinkingLevel) {
 				options.thinkingLevel = resolved.thinkingLevel;
+				options.thinkingSelection = resolved.thinkingSelection;
 				cliThinkingFromModel = true;
 			}
 		}
@@ -563,6 +595,7 @@ function buildSessionOptions(
 			// Use thinking level from scoped model config if explicitly set
 			if (!parsed.thinking && savedInScope.thinkingLevel) {
 				options.thinkingLevel = savedInScope.thinkingLevel;
+				options.thinkingSelection = savedInScope.thinkingSelection;
 			}
 		} else {
 			options.model = scopedModels[0].model;
@@ -570,6 +603,7 @@ function buildSessionOptions(
 			// Use thinking level from first scoped model if explicitly set
 			if (!parsed.thinking && scopedModels[0].thinkingLevel) {
 				options.thinkingLevel = scopedModels[0].thinkingLevel;
+				options.thinkingSelection = scopedModels[0].thinkingSelection;
 			}
 		}
 	}
@@ -577,6 +611,7 @@ function buildSessionOptions(
 	// Thinking level from CLI (takes precedence over scoped model thinking levels set above)
 	if (parsed.thinking) {
 		options.thinkingLevel = parsed.thinking;
+		options.thinkingSelection = { level: parsed.thinking, source: "explicit" };
 	}
 
 	// Scoped models for Ctrl+P cycling
@@ -586,6 +621,7 @@ function buildSessionOptions(
 		options.scopedModels = scopedModels.map((sm) => ({
 			model: sm.model,
 			thinkingLevel: sm.thinkingLevel,
+			thinkingSelection: sm.thinkingSelection,
 		}));
 	}
 
@@ -657,6 +693,18 @@ export async function main(args: string[], options?: MainOptions) {
 		return;
 	}
 
+	// Internal launch surface used by bundled/rebranded runtimes. It is deliberately
+	// not accepted by parseArgs, so existing CLI modes remain unchanged.
+	if (args[0] === "--internal-rpc-host-supervisor") {
+		const launch = parseSupervisorArgs(args.slice(1));
+		if (!launch) {
+			console.error("invalid internal RPC host supervisor arguments");
+			process.exit(2);
+		}
+		await runHostSupervisor(launch);
+		return;
+	}
+
 	if (process.platform === "win32") {
 		cleanupWindowsSelfUpdateQuarantine(getPackageDir());
 	}
@@ -724,9 +772,17 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	let appMode = resolveAppMode(parsed, process.stdin.isTTY, process.stdout.isTTY);
-	const shouldTakeOverStdout = appMode !== "interactive" && !isPlainRuntimeMetadataCommand(parsed);
+	const shouldTakeOverStdout =
+		appMode !== "interactive" && (!isPlainRuntimeMetadataCommand(parsed) || (parsed.help && parsed.mode === "json"));
 	if (shouldTakeOverStdout) {
 		takeOverStdout();
+	}
+	if (parsed.mode === "json") {
+		const log = console.log.bind(console);
+		console.log = (...args: unknown[]) => console.error(...args);
+		process.once("exit", () => {
+			console.log = log;
+		});
 	}
 
 	if (parsed.mode === "rpc" && parsed.fileArgs.length > 0) {
@@ -775,6 +831,7 @@ export async function main(args: string[], options?: MainOptions) {
 		reportDiagnostics([
 			...services.diagnostics,
 			...collectSettingsDiagnostics(services.settingsManager, "model listing"),
+			...collectAuthDiagnostics(services.authStorage, "model listing"),
 		]);
 		const searchPattern = typeof parsed.listModels === "string" ? parsed.listModels : undefined;
 		await listModels(services.modelRuntime, searchPattern);
@@ -792,6 +849,10 @@ export async function main(args: string[], options?: MainOptions) {
 	) {
 		await showFirstTimeSetup(startupSettingsManager);
 		time("firstTimeSetup");
+	}
+
+	if (appMode === "interactive" && parsed.useTheme !== undefined) {
+		startupSettingsManager.applyOverrides({ theme: parsed.useTheme });
 	}
 
 	// Decide the final runtime cwd before creating cwd-bound runtime services.
@@ -819,8 +880,8 @@ export async function main(args: string[], options?: MainOptions) {
 		}
 	}
 	if (parsed.name !== undefined) {
-		const name = parsed.name.trim();
-		if (!name) {
+		const name = normalizeSessionName(parsed.name);
+		if (name === undefined) {
 			console.error(chalk.red("Error: --name requires a non-empty value"));
 			process.exit(1);
 		}
@@ -920,6 +981,8 @@ export async function main(args: string[], options?: MainOptions) {
 				noPromptTemplates: parsed.noPromptTemplates,
 				noThemes: parsed.noThemes,
 				noContextFiles: parsed.noContextFiles,
+				systemPrompt: parsed.systemPrompt,
+				appendSystemPrompt: parsed.appendSystemPrompt,
 				extensionFactories,
 			},
 		});
@@ -990,12 +1053,13 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionStartEvent,
 			model: sessionOptions.model,
 			thinkingLevel: sessionOptions.thinkingLevel,
+			thinkingSelection: sessionOptions.thinkingSelection,
 			scopedModels: sessionOptions.scopedModels,
 			tools: sessionOptions.tools,
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
-			autoTitleSessions: appMode === "interactive" && !sessionManager.hasContextMessages(),
+			autoTitleSessions: resolveAutoTitleSessions(appMode, parsed, sessionManager.hasContextMessages()),
 		});
 		const cliThinkingOverride = runtimeParsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {
@@ -1024,6 +1088,7 @@ export async function main(args: string[], options?: MainOptions) {
 			creationModel:
 				parsed.provider && parsed.model ? { provider: parsed.provider, modelId: parsed.model } : undefined,
 			initialThinkingLevel: parsed.thinking,
+			listen: parsed.listen,
 		});
 	}
 	const runtime = await createAgentSessionRuntime(createRuntime, {
@@ -1034,7 +1099,16 @@ export async function main(args: string[], options?: MainOptions) {
 		startupLoadingIndicator.stop();
 	});
 	time("createAgentSessionRuntime");
-	const { services, session, modelFallbackMessage } = runtime;
+	let selectedRuntime = runtime;
+	if (appMode === "interactive" && !isTruthyEnvFlag(envValue("DISABLE_SHARED_HOST"))) {
+		const socket = envValue("RPC_SOCKET") ?? resolve(agentDir, "rpc", "rpc.sock");
+		selectedRuntime = await createInteractiveHostRuntime(runtime, {
+			socket,
+			agentDir,
+			onWarning: (warning) => console.error(chalk.yellow(warning.message)),
+		});
+	}
+	const { services, session, modelFallbackMessage } = selectedRuntime;
 	const { settingsManager, modelRuntime, resourceLoader } = services;
 	applyHttpProxySettings(settingsManager.getGlobalSettings().httpProxy);
 	configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
@@ -1076,6 +1150,9 @@ export async function main(args: string[], options?: MainOptions) {
 
 	time("resolveModelScope");
 	reportDiagnostics(runtime.diagnostics);
+	if (appMode !== "interactive") {
+		reportDiagnostics(collectAuthDiagnostics(services.authStorage, "runtime creation"));
+	}
 	if (runtime.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
 		if (runtime.diagnostics.some((diagnostic) => diagnostic.message.includes("Failed to load extension"))) {
 			console.error(chalk.yellow(EXTENSION_LOAD_FAILURE_HINT));
@@ -1109,7 +1186,10 @@ export async function main(args: string[], options?: MainOptions) {
 		printTimings();
 		await runRpcMode(runtime);
 	} else if (appMode === "interactive") {
-		const interactiveMode = new InteractiveMode(runtime, {
+		// Keep the TUI graph out of headless RPC children. This is intentionally at the
+		// mode seam: interactive startup still loads the same module before first use.
+		const { InteractiveMode } = await import("./modes/interactive/interactive-mode.ts");
+		const interactiveMode = new InteractiveMode(selectedRuntime, {
 			migratedProviders,
 			modelFallbackMessage,
 			autoTrustOnReloadCwd,
@@ -1120,6 +1200,7 @@ export async function main(args: string[], options?: MainOptions) {
 			verbose: parsed.verbose,
 			chrome: parsed.grokNeo ? "grok" : undefined,
 			tuiMode: parsed.tuiMode,
+			initialThemeSetting: parsed.useTheme,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();
@@ -1149,6 +1230,7 @@ export async function main(args: string[], options?: MainOptions) {
 			initialMessage,
 			initialImages,
 		});
+		reportDiagnostics(collectAuthDiagnostics(services.authStorage, "print mode"));
 		stopThemeWatcher();
 		restoreStdout();
 		if (exitCode !== 0) {

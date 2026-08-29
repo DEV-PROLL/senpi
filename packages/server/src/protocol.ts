@@ -48,7 +48,10 @@ type _AiThinkingContentFieldsAccountedFor = Assert<
 >;
 type _AiImageContentFieldsAccountedFor = Assert<ExactKeys<AiImageContent, "type" | "data" | "mimeType">>;
 type _AiToolCallFieldsAccountedFor = Assert<
-	ExactKeys<ToolCall, "type" | "id" | "name" | "arguments" | "incomplete" | "errorMessage" | "thoughtSignature">
+	ExactKeys<
+		ToolCall,
+		"type" | "id" | "name" | "arguments" | "incomplete" | "errorMessage" | "thoughtSignature" | "namespace"
+	>
 >;
 type _AiUsageFieldsAccountedFor = Assert<
 	ExactKeys<
@@ -102,7 +105,9 @@ type _AiAssistantMessageFieldsAccountedFor = Assert<
 		| "stopDetails"
 		| "deferred"
 		| "errorMessage"
+		| "abortSource"
 		| "rawStopReason"
+		| "endTurn"
 		| "timestamp"
 	>
 >;

@@ -1,5 +1,2035 @@
 # changes
 
+## 2026-08-29 - Make externally owned compaction delegation sticky
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: remember the provider and model id after an automatic compaction is rejected by an external owner, suppressing repeated automatic attempts until that key changes, compaction is accepted, or runtime ownership is reconfigured by reload/registry refresh. Manual compaction remains admitted.
+- Added `test/suite/regressions/1174-sticky-delegated-compaction.test.ts` covering repeated turns, manual compaction, and model changes.
+
+### Why
+
+- A provider-owned compaction lane previously caused the core to emit a new automatic compaction attempt on every turn, repeatedly producing rejection events and repainting the same error.
+
+### Why an extension could not handle it
+
+- Automatic compaction admission and lifecycle state are private `AgentSession` control flow that runs before extension hooks are emitted.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: compaction state, automatic admission methods, rejection handling, model selection invalidation, and tree navigation.
+
+## 2026-08-29 - Withheld tools are filtered at the advertisement seam
+
+### What changed
+
+- `agent-session.ts`: names in `temporarilyDisabledToolNames` are dropped from `definitionRegistry`
+  (which becomes `_toolDefinitions`, and therefore the prompt snippets and guidelines) and from the
+  DEFAULT `nextActiveToolNames` selection. `_baseToolDefinitions` stays unfiltered, so
+  `_toolRegistry` remains whole, and an explicit `activeToolNames` request still activates the tool.
+
+### Why
+
+- Filtering `_baseToolDefinitions` also emptied `_toolRegistry`, which `getRegisteredTool` serves.
+  That method is documented to resolve "from the full registry ... independent of the active set"
+  precisely because the Cursor exec bridge drives its own native read/bash/grep/ls frames regardless
+  of what the request advertised, so every Cursor grep frame would have answered
+  `Tool "grep" is not available in this session`. Withholding now happens only where the
+  model-facing surface is derived, leaving programmatic name-based resolution working.
+- The active-name filter applies to the default selection only. A caller that passes
+  `activeToolNames` has named the tool deliberately; overriding that would have broken
+  `filesystem-policy`'s contract that policies reach all six built-in file tools, and the
+  `defaultTools` explicit-precedence guard.
+
+### Why an extension could not handle it
+
+- `_toolDefinitions`, `_toolRegistry`, and the active tool names are private session state built in
+  one pass inside `AgentSession`; no extension hook runs between their construction and first use,
+  so the split between the advertised surface and the resolvable registry can only be made here.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: the `definitionRegistry` construction and the `nextActiveToolNames` filter
+  both gained a `temporarilyDisabledToolNames` guard alongside the existing `isAllowedTool` call.
+  Upstream edits to either filter will conflict; keep the upstream predicate change and re-apply
+  the withheld-name guard next to it.
+
+- Model runtime credential admission counts the combined canonical environment and policy slot lane, admitting rotation for more than one live slot without acquiring leases during preflight.
+
+## 2026-08-28 - Credential pool parity follow-ups
+
+- Half-open leases now admit their holder exactly once for stored and environment probes.
+- Named `models.json` credential slots participate in rotation, policy cooldown bases drive initial backoff,
+  full streams preserve session affinity, and account health follows the auth storage directory.
+- Bare-family fallback opt-outs normalize provider namespaces, and the shipped `"*"` lane is accepted by validation.
+
+## 2026-08-28 - Wildcard fallback lane for chainless models
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/chains.ts`: added the `WILDCARD_CHAIN_KEY` (`"*"`),
+  taught `canonicalizeFallbackChains` to expand and tombstone it (both existing loops skip it because
+  it is not a model selector), gave `resolveChainKey` an opt-in `allowWildcard` fallthrough, and added
+  `hasExplicitFallbackOptOut` so a `[]` tombstone on the current model's exact/base/bare-family key
+  suppresses the lane.
+- `packages/coding-agent/src/core/retry-fallback/settings.ts`: `DEFAULT_FALLBACK_CHAINS` ships a `"*"`
+  lane mirroring the Fable default rungs.
+- `packages/coding-agent/src/core/retry-fallback/controller.ts`: `nextCandidate` resolves in the order
+  own chain -> active episode's `chainKey` -> wildcard (gated on the opt-out check).
+
+### Why
+
+- Desktop thread 487d7c29 (2026-08-28) burned nine consecutive turns on upstream 500s from
+  `apitopia/kimi-k3-unlocked` with zero fallback attempts and wedged terminal `error`; a manual model
+  switch recovered it instantly. `DEFAULT_FALLBACK_CHAINS` only keyed `claude-fable-5`, so the
+  manually selected model resolved no chain and `canTryFallback()` was permanently false.
+- Ordering is load-bearing: an unconditional wildcard fallthrough hijacked sessions already walking a
+  configured chain (their last rung usually has no key either), which the engine suite caught as a
+  7 -> 5 call-count regression.
+- The opt-out gate exists because canonicalization deletes tombstoned keys, which would otherwise let
+  the shipped wildcard silently resurrect fallback for a user who explicitly disabled it.
+
+### Why an extension could not handle it
+
+- Chain resolution and candidate selection are private `RetryFallbackController` state; extensions see
+  fallback events only after the core has already decided not to rotate.
+
+### Expected merge conflict zones
+
+- LOW: the `resolveChainKey` tail and the `canonicalizeFallbackChains` return block in `chains.ts`.
+- LOW: the `chainKey` resolution expression in `controller.ts`.
+
+## 2026-08-28 - Credential pool runtime wiring
+
+- Normal simple agent streams now use credential rotation, session ids provide affinity, pinned accounts win selection, expired cooldowns use one half-open probe, successful probes persist health, and custom agent directories scope sidecar state.
+
+## 2026-08-28 - Credential pool final-account removal
+
+- Removing the last stored account now deletes the provider credential instead of leaving stale auth.json data.
+
+## 2026-08-28 - SessionManager reloadFromDisk for external/shared-host mutations
+
+### What changed
+
+- `packages/coding-agent/src/core/session-manager.ts`: added `reloadFromDisk()` to reload `fileEntries`, update internal maps/caches, and rebuild index from `this.sessionFile` if it exists.
+- Enables in-process mirrors (such as interactive host proxy) to synchronize with external changes like host-committed compactions.
+## 2026-08-27 - Default retry policy phase-2 close-out (docs)
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/profile-override.ts`: the `retry.providers.<providerId>` override surface accepts per-provider scheduling-knob overrides validated against `RetryStageOverride` (fields: `enabled`, `maxRetries`, `baseDelayMs`, `growthFactor`, `perAttemptCapMs`, `jitter`, `serverHintMaxDelayMs`). An entire provider entry is rejected atomically when any knob is invalid.
+- Recommended settings snippet for users who configure no fallback chain and want a larger same-model budget:
+  ```jsonc
+  {
+    // Raise the turn retry budget for a single-provider setup.
+    // maxRetries must be a non-negative safe integer.
+    "retry": {
+      "providers": {
+        "<providerId>": {
+          "turn": {
+            "maxRetries": 5
+          }
+        }
+      }
+    }
+  }
+  ```
+- The default same-model turn retry budget stays at 3 retries. This is an intentional non-change: the budget was reviewed during phase-2 close and kept at its existing value for all providers that don't declare their own profile.
+- No new kimi-code observability or telemetry surface was adopted.
+- Regression coverage: `packages/coding-agent/test/suite/regressions/retry-default-no-kimi-leak.test.ts` guards senpi-default against kimi semantics leaking in (no-hint 429 first-failure fallback, 1258000ms hint tier routing, billing 429 pinned fallback, abort during backoff single `auto_retry_end`).
+- Tracked in `packages/ai/src/changes.md` and `packages/coding-agent/src/core/changes.md`.
+
+### Why
+
+- Users running a single provider without a fallback chain benefit from a higher retry budget, but the default stays conservative (3) to avoid masking persistent failures when fallback providers are available. The snippet documents the exact override path so users don't have to read the validation source.
+
+### Why an extension could not handle it
+
+- `retry.providers` overrides are resolved inside `resolveRetryProfile` in `packages/coding-agent/src/core/settings-manager.ts`, before any extension hook. The validation and merge happen at settings load time.
+
+### Expected merge conflict zones
+
+- NONE: doc-only section append; no code files touched.
+
+## Provider-neutral credential accounts (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/core/credential-accounts.ts` (new): provider-neutral account surface over the pool slot algebra - `getCredentialAccounts`/`summarizeCredentialAccounts` list stored slots (env slots only when nothing is stored, mirroring resolution precedence), `pinCredentialAccount` pins/unpins, `removeCredentialAccount` removes a stored slot and drops its sidecar health (env-backed accounts refuse removal). Blocked state reads BOTH sources: a slot's own persisted `blockedUntil`/`blockReason` and the pool sidecar. Mutations emit `emitProviderAccountsChanged` so subscribed clients re-read. Summaries carry names and health only, never key material.
+- `packages/coding-agent/src/main.ts`: `auth check --json` now includes a non-secret `accounts` array (name/source/blocked/pinned) for the checked provider; enrichment failures never turn a readable auth state into an error.
+
+### Why
+
+- Account management was confined to the claude-sdk-oauth lane (`assertManagedProvider` hard-rejected every other provider). Generic multi-credential pools need one surface that works for every provider, and scripts consuming `auth check --json` need account visibility without parsing auth.json.
+
+### Why an extension could not handle it
+
+- The RPC and app-server consumers dispatch these operations inside core connection handling; an extension cannot replace their imports, and account listing needs the auth storage and pool sidecar wiring that live in core.
+
+### Expected merge conflict zones
+
+- LOW: `main.ts` auth-check output composition (one enrichment block); `credential-accounts.ts` is fork-new.
+
+## 2026-08-27 - Credential pool: health sidecar, policy schema, env slots, in-lane rotation
+
+### What changed
+
+- `packages/coding-agent/src/core/credential-pool/state-store.ts` (new): file-locked health sidecar at `<agent-dir>/credential-pool-state.json` (mode 0600, `FILE_STORAGE_LOCK_OPTIONS`) holding ONLY health - absolute cooldown deadlines, permanent auth/billing blocks, half-open probe leases, `lastSuccessAt`, and HMAC-derived env-slot revisions. `CredentialSlotRepository.mutateSlotState` is an atomic read-modify-write with a `stateVersion` increment; `acquireHalfOpenLease` transitions an elapsed cooldown to half-open for exactly one probing caller. An unreadable or schema-invalid document resets to fresh state rather than failing auth resolution.
+- `packages/coding-agent/src/core/credential-pool/classify.ts` (new): concrete provider-error taxonomy over `normalizeProviderError` and the existing 429 retry-hint parser. 401/invalid-key and account-scoped 403 block permanently and fail over; bare 403 fails the request; 429 fails over with a per-slot exponential cooldown floored (never overridden) by the server hint and capped at 48h; billing/quota-exhausted disables the account; 5xx/529/overload/network retry the SAME slot without blocking it; overflow, invalid model, 400, 404, malformed stream, and abort fail the request.
+- `packages/coding-agent/src/core/credential-pool/failover.ts` (new): `runCredentialFailover` re-reads slots before each distinct-credential attempt (so a newly added slot participates), runs at most one failover attempt per slot per request, settles a failed stream before starting the next, persists the block BEFORE selecting a replacement, and requires an `isCommittedOutput` predicate whose contract is default-DENY. Committed output bars rotation and the rethrow carries the existing `senpi:no-turn-retry:` marker.
+- `packages/coding-agent/src/core/credential-pool/env-slots.ts` (new): numbered env credential slots for any provider (`<VAR>`, `<VAR>_2` .. `<VAR>_16`), gap-tolerant, over the canonical `getApiKeyEnvVars` mapping.
+- `packages/coding-agent/src/core/credential-pool/rotation-stream.ts` (new): lists a provider's rotation slots with sidecar health overlaid (stored lane when a credential exists, env lane otherwise), selects by sha256 HRW over the request affinity key, and persists blocks per lane. An env slot's persisted health applies only while its HMAC revision still matches the current value.
+- `packages/coding-agent/src/core/model-runtime.ts`: `ModelRuntime.stream` engages that rotation only when the provider actually holds more than one slot and nothing pins the request to a single credential (runtime key, explicit per-request `apiKey`, or `credentials.rotation: false`); `prepareRequest` accepts a per-attempt slot override, and `ModelRuntimeAuthOverrides.slotName` plumbs slot-scoped resolution.
+- `packages/coding-agent/src/core/model-config-schema.ts`: per-provider `credentials` policy block (`additionalProperties: false`) with `rotation`/`affinity` toggles, cooldown bounds, and named slot references to env vars or command values; `CREDENTIAL_POLICY_DEFAULTS` re-exports the engine constants so schema and runtime cannot drift.
+
+### Why
+
+- Multi-credential rotation needs durable per-slot health that survives restart with absolute deadlines, a taxonomy that distinguishes credential-scoped from provider-scoped faults (blocking a healthy credential for a provider outage only destroys prompt-cache locality), and a request-level runner that exhausts a lane's slots before the model fallback chain above it is consulted. Health cannot live in `auth.json`: that file is credential material under its own lock, and mixing volatile block state into it would rewrite user credentials on every rate limit.
+
+### Why an extension could not handle it
+
+- `ModelRuntime.stream` is the one place where a request's provider auth is resolved and the provider stream is constructed; per-attempt credential selection has to happen inside it. The sidecar likewise needs `getAgentDir()` and the shared file-storage lock policy, neither of which is reachable through the extension API.
+
+### Expected merge conflict zones
+
+- MEDIUM: `model-runtime.ts` `prepareRequest`/`stream` (upstream-owned request construction; the rotation branch is additive and the single-credential path is unchanged).
+- LOW: `model-config-schema.ts` provider block (one optional property); the `credential-pool/` directory is fork-new with no upstream counterpart.
+
+## 2026-08-26 - Capture bash spill-file errors before the first write
+
+### What changed
+
+- `packages/coding-agent/src/core/bash-executor.ts`: attaches an `error` listener as soon as the
+  full-output `WriteStream` is created, records the first failure, and rejects the bash execution
+  through the terminal `close` boundary even when a late filesystem close failure follows `finish`.
+- The close helper waits for `close`, preserves the first storage failure, and removes its error and
+  close listeners after settlement so a stream cannot resolve successfully before final storage state
+  is known or retain listeners after cleanup.
+- Successful command finalization now runs outside the command-execution catch, so an already-set
+  abort signal cannot reinterpret a spill close failure as a successful cancelled result.
+- Decoder flushing and output preparation now close the spill stream before propagating a callback
+  or formatting failure; if cleanup also fails, both errors are preserved in an `AggregateError`.
+
+### Why
+
+- A full `/tmp` or exhausted user quota can make the spill stream emit `ENOSPC` or `EDQUOT` while
+  command output is still arriving, or during the final filesystem close after `finish`. The close
+  path must therefore wait for `close`, rather than treating `finish` as durable completion; the first
+  storage failure is reported instead of returning a successful result with an incomplete path.
+
+### Why an extension could not handle it
+
+- The stream is created and written inside the core bash executor before extension result hooks
+  receive control.
+
+### Expected merge conflict zones
+
+- LOW: the temp-file stream creation and close lifecycle in `bash-executor.ts`.
+
+## 2026-08-26 - Continue provider fallback after failed required compaction
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: Cursor token-bearing quota `resource_exhausted`
+  and eligible hard-error failures now advance the provider fallback chain when required pre-retry
+  compaction is rejected (`retryContinuationBlocked` no longer covers those two classes). Ordinary
+  transient retries remain compaction-blocked, and zero-token Cursor `resource_exhausted` keeps its
+  compact-before-rotate contract.
+- `packages/coding-agent/src/core/agent-session.ts`: the hard-error fallback not-switched path now
+  emits `retry_fallback_exhausted` when the configured chain has no usable candidate, mirroring the
+  refusal path.
+
+### Why
+
+- Cursor usage-pool exhaustion surfaces as `resource_exhausted` that also demands required
+  compaction; the compaction generator runs on the same dead lane and always fails, so the old
+  blocking wedged the turn ("Compaction rejected: compaction generator failed" then "Retry failed
+  after 1 attempts") and the fallback chain never advanced to the next provider.
+- The silent not-switched path gave the TUI no signal about why no fallback hop happened.
+
+### Why an extension could not handle it
+
+- `retryContinuationBlocked`, required-compaction admission, and fallback dispatch ordering are
+  private `AgentSession` agent_end lifecycle state; extensions observe compaction and fallback
+  events only after the core has already made the dispatch decision.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/coding-agent/src/core/agent-session.ts` agent_end retry/compaction dispatch
+  block and the `_handleRetryableError` hard-error branch.
+
+## 2026-08-26 - Uncaught-crash writer on the debug-log lane
+
+### What changed
+
+- `packages/coding-agent/src/core/hidden-stdout-log.ts`: factored the existing append (timestamp
+  header + `redactSensitiveOutput` + `0o600` debug log) into a private `appendDebugLogEntry` and
+  added the sibling `appendUncaughtCrashLog(origin, error)`, which writes the distinct
+  `uncaught crash (<origin>)` header plus the error identity and stack. `appendHiddenTuiStdout`
+  keeps its exact `hidden stdout while TUI active` header and empty-chunk skip.
+
+### Why
+
+- The interactive crash handler needed a redacted, permission-locked lane into the brand debug log,
+  and the hidden-stdout writer already owned that lane. A distinct header keeps crash records
+  greppable and prevents them from being read as suppressed TUI stdout.
+
+### Why an extension could not handle it
+
+- Fork-only file (absent from the pinned upstream tree); it is the core writer for the brand debug
+  log and runs inside the fatal crash path, where no extension code executes.
+
+### Expected merge conflict zones
+
+- NONE: the file does not exist upstream.
+
+## 2026-08-26 - Reject no-progress manual compaction before active abort
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `AgentSession.compact()` now runs the existing
+  `prepareCompaction()` check before claiming manual admission or aborting an active agent run.
+- A no-progress request still emits balanced manual `compaction_start` / failed `compaction_end`
+  events and the existing `session_compact_failed` hook, but it leaves the active continuation alive.
+
+### Why
+
+- A manual compaction request can arrive after automatic tool-result compaction has committed but
+  while that same turn's next provider call is streaming. The old order aborted the provider
+  continuation first and only then discovered that the pre-abort branch had nothing left to
+  summarize, terminally ending otherwise healthy goal work.
+
+### Why an extension could not handle it
+
+- Manual compaction admission, active-agent abort ownership, and the pre-abort branch snapshot are
+  private `AgentSession` lifecycle state. An extension observes compaction hooks only after the core
+  has already admitted the operation.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/coding-agent/src/core/agent-session.ts` around the public `compact()` entry point.
+
+## 2026-08-23 - Provider-declared retry policy profiles (session wiring)
+
+### What changed
+
+- `packages/coding-agent/src/core/provider-composer.ts`: forwards `retryPolicy` through provider composition (`extension?.retryPolicy ?? base?.retryPolicy`) so composed providers never silently drop provider-declared retry profiles. `ProviderConfigInput` gained the `retryPolicy` field for config-layer injection.
+- `packages/coding-agent/src/core/retry-fallback/settings.ts`: `RetrySettings` gained `providers?: Record<string, RetryPolicyOverride>` for per-provider scheduling-knob overrides.
+- `packages/coding-agent/src/core/retry-fallback/profile-override.ts` (new): `validateRetryProviderOverrides` returns warnings (never throws, never mutates) for the `retry.providers.<id>` map, rejecting an entire provider entry atomically when any knob is invalid, and warning once on unknown provider ids.
+- `packages/coding-agent/src/core/settings-manager.ts`: `resolveRetryProfile(provider)` resolves the effective profile with documented precedence: shipped senpi-default -> provider-declared profile -> user global (no-profile providers only) -> `retry.providers.<id>` -> `retry.enabled` hard gate.
+- `packages/coding-agent/src/core/agent-session.ts`: `_handleRetryableError` resolves the profile once per failure. `fallback.rateLimited` decides 429 routing ("tiered" keeps today's hint tiers, "after-turn-budget" routes 429s through the ordinary same-model budget). Profile ceiling null bypasses the over-ceiling error path. The kimi routing marks `is429TierRouted` to prevent double-counting with the generic non-429 path. Every same-model budget check (`_willRetryAfterAgentEnd`, `_degradeRateLimitedWithoutFallback`, and all `_handleRetryableError` branches incl. the `auto_retry_start.maxAttempts` field) reads the resolved profile's `turn.maxRetries` — identical to `settings.maxRetries` for providers without a declared profile, and the declared budget (kimi-code's 9) otherwise.
+- `packages/coding-agent/src/core/sdk.ts`: `streamFn` resolves the profile's `providerRequest` stage for `maxRetries`/`maxRetryDelayMs`; a profile with `providerRequest.enabled === false` sends `maxRetries: 0`.
+
+### Why
+
+- The kimi-coding provider needs kimi-code's own retry policy (10 attempts, uncapped server hints, no immediate 429 fallback) while every other provider keeps senpi's existing behavior byte-identical. The profile resolution happens at the session's failure-handling loop so classification, delay, and fallback routing stay consistent.
+
+### Why an extension could not handle it
+
+- The retry decision happens inside the session's own failure-handling loop before any extension hook, and must also cover the transport stage in `sdk.ts`. An extension observing the error after the fact cannot influence the same-model budget, tier routing, or the over-ceiling gate.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/coding-agent/src/core/settings-manager.ts` getters region (new `resolveRetryProfile` sibling method).
+- MEDIUM: `packages/coding-agent/src/core/agent-session.ts` `_handleRetryableError` profile routing and over-ceiling gate.
+- MEDIUM: `packages/coding-agent/src/core/sdk.ts` `streamFn` provider-request stage resolution.
+- LOW: `packages/coding-agent/src/core/provider-composer.ts` field forwarding (append-only).
+- LOW: `packages/coding-agent/src/core/retry-fallback/settings.ts` + `profile-override.ts` (new module, no upstream owner).
+
+## Core runtime re-diverges from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` keeps the fork session runtime (prepared tool
+  calls, server-fallback-aborted diagnostics, thinking selection, settlement/idle lifecycle).
+- `packages/coding-agent/src/core/auth-storage.ts` keeps OAuth auth events, interactions, prompts,
+  and login callbacks on the credential store surface.
+- `packages/coding-agent/src/core/footer-data-provider.ts` keeps the polling fallback armed when
+  `fs.watch` creation fails (descriptor limits, unsupported filesystems).
+- `packages/coding-agent/src/core/keybindings.ts` keeps `app.history.search` (ctrl+r) and
+  `app.models.toggleFavorite` (ctrl+f) with their record guards.
+- `packages/coding-agent/src/core/model-config.ts` keeps the extracted `model-config-schema.ts`
+  validation module and `samplingParams` passthrough.
+- `packages/coding-agent/src/core/model-resolver.ts` keeps scoped-model resolution, service tiers,
+  initial-model provenance, and the `AvailableModelsSource` snapshot interface.
+- `packages/coding-agent/src/core/model-runtime.ts` keeps wire identity, payload request metadata,
+  and remote-catalog provider routing.
+- `packages/coding-agent/src/core/package-manager.ts` and `packages/coding-agent/src/core/pi-manifest.ts`
+  keep the `hooks` resource type and branded `envValue("OFFLINE")` reads.
+- `packages/coding-agent/src/core/provider-composer.ts` keeps the extracted api-key/header auth
+  composition modules and tool-call middleware wrapping.
+- `packages/coding-agent/src/core/resource-loader.ts` keeps bundled shim banners, builtin extension
+  factories, and the cwd-scoped extension cache.
+- `packages/coding-agent/src/core/sdk.ts` keeps auth storage, the cursor exec bridge, transport
+  image budgets, model registry wiring, and initial-model provenance.
+- `packages/coding-agent/src/core/session-manager.ts` keeps the session-discovery/resident-store
+  split and the inlined UUIDv7 (upstream depends on the `uuid` package).
+- `packages/coding-agent/src/core/settings-manager.ts` keeps retry/hint policy settings, lockfile
+  policy, nearest-parent config, and atomic settings writes.
+- `packages/coding-agent/src/core/slash-commands.ts` keeps `/favorite-models` and the `/exit` alias.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/core/settings-manager.ts`,
+  and `packages/coding-agent/src/core/session-manager.ts` are the highest-churn files in every sync;
+  expect import-block and constructor-wiring conflicts there first.
+
+## 2026-08-23 - Slot-preserving credential writes for multi-account pools
+
+### What changed
+
+- `packages/ai/src/auth/pool/slots.ts` (new, exported as `@earendil-works/pi-ai/auth/pool/slots`): pure slot algebra over a provider credential - `listSlots`, `findSlot`, `upsertSlot`, `removeSlot`, `pinSlot`, `assertValidSlotName`. A stored credential with no `accounts` array is read as a one-slot pool named `default` derived from its flat fields, without writing anything back. `upsertSlot` replaces or appends one slot and leaves every sibling, the pin, and the flat top-level credential untouched. `removeSlot` drops the provider entry once its last slot is gone and clears a pin naming the removed slot.
+- `packages/coding-agent/src/core/auth-storage.ts`: added `listSlots`, `setSlot`, and `removeSlot` delegating to that module; `set()` now appends to a pool (generated `login-N` slot, siblings preserved) instead of replacing the provider entry, so the RPC `login_api_key` path no longer destroys sibling slots; flat providers keep today's whole-write shape (imported via the new vitest source alias for `@earendil-works/pi-ai/auth/*` in `vitest.base.ts`). Each write runs inside the existing `storage.withLock` read-modify-write and rebuilds the provider entry from the locked content, so unrelated providers and sibling slots survive.
+
+### Why
+
+- `set()` replaces a whole provider entry and `remove()` deletes it, so any provider holding more than one credential lost every sibling the moment one slot was written. Multi-account support needs a write path that preserves siblings before any pooled data can exist. The flat top-level credential is deliberately retained on a pooled entry so a senpi build that predates pools still authenticates from it.
+
+### Why an extension could not handle it
+
+- `AuthStorage` is the app-owned `CredentialStore` implementation and the only holder of the `auth.json` lock; slot-preserving semantics must live inside that locked read-modify-write, which no extension can enter.
+
+### Expected merge conflict zones
+
+- LOW: the new methods sit immediately after `remove()` in `packages/coding-agent/src/core/auth-storage.ts`; `credential-slots.ts` is a new file with no upstream counterpart.
+
+## 2026-08-25 - Fall back on Cursor usage-pool exhaustion
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: admits token-bearing Cursor `resource_exhausted` failures as a dedicated fallback class, retires failed assistants before fallback, and annotates terminal no-fallback errors with the likely usage-pool cause.
+
+### Why
+
+- Cursor quota exhaustion was misclassified as overflow and entered compaction loops; mid-turn tool calls also require explicit retry admission outside the generic hard-error gate.
+
+### Why an extension could not handle it
+
+- Retry admission, assistant retirement, and provider fallback are private AgentSession lifecycle boundaries.
+
+### Expected merge conflict zones
+
+- HIGH: Cursor retry admission and fallback dispatch in `packages/coding-agent/src/core/agent-session.ts`.
+
+## 2026-08-25 - Harden watchdog abort accounting and retry jitter
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: carries watchdog provenance and applies injected jitter while preserving provider hints and 429 floors.
+- `packages/coding-agent/src/core/extensions/types.ts`: includes provider abort ownership in `agent_end`.
+
+### Why
+
+- Watchdog aborts must remain retryable and consume the configured budget; delay jitter must not alter provider hints or the 429 exponential floor.
+
+### Why an extension could not handle it
+
+- Session retry admission and lifecycle event typing are core boundaries with no extension seam.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/core/agent-session.ts` retry scheduling and `packages/coding-agent/src/core/extensions/types.ts` event contract.
+## 2026-08-24 - expose abort provenance to interactive rendering
+
+### What changed
+
+- `agent-abort-provenance.ts` exposes the current explicit abort owner across the active and settlement boundaries.
+- `agent-session.ts` exposes that owner through the read-only `currentAbortSource` getter for the interactive renderer.
+
+### Why
+
+- An assistant `stopReason: "aborted"` does not prove that the user cancelled. Provider retry watchdogs can produce the same terminal shape without explicit ownership, while user and system aborts are recorded by `AgentAbortProvenance`.
+- The renderer needs the existing provenance at message finalization so it can persist an accurate user, system, or provider label that remains correct when the transcript is replayed.
+
+### Why an extension could not handle it
+
+- Abort ownership is private AgentSession lifecycle state and the assistant message is finalized before the extension-visible `agent_end` event.
+
+### Expected merge conflict zones
+
+- LOW: `agent-abort-provenance.ts` source getter and the `AgentSession` read-only state getters.
+
+## 2026-08-22 - Retarget OpenAI automatic defaults to GPT-5.6 Sol
+
+### What changed
+
+- `packages/coding-agent/src/core/model-resolver.ts`: retargeted the `openai` and `openai-codex` provider defaults from `gpt-5.5` to `gpt-5.6-sol` while retaining GPT-5.5 in catalogs and explicit settings resolution.
+
+### Why
+
+- Automatic startup recommendation should follow the current recommended GPT-5.6 Sol model; saved GPT-5.5 selections remain explicitly selectable.
+
+### Why an extension could not handle it
+
+- `defaultModelPerProvider` is consumed by core initial-model resolution before extension recommendations are applied.
+
+### Expected merge conflict zones
+
+- LOW: the OpenAI provider entries in `packages/coding-agent/src/core/model-resolver.ts`.
+
+## 2026-08-22 - emit agent_idle after settlement-deferred turns resolve
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-settled-delivery.ts`: added `DeferredTurnClaim` / `DeferredTurnDisposition` (`started` / `delegated` / `finished-without-start`) and `deferTriggerTurn`, so a settlement-deferred turn request declares whether it actually started a run. Claims resolve at the `_promptAgent` admission boundary.
+- `packages/coding-agent/src/core/agent-session.ts`: after the deferred-action loop in `_emitAgentSettled`, an out-of-band check waits for all deferred turn dispositions, skips emission when any turn `started`, waits for delegated session work to drain, verifies the settlement epoch is still current, and emits `{ type: "agent_idle" }` only when no agent run or session work is active. Both settlement-deferred turn APIs register a claim: `sendMessage(..., { triggerTurn: true })` via `deferTriggerTurn`, and `sendUserMessage` (which always triggers a turn) via a claim resolved from its prompt disposition; its content normalization is wrapped so a throwing iterator/getter resolves the claim instead of hanging the idle wait. `agent_settled` ordering is unchanged for existing subscribers.
+
+### Why
+
+- The TUI cleared its working-status dock on the public `agent_settled`, but settlement-deferred continuations (TTSR, loop-guard, goal recovery) start a turn *after* that event, so the dock was removed and immediately remounted - the same vertical bounce the jitter fix exists to eliminate. `_isAgentRunActive` alone cannot decide this at the deferred-action loop because a deferred `sendCustomMessage`/`sendUserMessage` can be suspended at compaction/provider admission before reaching `_promptAgent`, and a throwing content normalization could leave the claim unresolved forever. `agent_idle` is the single race-free boundary for final cleanup.
+
+### Why an extension could not handle it
+
+- Settlement-deferred turn admission, the settlement epoch, and the deferred-turn claim lifecycle are private `AgentSession` / `AgentSettledDelivery` state.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_emitAgentSettled`, `_promptAgent`, `sendCustomMessage`, `sendUserMessage`, and the `AgentEvent` union.
+- `packages/coding-agent/src/core/agent-settled-delivery.ts`.
+
+## 2026-08-21 - Auth-storage lock retry sleeps instead of spinning
+
+### What changed
+
+- `packages/coding-agent/src/core/auth-storage.ts`: `FileAuthStorageBackend.acquireLockSyncWithRetry` replaces the `while (Date.now() - start < delayMs) {}` busy-wait with `Atomics.wait` on a `SharedArrayBuffer`. The wait stays synchronous (callers and the 20ms/10-attempt policy unchanged) but the thread actually sleeps.
+
+### Why
+
+- This is the same defect PR #1056 removed from `settings-manager.ts`, but `auth-storage.ts` was left out of both #1056 and #1057. The sync `withLock` paths (`reload()`, `set()`, `remove()`) reach it, so under multi-session OAuth-refresh contention (auth.json rewritten by other sessions, forcing `reload()` through a contended lock) a synchronous auth write could spin up to 10×20ms of pure CPU on the main thread.
+
+### Why an extension could not handle it
+
+- `FileAuthStorageBackend` is the core credential persistence path with no extension seam.
+
+### Expected merge conflict zones
+
+- `auth-storage.ts` around `acquireLockSyncWithRetry` (line ~95).
+
+
+## 2026-08-21 - Settings reads are lock-free; writes publish atomically via temp+rename
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: `FileSettingsStorage.withLock` no longer acquires the settings lock for read-only callbacks. The initial read happens without the lock; only a callback that returns content acquires the lock, re-reads under it, re-runs the callback when a concurrent winner changed the file, and publishes by writing a same-directory `*.tmp` file then `renameSync`-ing it over the settings path. `recordSelfWrite` fires before the rename so the config-reload watcher's self-write suppression still sees the hash first. A failed publish removes the temp file and rethrows.
+
+### Why
+
+- Follow-up to the settings-lock CPU-spin fix (#1056). Locked reads were the remaining lock-pressure source: every `SettingsManager` load acquired the lock even when nothing was written, so cache misses and multi-session startups still convoyed on `settings.json.lock`. Atomic rename publish makes torn reads impossible, which is the precondition for dropping the read lock entirely.
+
+### Why an extension could not handle it
+
+- `FileSettingsStorage` is the core settings persistence path with no extension seam.
+
+### Expected merge conflict zones
+
+- `settings-manager.ts` around `withLock` (line ~555) and the `fs` import list (line ~5).
+
+
+## 2026-08-21 - Settings-lock retry sleeps instead of spinning; retry-fallback canonicalization memoized
+
+### What changed
+
+- `settings-manager.ts`: `acquireLockSyncWithRetry` replaces the `while (Date.now() - start < delayMs)` busy-wait with `Atomics.wait` on a `SharedArrayBuffer`. The wait stays synchronous (callers and the 20ms/10-attempt policy unchanged) but the thread actually sleeps, so contended retries no longer burn a CPU core per waiter.
+- `retry-fallback/controller.ts`: `RetryFallbackController` memoizes `canonicalizeFallbackChains` by the serialized chains content. `canTryFallback`/`nextCandidate`/`hasConfiguredChain` reuse the canonical result for an unchanged config; a chains edit invalidates immediately; `clear()` drops the memo.
+
+### Why
+
+- Provider-error handling calls `canTryFallback` 4-6 times per error, each re-canonicalizing chains whose oauth-lane eligibility probes create fresh `SettingsManager` instances and locked disk reads. With ~12 sessions sharing one settings.json the lock convoy made every waiter busy-spin on the main thread, starving the TUI render loop and freezing the screen at ~100% CPU under 429/5xx storms. V8 profile of a frozen omo process showed 65% in `acquireLockSyncWithRetry` and 18% in `parseSettingsJson`.
+
+### Why an extension could not handle it
+
+- The settings file lock and the retry-fallback controller are core storage and session-admission paths with no extension seam.
+
+### Expected merge conflict zones
+
+- `settings-manager.ts` around `acquireLockSyncWithRetry` (line ~527). `retry-fallback/controller.ts` around `nextCandidate`/`hasConfiguredChain` and the new `canonicalChains` private method.
+
+
+## 2026-08-20 - Resume picker caches exact streaming summaries
+
+### What changed
+
+- `packages/coding-agent/src/core/session-manager.ts`: session listing now delegates picker-row discovery instead of parsing every JSONL record itself.
+- `packages/coding-agent/src/core/session-summary.ts`: streams each cold JSONL file once and preserves the exact prior row contract: first user text, latest name, maximum activity timestamp, parsed message count, parent/cwd, and full search text.
+- `packages/coding-agent/src/core/session-summary-cache.ts`: reuses summaries while canonical path, size, and mtime match.
+- `packages/coding-agent/src/core/session-summary-lru.ts`: caps retained summaries at 4,096 entries and 64 MiB of UTF-8 transcript text, evicting least-recently-used rows and refusing oversized entries without changing their returned result.
+- `packages/coding-agent/src/core/session-discovery.ts`: builds and sorts picker rows from the exact cached summaries with the existing bounded-concurrency loader.
+
+### Why
+
+- `/resume` previously reparsed every message in every unchanged session each time the selector opened. The cost scaled with aggregate session bytes and made repeated selector use visibly slower as histories grew.
+- Cold discovery still performs one exact streaming fold so picker metadata and full-text search do not regress. Reopening `/resume` validates one stat per file and reuses unchanged summaries; byte and entry budgets bound process-lifetime retention.
+
+### Why an extension could not handle it
+
+- Session directory enumeration and `SessionInfo` construction happen inside the core `SessionManager.list()` / `listAll()` path before extensions receive a session or selector hook.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/coding-agent/src/core/session-manager.ts` imports and the `list()` / `listAll()` delegation around session discovery.
+- LOW: the new `session-discovery.ts`, `session-summary*.ts`, and `session-record.ts` modules are fork-owned extraction points.
+
+## 2026-08-20 - Session title uses session-model auth
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `_generateSessionTitle` now calls `_getSummarizationRequestAuth(model)` instead of `_getCompactionRequestAuth(model)`.
+
+### Why
+
+- Compaction auth can be remapped to another provider (see #974). Title generation still streams with the session model, so a remapped key produces `session_title_generation` `unauthenticated` on Cursor while the main turn works.
+
+### Why an extension could not handle it
+
+- Title generation is private session lifecycle. There is no extension hook for the title complete auth.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_generateSessionTitle`.
+
+## 2026-08-20 - Cursor 0-token RE stays on the same model and shrinks
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: 0-token Cursor `resource_exhausted` retries with `sameModelRemint` instead of 429/k3 fallback; overflow compact uses Cursor keep-recent-0 settings; too-small compact truncates to the last user turn.
+
+### Why
+
+- `resource.?exhausted` was classified as a 429 transient fallback, and overflow compact that saved <1% still retried the same Cursor payload.
+
+### Why an extension could not handle it
+
+- Retry fallback and pre-prompt compaction are core AgentSession admission paths.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_handleRetryableError`, `_executeCompaction`, `_isHardErrorFallbackEligible`.
+
+## 2026-08-20 - streamRetryTimeoutMs docstring aligned with the reconciled watchdog (issue #723 lane)
+
+### What changed
+
+- `core/retry-fallback/settings.ts`: the `streamRetryTimeoutMs` interface comment now states the actual
+  post-2026-08-18 semantics — it caps the retry-CONTINUATION watchdog, reconciled to
+  `max(cap, streamStartTimeoutMs)` — instead of the stale "first-request liveness cap after a provider
+  timeout" wording. Comment-only; no behavior change.
+
+### Why
+
+- Issue #723 diagnosis (M3) read that comment and concluded the setting clamps the stream-start guard
+  itself. It does not: since the 2026-08-18 reconciliation the retry request keeps its full granted
+  guard and only the continuation watchdog takes this cap. A wrong comment on the exact knob a
+  retry-storm investigation reaches first sends the next diagnosis down the same dead end.
+
+### Why an extension could not handle it
+
+- The setting is a core `ProviderRetrySettings` field consumed by `core/provider-timeout-retry.ts`; the
+  doc contract lives with the interface.
+
+### Expected merge conflict zones
+
+- `core/retry-fallback/settings.ts` `ProviderRetrySettings` field list only (comment line).
+## 2026-08-20 - Cursor exec emits tool_result after native write/edit
+
+### What changed
+
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts`: `executeTool` now calls `emitToolResult` after `tool_execution_end`, passing cleaned args and the real result so plan-touch listeners see native exec writes.
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: wires the bridge's optional `emitToolResult` to `emitExecBridgeToolResult` on the session.
+- `packages/coding-agent/src/core/agent-session.ts`: adds `emitExecBridgeToolResult`, which runs `_emitAfterToolCallHooks` so the same `tool_result` hook path as the local tool loop fires after Cursor exec.
+
+### Why
+
+- Cursor exec runs `write`/`edit` via `tool.execute` and previously only emitted `tool_execution_end`. Plan-touch trackers listen to `tool_result`, so momus stayed gated after a real `.omo/plans/*.md` write (#989).
+
+### Why an extension could not handle it
+
+- The exec-bridge factory is inside `packages/coding-agent` before any omo hook sees the stream; an extension cannot inject `tool_result` into a path that never emitted it.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts` `executeTool` (ownership recheck after preflight plus `emitToolResult`).
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts` session wiring.
+- `packages/coding-agent/src/core/agent-session.ts` `emitExecBridgeToolResult`.
+## 2026-08-20 - Append-only goal continuations and exponentially floored 429 waits
+
+### What changed
+
+- `packages/coding-agent/src/core/messages.ts`: removed `keepLatestGoalContinuationMessage()`.
+  `filterContextExcludedMessages()` is now an explicit identity pass and `convertToLlm()` maps the full
+  input array, so every accepted `goal-continuation` custom message stays in provider-visible chronological
+  history. `GOAL_CONTINUATION_MESSAGE_TYPE` and `isContextExcludedCustomMessage() === false` are unchanged;
+  no dedupe by content, goal id, wake source, or streak was added. Session JSONL format and
+  `queueHiddenGoalPrompt()` are untouched.
+- `packages/coding-agent/src/core/retry-fallback/hint-policy.ts`: `nextInTurnDelayMs()` computes
+  `exponentialFloorMs = baseDelayMs * 2 ** (attempt - 1)` and applies it to all three same-model branches
+  (half-used deadline remainder, first hinted idle probe, and the done/hint-override path). The floored
+  delay — not the raw hint — feeds `cumulativeHintedWaitMs`, so cap demotion accounts for time actually
+  slept. `degradeWithoutFallback()` tier 2 raises its cap-clamped wait to the same floor. The probe state
+  machine, tier boundaries, budgets, and the tier-3 terminal verdict are unchanged.
+- `packages/coding-agent/src/core/agent-session.ts`: comments only near 429 detection and retry scheduling,
+  recording that the exponential floor lives in the pure policy and must not be recomputed at the call site.
+  No control-flow change.
+
+### Why
+
+- Anthropic-style prompt caching keys on an exact message-array prefix. Dropping a previously sent
+  continuation made request N stop being a prefix of request N+1, so every token ahead of the deletion point
+  missed cache and was re-read at full price. In team mode, where continuations arrive every turn, that
+  produced sustained cache-miss traffic and 429 storms (#1005). Keeping continuations append-only is the
+  smallest change that restores prefix immutability; context growth is a deliberate trade bounded by normal
+  compaction.
+- The 429 handler previously let a provider hint fully replace the exponential schedule. A provider that
+  repeats a 5 ms `retry-after` on every rate-limit pinned the same-model retry cadence at 5 ms, so the
+  session hammered a model that was already refusing it. Flooring each wait guarantees monotonic pressure
+  relief while still honouring hints longer than the floor.
+
+### Why an extension could not handle it
+
+- `filterContextExcludedMessages()` / `convertToLlm()` run inside the core transport and compaction paths
+  (`agent-session.ts`, `compaction/compaction.ts`); an extension's `transformContext` hook fires before this
+  core-owned filter, so it cannot prevent a core deletion of already-sent turns.
+- The 429 wait is computed by the pure retry policy inside the session's own retry loop. Extensions observe
+  `auto_retry_start` after the delay has been decided and cannot rewrite `delayMs` or the probe state.
+
+### Expected merge conflict zones
+
+- MEDIUM: `messages.ts` top-of-file exclusion helpers and the `convertToLlm()` entry line — any concurrent
+  change that reintroduces context filtering there will collide.
+- MEDIUM: `retry-fallback/hint-policy.ts` `nextInTurnDelayMs()` branch bodies and the
+  `degradeWithoutFallback()` tier-2 return.
+- LOW: `agent-session.ts` 429 detection and retry-delay comments (comment-only lines).
+- LOW: `test/suite/goal-continuation-context-exclusion.test.ts`,
+  `test/suite/retry-fallback-hint-policy.test.ts`, and
+  `test/suite/regressions/issue-447-goal-continuation.test.ts`, whose assertions moved from
+  keep-latest-only to append-only.
+
+## 2026-08-20 - Skip Cursor compaction while a native Run is live
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `compactBeforeNextAdmission` no-ops for `cursor` / `cursor-cli-oauth` so mid-turn tool-loop admission does not compact while a native Cursor Run is live.
+
+### Why
+
+- Cursor rebuilds full conversation state each hop. Mid-turn compact desyncs `conversationId` and the next hop returns 0-token `resource_exhausted` (session 01a01879, issue #984).
+
+### Why an extension could not handle it
+
+- Tool-loop admission and pre-turn compaction live in `AgentSession.prepareNextTurnWithContext`; an extension cannot skip that core call.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `compactBeforeNextAdmission`
+
+## 2026-08-20 - Ignore implausible Cursor billed usage in compaction threshold
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `_resolveThresholdContextTokens` now delegates to `resolveThresholdContextTokens` so a billed usage figure more than 8× a ≥50k local estimate is ignored for the compaction threshold.
+
+### Why
+
+- Complements the billed-cacheRead guard in cursor-agent. When no checkpoint arrived, a 4M `cacheRead` still must not beat a 149k transcript estimate.
+
+### Why an extension could not handle it
+
+- Threshold resolution runs inside `AgentSession` before any session hook sees the assistant message.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts` `_resolveThresholdContextTokens`
+
+## Shared notice styling for built-in cards (2026-08-20)
+
+### What changed
+
+- The prompt URL widget and the multi-line pi-rules banner now render through `buildNoticeBox`, retaining their existing titles, paths, diagnostics, and URL details while using the shared notice background and bold tone title.
+- The compact pi-rules footer remains a one-line status surface and is unchanged.
+
+### Why
+
+- These built-in multi-line cards were visually divergent from every transcript notice renderer and did not carry the `customMessageBg` notice background.
+
+### Why an extension could not handle it
+
+- The built-in widget and rules banner own their component rendering before another extension can restyle the returned component.
+
+### Expected merge conflict zones
+
+- LOW: `extensions/builtin/prompt-url-widget.ts` widget construction and `extensions/builtin/rules/ui/rules-banner.ts` multi-line rendering.
+
+## Cursor exec emits tool_result after native write/edit (2026-08-19)
+
+`executeTool` now calls `emitToolResult` after `tool_execution_end`. Cursor exec runs `write`/`edit` without the local tool loop, so momus `hasPlanArtifact()` never saw `.omo/plans/*.md` touches.
+
+Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-session.ts`, `agent-session.ts` `emitExecBridgeToolResult`.
+
+## Provider-declared fallback-expansion eligibility gate (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/core/provider-composer.ts`: `ProviderConfigInput` gained optional
+  `fallbackEligible?(): boolean`, the extension-owned deterministic usability gate for implicit
+  bare-family fallback expansion.
+- `packages/coding-agent/src/core/model-runtime.ts`: new `isFallbackEligible(providerId)` consults the
+  registered hook; hookless providers and throwing hooks stay eligible so expansion never shrinks on
+  uncertainty.
+- `packages/coding-agent/src/core/model-registry.ts`: new `isFallbackEligible(model)` forwards the
+  per-provider verdict to `core/retry-fallback/` chain canonicalization.
+
+### Why
+
+- Bare expansion ranked OAuth-credential providers first without asking whether the lane could execute;
+  a credentialed cursor-cli-oauth lane with an unacknowledged `--force` gate ranked tier 0, entered the
+  shipped `claude-opus-5:xhigh` default chain, and hard-errored on every fallback hop (see
+  `core/extensions/changes.md` 2026-08-19).
+
+### Why an extension could not handle it
+
+- Chain canonicalization runs inside `core/retry-fallback/` against the model registry; no extension
+  hook observes it. The eligibility signal itself stays extension-owned via the registration field.
+
+### Expected merge conflict zones
+
+- `provider-composer.ts` end of `ProviderConfigInput`; `model-runtime.ts` near `hasConfiguredAuth`;
+  `model-registry.ts` near `isUsingOAuth`.
+
+## 2026-08-19 upstream sync integration repair (footer-data-provider watcher fallback)
+
+### What changed
+
+- `packages/coding-agent/src/core/footer-data-provider.ts`: `setupGitWatcher` no longer returns early when a
+  watcher fails to register. The `tables.list` polling fallback is armed whenever the file exists, and its path is
+  recorded after the watcher attempt because a failed registration synchronously clears watcher state.
+
+### Why
+
+- Carried forward from `origin/main` during the upstream sync merge. Tracker files resolve to `ours` on merges,
+  which would otherwise drop this entry and leave the path uncovered for the next upstream audit.
+
+### Why an extension could not handle it
+
+- Footer git-state polling is core session plumbing owned by the CLI runtime; an extension cannot re-arm the
+  internal watcher fallback or reach the reftable polling path.
+
+### Expected merge conflict zones
+
+- `footer-data-provider.ts` `setupGitWatcher` reftable block.
+
+## 2026-08-19 - Core session, settings, packaging, and catalog divergence after the upstream 59a71b23 pin
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: the fork session keeps its own compaction stack over
+  upstream's newly centralized one — `CompactionLifecycleCoordinator`, typed `CompactionReason`
+  (`manual`/`threshold`/`overflow`/`pre_prompt`/`branch`/`extension`) and `CompactionRejectionCause` with
+  human-readable rejection text, warm-anchor admission (`isWarmSummaryAnchorValid`), request ids on
+  `compaction_start`/`compaction_progress`/`compaction_end`, and real `CacheFriendlySummaryOptions`
+  (`sourceContext`/`turnPrefixSourceContext`) where upstream still passes `undefined // cacheFriendly`. It also
+  keeps the `-fast` service-tier state machine (`serviceTier`, `isFastModeActive()`, `service_tier_changed`
+  events, per-model tier memory) and the `senpi:`-prefixed hook/diagnostic custom-message types.
+- `packages/coding-agent/src/core/settings-manager.ts`: retains the fork settings schema and loaders upstream has
+  no counterpart for — JSONC parsing that ignores comment-like text inside strings, brand-aware `envValue()` and
+  `findNearestParentConfigDir()` resolution, lockfile policy, retry/fallback settings
+  (`resolveRetryFallbackSettings`, hint policy, abort server-side fallback), speculative/idle compaction and
+  restoration knobs, prompt-cache and look-at settings, per-model thinking/service-tier memory, smooth-streaming
+  and tips settings, `hooks` sources, and builtin-extension enable/disable lists.
+- `packages/coding-agent/src/core/package-manager.ts`: keeps `hooks` as a fifth resource type (`.json` pattern,
+  user and project dirs, override lists, accumulator and resolved-path maps), the legacy `.pi` project base dir
+  scan when it differs from the branded one, and branded offline detection via `envValue("OFFLINE")`. Upstream's
+  `semver.gt` version comparison arrived through the merge and is retained unchanged.
+- `packages/coding-agent/src/core/remote-catalog-provider.ts`: keeps `FORK_ONLY_BUILTIN_PROVIDERS`
+  (`alibaba-token-plan`, `opengateway`) with `remoteCatalogServesProvider()` so the pi.dev overlay is skipped for
+  providers upstream's catalog cannot serve, and `mergeInputModalities()` so an overlay entry never drops an input
+  modality the built-in model already declares.
+- `packages/coding-agent/src/core/skills.ts`: keeps the fork's skill-listing guidance (load a skill whenever its
+  description even loosely matches, because loading an irrelevant skill is cheap and missing a relevant one is
+  not) and the branded `~/.senpi/agent` default in `LoadSkillsOptions.agentDir`. Upstream's nested markdown skill
+  discovery from this sync is retained as-is.
+
+### Why
+
+- These files carry fork-only product behavior — compaction affinity/lifecycle ownership, `-fast` priority tiers,
+  fork-only providers and catalog overlays, hooks packaging, legacy `.pi` layout support, and senpi branding —
+  that the advanced pin does not contain, so they legitimately remain divergent after the merge instead of being
+  reset to upstream's tree.
+
+### Why an extension could not handle it
+
+- Compaction admission, settings resolution, resource discovery, and the model-catalog overlay all execute before
+  or beneath the extension runner: extensions are loaded from the settings and resources these modules resolve,
+  and the compaction hooks they can observe are emitted by this same session code.
+
+### Expected merge conflict zones
+
+- HIGH: `agent-session.ts` compaction execution/admission block and the summarization request wiring.
+- MEDIUM: `settings-manager.ts` settings interfaces and load/merge paths; `package-manager.ts` per-resource
+  literal lists (`FILE_PATTERNS`, dirs, overrides, accumulator) where each new resource type must gain `hooks`.
+- LOW: `remote-catalog-provider.ts` around `mergeModels()`; `skills.ts` prompt guidance line and the `agentDir`
+  doc comment.
+
+## 2026-08-18 - Resume active goals stuck after suppressed continuation-flood loads
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `sendCustomMessage` with `triggerTurn` no longer waits on
+  `_sessionWorkBarrier` while the session-start binding itself holds it (`_extensionBindingPromptReadiness`
+  active). A trigger-turn message queued from the `session_start` emission — a goal continuation queued on
+  resume — previously waited on the very work that was delivering it, so the resumed session rendered the TUI
+  but never started a turn.
+- `core/extensions/builtin/goal/index.ts` + `direct-input-lifecycle.ts`: a suppressed flooded load now arms a
+  one-shot latch; the next accepted user message (the "Send a message to resume" the notice promises) queues
+  the goal continuation immediately instead of only resetting the continuation streak.
+- Coverage: `test/suite/goal-extension.test.ts` (queues a continuation when the user sends a message after a
+  suppressed flooded load) and `test/suite/agent-session-queue.test.ts` (triggerTurn send does not wait on the
+  binding-phase barrier; fails pre-fix via a deadlock race).
+
+### Why
+
+- A resumed session whose branch ends in >= `GOAL_CONTINUATION_CAP` trailing continuations suppresses
+  auto-continuation by design, but the documented resume path was a dead end: the user message reset the
+  streak without queueing a continuation, and even once queued the continuation deadlocked on the
+  binding-held barrier. Reproduced against a clone of the stuck session; post-fix the continuation is
+  delivered and the agent resumes.
+
+### Why an extension could not handle it
+
+- The barrier admission condition lives in `AgentSession.sendCustomMessage`, and the resume latch lives in the
+  builtin goal extension's own load/disposition path; both are core session-lifecycle surfaces.
+
+### Expected merge conflict zones
+
+- `core/agent-session.ts` `sendCustomMessage` wait condition, and the goal extension `session_start`
+  suppressed-load branch in `core/extensions/builtin/goal/index.ts`.
+
+
+## 2026-08-25 - Harden provider retry watchdog ownership and backoff
+
+### What changed
+
+- `core/provider-timeout-retry.ts`: gives the retry-continuation watchdog a proportional 10% grace beyond the granted stream-start guard, preserving `0`/`undefined` opt-out behavior.
+- `packages/coding-agent/src/core/agent-session.ts`: mark watchdog aborts as provider-owned and retain the real watchdog cause for retry classification and terminal reporting; retry delays use injected +/-10% jitter.
+- `packages/coding-agent/src/core/agent-abort-provenance.ts`: carries provider abort ownership through `agent_end`.
+- `packages/coding-agent/src/core/extensions/types.ts`: adds provider abort ownership to the public `agent_end` event type.
+- `packages/coding-agent/src/core/agent-session.ts`: apply injected retry jitter while preserving provider hints and 429 exponential floors.
+- `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render labels without mutating persisted messages.
+- `modes/interactive/interactive-mode.ts` and `modes/interactive/aborted-error-label.ts`: render abort labels from a copied message rather than mutating session state.
+
+### Why
+
+- The watchdog starts before the retried request starts its stream-start timer, so equal deadlines deterministically laundered a retryable stall into an unclassifiable abort and discarded remaining retry budget.
+- Codex-style jitter prevents synchronized retry storms while provider Retry-After hints remain lower bounds.
+
+### Why an extension could not handle it
+
+- Retry watchdog ownership, Agent abort propagation, session retry accounting, and message finalization are core lifecycle boundaries with no extension seam.
+
+### Policy note
+
+- Non-429 provider retry hints remain authoritative. Jitter applies only when no provider hint is present; 429-tier scheduling remains deterministic so its exponential floor remains a true floor.
+
+### Expected merge conflict zones
+
+- HIGH: `core/provider-timeout-retry.ts`, `core/agent-session.ts`, and `packages/agent/src/{agent.ts,agent-loop.ts}`.
+- LOW: `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/core/extensions/types.ts`, and interactive aborted-label rendering.
+
+## 2026-08-18 - Retry continuation watchdog reconciled with the guards it grants
+
+### What changed
+
+- `core/provider-timeout-retry.ts`: `createProviderTimeoutRetryPlan` now reconciles the retry-continuation
+  liveness cap against the stream-start guard the same retry is handed:
+  `watchdogTimeoutMs = max(streamRetryTimeoutMs, streamStartTimeoutMs)`. An explicitly disabled cap
+  (`undefined`) stays disabled, and a cap that already outlasts the granted guard is returned unchanged.
+- Coverage: `test/provider-timeout-retry-continuation.test.ts` (new; first direct coverage of
+  `runBoundedRetryContinuation`), extended `test/provider-timeout-retry.test.ts`, and updated
+  `test/suite/regressions/provider-idle-recovery.test.ts`.
+
+### Why
+
+- This completes the 2026-08-13 fix below. That change stopped clamping the retry *request* guards to
+  `retry.provider.streamRetryTimeoutMs`, but left the same 30s cap bounding the retry *continuation*, which
+  reproduced the identical defect one layer up: `runBoundedRetryContinuation` aborted the attempt at 30s while
+  the request still had 60s of its configured 90s stream-start budget left.
+- No attempt could therefore finish, so the bounded `retry.maxRetries` budget (default 3) collapsed into the
+  single user-visible `Provider stream start timed out after 90000ms` / `Aborted after 1 retry attempt`
+  outcome. A slow-but-alive provider was again judged dead on a deadline it was never given.
+- Raising the watchdog to the granted guard preserves the wedge protection it was added for: the provider
+  guards still fail a dead upstream, and the watchdog still cancels a retry that outlives every guard it was
+  granted.
+
+### Why an extension could not handle it
+
+- The retry continuation bound and its abort ownership are core session-lifecycle surfaces with no extension
+  hook.
+
+### Expected merge conflict zones
+
+- `core/provider-timeout-retry.ts` plan construction, and the retry-bound constants in
+  `test/suite/regressions/provider-idle-recovery.test.ts`.
+
+
+## Queue typed input admitted during auto-compaction (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: `prompt()` gained a
+  `canQueueDuringAutoCompaction` eligibility flag for a queueable submission
+  (`streamingBehavior` set) that arrives while auto-compaction owns the session
+  and no run is streaming. The flag suppresses the settled-session-work wait and
+  routes the message through `_queueSteer`/`_queueFollowUp` beside the existing
+  queue branches, after extension input handling and template expansion.
+
+### Why
+
+- `isCompacting` is true for the auto, manual, and branch-summary controllers,
+  but the admission guard rejects only on `_compactionAbortController`, so
+  auto-compaction never rejected typed input. That input then matched no queue
+  branch — `canQueueWhileStreaming` requires `!isCompacting` — and fell through
+  neither queued nor started, so a message typed while the TUI showed
+  "Compacting context..." was accepted and silently dropped.
+- Gating on the auto controller alone keeps the manual `/compact` fail-closed
+  admission path and the post-compaction recovery continuation unchanged; a
+  broader `isCompacting` relaxation regressed both.
+
+### Why an extension could not handle it
+
+- Prompt admission and queue ownership run inside the session before any
+  extension input hook observes the submission, so an extension cannot recover
+  input the engine has already dropped.
+
+### Expected merge-conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`: the `prompt()` queue
+  eligibility constants and the queue branches preceding the settled-work wait.
+
+## Cursor bridge dispatches bind to the run that owns the stream (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: the session
+  adapter accepts the signal of the run that owns the exec stream and resolves
+  `getAbortSignal` from it, returning `undefined` once that run is no longer
+  the agent's live run. Adapters created without a captured owner fail closed
+  instead of adopting whichever run is currently live.
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts`: dispatch rechecks the
+  captured signal after awaited preflight work and before `tool.execute()`, so
+  a run that ends during approval cannot start a side effect afterward.
+- `packages/coding-agent/src/core/sdk.ts`: supplies the bridge as a per-run
+  factory so every Cursor stream gets handlers bound to its own run.
+
+### Why
+
+- The bridge is built once per session, but each exec stream belongs to exactly
+  one run. Resolving ownership from the agent's live signal let a straggler
+  frame from a stream whose run had already ended adopt the replacement run's
+  signal, clear the ownership guard in `Agent.emitExternalEvent`, and execute a
+  dead run's tool inside the new run while emitting its lifecycle events into
+  the new run's transcript.
+- This is the shape the crashed 2026-08-18 session hit: a provider rate-limit
+  error restarted the run on a fallback lane while the previous stream still
+  held buffered exec frames.
+
+### Why an extension could not handle it
+
+- Run ownership of provider-driven exec frames is an engine contract between
+  the agent loop and the Cursor stream; no extension hook sits between the
+  straggler frame and the bridge dispatch.
+
+### Expected merge conflict zones
+
+- `cursor-exec-bridge-session.ts` signature and `getAbortSignal` resolution,
+  `sdk.ts` `cursorExecHandlers` wiring.
+## 2026-08-18 - Cursor reasoning levels: session provenance and legacy id resolution
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`, `agent-session-services.ts`, `session-manager.ts`:
+  record, persist, and restore provenance-bearing thinking selections (explicit user actions, CLI `:suffix`,
+  favorites, legacy variant ids); defaulted levels stay selection-free and next-turn refresh returns the
+  selection so mid-run switches propagate.
+- `packages/coding-agent/src/core/model-resolver.ts`: resolve allowlisted legacy Cursor variant ids to their
+  grouped identity plus selection ahead of generic partial matching, and project wildcard/enabled/favorite
+  patterns across the alias union without cross-provider projection.
+- `packages/coding-agent/src/core/sdk.ts`: carry the startup selection into agent state.
+
+### Why
+
+- The Cursor catalog now publishes grouped identities, so sessions, favorites, and enabled-model patterns that
+  referenced the old expanded variant ids must keep resolving, with the level they encoded preserved.
+
+### Why an extension could not handle it
+
+- Session state, persistence entries, startup model resolution, and favorite/enabled pattern expansion are
+  core surfaces with no extension hook.
+
+### Expected merge conflict zones
+
+- `model-resolver.ts` pattern matching and partial-match ordering, `agent-session.ts` thinking-level setters,
+  `session-manager.ts` entry schema.
+
+## Cursor bridge lifecycle events retain run ownership (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts`: bridge executions
+  require and capture the active run signal before emitting
+  `tool_execution_start`, pass that same signal through every matching
+  `tool_execution_end` path, and await lifecycle delivery.
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: the session
+  adapter forwards that captured signal to agent-core and returns its promise
+  to the bridge.
+
+### Why
+
+- An aborted bridge tool can settle after a replacement run has started. The
+  signal lets agent-core discard the stale lifecycle event instead of
+  delivering it to the replacement run.
+- A bridge dispatch with no active run is refused before tool execution, and
+  active-run listener failures stay attached to the dispatch instead of
+  becoming detached unhandled rejections.
+
+### Why an extension could not handle it
+
+- The run signal is owned by the engine bridge before extension preflight and
+  tool execution, so an extension cannot reliably reconstruct the originating
+  run after the asynchronous tool settles.
+
+### Expected merge-conflict zones
+
+- `packages/coding-agent/src/core/cursor-exec-bridge.ts`: lifecycle emission
+  around preflight and tool execution.
+- `packages/coding-agent/src/core/cursor-exec-bridge-session.ts`: the
+  agent-core event forwarding adapter.
+
+## Single availability scan across provider re-register (2026-08-18)
+
+### What changed
+
+- `model-runtime.ts`: `registerProvider` / `registerNativeProvider` skip `refreshAfterRegistration` when the provider is already registered and the availability snapshot is fresh. An optional `{ refresh: false }` defers the scan so a caller can do one refresh after a batch.
+- `agent-session-services.ts`: the create-time pending-registration drain uses `{ refresh: false }`, then keeps the existing single `refresh({ allowNetwork: false })`.
+- `test/model-runtime-registration-refresh.test.ts`: re-registering a native provider already in a fresh snapshot does not run another catalog refresh.
+
+### Why
+
+- Session reload re-binds the same extension provider and started a second full availability scan. Create-time drain also fire-and-forgot a registration refresh that could `credentials.list()` after create returned. `reload-efficiency` expected one `list()` per reload and failed deterministically on current main, which blocked `release:local` `npm test`.
+
+### Why an extension could not handle it
+
+- Availability refresh and provider registration are core `ModelRuntime` contracts. Extensions cannot coalesce those scans.
+
+### Expected merge-conflict zones
+
+- MEDIUM: `registerProvider` / `registerNativeProvider` in `model-runtime.ts` and the drain loop in `agent-session-services.ts`.
+
+## Cerebras default retarget after live catalog drift (2026-08-18)
+
+### What changed
+
+- `model-resolver.ts`: `defaultModelPerProvider.cerebras` is now `gpt-oss-120b` instead of `zai-glm-4.7`.
+- `test/model-resolver.test.ts`: the pinned Cerebras default expectation matches the retarget.
+
+### Why
+
+- The live Cerebras catalog dropped `zai-glm-4.7` and now ships only `gemma-4-31b` and `gpt-oss-120b`. The old default failed `every bundled provider default resolves in its catalog` after `hydrate:model-data` / `release:local` regeneration, which blocked the release smoke.
+- `gpt-oss-120b` is present in both the committed snapshot and the live regenerated catalog, so the default stays resolvable across regen.
+
+### Why an extension could not handle it
+
+- `defaultModelPerProvider` is a core-owned exhaustive `Record<KnownProvider, string>` used by initial model selection. There is no extension hook for bundled provider defaults.
+
+### Expected merge-conflict zones
+
+- LOW: the `cerebras` row in `defaultModelPerProvider` and the matching pin in `test/model-resolver.test.ts`.
+
+## Cursor CLI OAuth provider display name (2026-08-17)
+
+### What changed
+
+- `provider-display-names.ts`: added `"cursor-cli-oauth": "Cursor CLI (OAuth)"` for the new builtin
+  provider lane. The `/login` list and auth status surfaces pick the name up automatically from the
+  provider registration; only the display-name map needed a row. The lane's builtin registry entry is
+  recorded in `extensions/builtin/changes.md` (this directory's nearest record for that file).
+
+### Why
+
+- The lane runs senpi turns through the official `cursor-agent` CLI in print mode as the documented
+  fallback for the native Cursor provider (`cursor`, the api2.cursor.sh protobuf transport): use the
+  native provider by default, and this lane when the native path misbehaves or Cursor's own agent
+  harness is explicitly wanted.
+
+### Why an extension could not handle it
+
+- The display-name map is a core-owned literal with no extension hook: a builtin provider cannot name
+  itself on the `/login` surface without an entry here. All lane behavior lives under
+  `extensions/builtin/cursor-cli-oauth/` (see that directory's `changes.md` and `AGENTS.md`).
+
+### Expected merge-conflict zones
+
+- LOW: `provider-display-names.ts` map rows (one-line additions in a sorted literal).
+
+## Repository audit baseline for the core tracker (2026-08-17)
+
+### What changed
+
+- This entry is the canonical inventory for the repository-wide changes.md audit (`scripts/audit-changes-md.mjs`, pin
+  `914cf1472e715297caa30db4b9535d534a9eb718`). It assigns every audited production path whose exact nearest tracker is
+  this file, so the audit gate can resolve each divergence even where the per-feature history below predates the gate.
+- Session and services surface: `packages/coding-agent/src/core/agent-session.ts`,
+  `packages/coding-agent/src/core/agent-session-runtime.ts`, `packages/coding-agent/src/core/agent-session-services.ts`,
+  `packages/coding-agent/src/core/sdk.ts`.
+- Persistence and identity: `packages/coding-agent/src/core/session-manager.ts`,
+  `packages/coding-agent/src/core/messages.ts`, `packages/coding-agent/src/core/settings-manager.ts`.
+- Model runtime surface: `packages/coding-agent/src/core/model-config.ts`, `packages/coding-agent/src/core/model-registry.ts`,
+  `packages/coding-agent/src/core/model-resolver.ts`, `packages/coding-agent/src/core/model-runtime.ts`,
+  `packages/coding-agent/src/core/provider-composer.ts`, `packages/coding-agent/src/core/remote-catalog-provider.ts`,
+  `packages/coding-agent/src/core/runtime-credentials.ts`.
+- Resources and packaging: `packages/coding-agent/src/core/resource-loader.ts`, `packages/coding-agent/src/core/package-manager.ts`,
+  `packages/coding-agent/src/core/pi-manifest.ts`, `packages/coding-agent/src/core/project-trust.ts`.
+- Auth and output safety: `packages/coding-agent/src/core/auth-storage.ts`, `packages/coding-agent/src/core/bash-executor.ts`,
+  `packages/coding-agent/src/core/output-guard.ts`.
+- Process-level surfaces: `packages/coding-agent/src/core/event-bus.ts`, `packages/coding-agent/src/core/experimental.ts`,
+  `packages/coding-agent/src/core/http-dispatcher.ts`, `packages/coding-agent/src/core/telemetry.ts`,
+  `packages/coding-agent/src/core/timings.ts`.
+- Invocation surfaces: `packages/coding-agent/src/core/slash-commands.ts`, `packages/coding-agent/src/core/prompt-templates.ts`,
+  `packages/coding-agent/src/core/skills.ts`, `packages/coding-agent/src/core/resolve-config-value.ts`,
+  `packages/coding-agent/src/core/keybindings.ts`.
+- Rendering and branding: `packages/coding-agent/src/core/export-html/index.ts`,
+  `packages/coding-agent/src/core/export-html/template.css`, `packages/coding-agent/src/core/export-html/template.js`,
+  `packages/coding-agent/src/core/provider-attribution.ts`.
+- Deleted upstream surface retained as a tracked divergence: `packages/coding-agent/src/core/index.ts`.
+
+### Why
+
+- The audit compares HEAD against the pinned upstream commit and requires every upstream-owned production divergence
+  to be covered by one entry with all four canonical sections in its exact nearest tracker. Paths that only ever appeared
+  in undated or partial-form entries were reported uncovered by the pre-backfill audit; this inventory closes that gap
+  without rewriting the accurate per-feature history below.
+
+### Why an extension could not handle it
+
+- Tracker coverage is repository and release policy, not runtime behavior; it is enforced by repository scripts before
+  any extension loader exists.
+
+### Expected merge conflict zones
+
+- NONE: this tracker file merges to `ours` on upstream sync; the inventory intentionally names pin-relative paths so it
+  stays valid as entries below change.
+
+## Session runtime launch profiles and removed-extension reporting (2026-08-17)
+
+### What changed
+
+- `agent-session-runtime.ts`: new immutable `AgentSessionLaunchProfile` (cwd, permission preset, creation model,
+  initial thinking level) captured at first launch and threaded through every replacement route — new, resume, fork,
+  and branch switch — via the runtime factory options, so a replaced session keeps the flags the runtime was launched
+  with.
+- `agent-session-runtime.ts`: `teardownCurrent()` snapshots the outgoing extension runner's identities; `apply()` now
+  diffs them against the new runner's resolved paths and emits one `session_extensions_removed` event (with the
+  replacement reason) on the old runner. `apply()` became async to await that emission. Runners without
+  `getExtensionIdentities` (test hosts, partial implementations) skip reporting instead of breaking replacement.
+- `agent-session-services.ts`: `AgentSessionServices` now exposes `authStorage` and `modelRegistry`;
+  `createAgentSessionServices()` constructs the `AuthStorage` for `<agentDir>/auth.json`, passes it into
+  `ModelRuntime.create()` as its credential store, and wraps the runtime in a `ModelRegistry`.
+- `agent-session-services.ts`: pending provider registrations (config-form and native) are replayed through one
+  ordered `drainPendingProviderRegistrations()` drain so last-registration-wins holds across mixed registration
+  kinds, replacing the two separate reset-after loops.
+- `agent-session-services.ts`: duplicate extension flags resolve first-registration-wins; `scopedModels` and the new
+  `favoriteModels` option carry a per-model `serviceTier`; `autoTitleSessions` is plumbed to session creation.
+
+### Why
+
+- Session replacement silently dropped the launch-time flags a runtime was created with, and extensions had no signal
+  that their host session was being swapped out from under them — the old runner observed `session_shutdown` but
+  consumers of the removed extension could not distinguish removal from reload.
+- Services were constructing auth and model state twice (runtime-internal and caller-side), and mixed legacy/native
+  provider registrations could interleave so a native provider registered earlier lost to a later config form.
+
+### Why an extension could not handle it
+
+- Runtime replacement and service construction happen before and beneath the extension runner; an extension cannot
+  observe the outgoing runner's identity set or re-order provider registration drains that install it.
+
+### Expected merge conflict zones
+
+- MEDIUM: `agent-session-runtime.ts` `teardownCurrent()`/`apply()` and the `launchProfile` threading on every
+  `createRuntime()` call site.
+- LOW: `agent-session-services.ts` service assembly and the registration drain loop.
+
+## Event bus provider-scope binding and extension RPC channel (2026-08-17)
+
+### What changed
+
+- `event-bus.ts`: `createEventBus()` wraps every subscribed handler with `bindToProviderScope()` from
+  `@earendil-works/pi-ai/node/provider-scope`, so ambient provider scope established on the emitting side propagates
+  through event dispatch; a binding failure falls back to the raw handler.
+- `event-bus.ts`: exports the `senpi:extension-rpc-event` channel constant (`EXTENSION_RPC_EVENT_CHANNEL`) and the
+  `ExtensionRpcEvent` shape used to relay extension-originated events to RPC hosts.
+
+### Why
+
+- Handlers dispatched on the shared bus otherwise lost the emitting session's provider scope (credentials, request
+  context), and RPC hosts needed one named channel contract instead of a string literal duplicated per caller.
+
+### Why an extension could not handle it
+
+- The bus is constructed by core before extensions load; scope binding must wrap the handler at subscription time,
+  which only the bus itself can do.
+
+### Expected merge conflict zones
+
+- LOW: `event-bus.ts` `on()` wrapper; the channel constant is fork-owned.
+
+## Brand-scoped environment flags and programmatic timings (2026-08-17)
+
+### What changed
+
+- `experimental.ts`: experimental-feature gating reads the branded `envValue("EXPERIMENTAL")` flag instead of
+  `process.env.PI_EXPERIMENTAL`.
+- `telemetry.ts`: install-telemetry gating reads `envValue("TELEMETRY")` instead of `process.env.PI_TELEMETRY`.
+- `timings.ts`: timing enablement reads `envValue("TIMING")`; the `reload` namespace joins `main`/`extensions`;
+  exported `TimingEntry` plus `getTimings()`/`formatTimings()` give hosts programmatic access to the same data
+  `printTimings()` writes to stderr.
+
+### Why
+
+- Fork environment flags are `SENPI_*`-branded via `brand.ts`, so every `PI_*` read had to move through the one
+  branded resolver; timings additionally needed a machine-readable form for hosts that capture startup profiles
+  without parsing stderr.
+
+### Why an extension could not handle it
+
+- These modules are imported by the bootstrap path before extension loading and by code that must stay loader-free;
+  they cannot depend on extension-provided configuration.
+
+### Expected merge conflict zones
+
+- LOW: one env read per file; `timings.ts` accessor block is additive.
+
+## HTML export: provider-native blocks, current skill invocations, tilde paths (2026-08-17)
+
+### What changed
+
+- `export-html/index.ts`: explicit output paths expand `~` through `expandTildePath()` in both
+  `exportSessionToHtml()` and `exportFromFile()`; default names are unchanged.
+- `export-html/template.js`: `parseSkillBlock()` recognizes the current chained skill-invocation format
+  (`The user explicitly invoked … <skill-instruction> … <user-request>`) in addition to the legacy `<skill>` block,
+  validating that the invocation and instruction names agree; kept in sync with core `agent-session.ts` so standalone
+  exports render skill turns the same way live sessions do.
+- `export-html/template.js`: assistant `providerNative` blocks render as a collapsible `<details>` element with the
+  provider name, subtype, and a 2000-character collapsed preview over the full JSON body.
+- `export-html/template.css`: styles for the provider-native collapsible block.
+
+### Why
+
+- Sessions exported after the skill-invocation format changed rendered skill turns as plain user text, and
+  provider-native replay content was dropped entirely from exports because the renderer had no arm for it.
+- `~/exports/session.html` failed with a literal tilde directory.
+
+### Why an extension could not handle it
+
+- The exporter renders from a session file with no runtime present; it is a static template executed in the exported
+  HTML, outside any extension lifecycle.
+
+### Expected merge conflict zones
+
+- LOW: `export-html/index.ts` output-path branches; MEDIUM: `template.js` renderer arms and `parseSkillBlock()`
+  (upstream evolves skill formatting); LOW: additive `template.css` rules.
+
+## Multi-session RPC guards for the shared HTTP dispatcher (2026-08-17)
+
+### What changed
+
+- `http-dispatcher.ts`: in `--multi-session` processes, `applyHttpProxySettings()` refuses to change an already-set
+  `HTTP_PROXY`/`HTTPS_PROXY` value and `configureHttpDispatcher()` pins one process-global idle timeout; both mismatch
+  paths throw with an explicit "fixed at process startup" error instead of silently replacing the earlier setting.
+
+### Why
+
+- Multi-session RPC hosts share one process-global Undici `EnvHttpProxyAgent` dispatcher; a second session applying
+  its own proxy or timeout would reconfigure every other session's transport mid-flight.
+
+### Why an extension could not handle it
+
+- The dispatcher is installed as the global `fetch` replacement during CLI bootstrap, before extensions load, and is
+  process-global by construction — no extension can scope it per session.
+
+### Expected merge conflict zones
+
+- LOW: guard blocks at the top of `applyHttpProxySettings()` and `configureHttpDispatcher()`.
+
+## Core barrel removal (2026-08-17)
+
+### What changed
+
+- Deleted `packages/coding-agent/src/core/index.ts`, the barrel that re-exported `AgentSession`, the runtime/services
+  factories, the bash executor, the event bus, `createSyntheticSourceInfo`, and the extension type surface.
+- Consumers import from the concrete modules (`agent-session.ts`, `agent-session-runtime.ts`,
+  `agent-session-services.ts`, `extensions/index.ts`) instead.
+
+### Why
+
+- The barrel was a frozen snapshot of the public surface: every fork addition had to be mirrored into it or it
+  silently exported a stale alias, and it duplicated the extension API re-exports that `extensions/index.ts` already
+  owns. Removing it leaves one authoritative import path per module.
+
+### Why an extension could not handle it
+
+- Not runtime behavior: an unused re-export layer cannot be provided or removed by an extension.
+
+### Expected merge conflict zones
+
+- MEDIUM: upstream additions to the barrel resurrect it on sync; keep the deletion and port new re-exports to their
+  concrete consumer imports.
+
+## Hooks as a packaged resource and legacy `.pi` discovery (2026-08-17)
+
+### What changed
+
+- `pi-manifest.ts`: `PiManifest` gains an optional `hooks: string[]` field and `RESOURCE_FIELDS` includes `hooks`, so
+  packaged hook resources are listed and validated like extensions, skills, prompts, and themes.
+- `package-manager.ts`: `hooks` becomes a fifth resource type (`.json` file pattern) with user and project hook
+  directories, global and project settings lists, `ResolvedPaths.hooks`, and accumulator handling.
+- `package-manager.ts`: when the legacy project base dir (`.pi`) differs from the canonical one, its auto-discovered
+  extensions, skills, prompts, themes, and hooks are still collected under legacy path metadata.
+- `package-manager.ts`: offline detection reads the branded `envValue("OFFLINE")` flag instead of `PI_OFFLINE`.
+
+### Why
+
+- Hook plugins ship in packages alongside the other resource kinds and need the same install/update/listing pipeline;
+  projects created before the config-directory rename must keep resolving resources from their existing `.pi` tree.
+
+### Why an extension could not handle it
+
+- Package installation, resource enumeration, and manifest validation run in the package manager before any
+  extension (including hook plugins) can load.
+
+### Expected merge conflict zones
+
+- MEDIUM: `package-manager.ts` resource maps (`FILE_PATTERNS`, dirs, overrides) — every resource literal list gains a
+  `hooks` entry on sync; LOW: `pi-manifest.ts` field list.
+
+## Slash commands, prompt-template metadata, and skill guidance (2026-08-17)
+
+### What changed
+
+- `slash-commands.ts`: builtin command list gains `favorite-models` (manage favorites for Ctrl+P cycling) and `exit`
+  (alias of `/quit`).
+- `prompt-templates.ts`: new `expandPromptTemplateWithMetadata()` returns `{ text, template }` so callers can emit
+  invocation metadata for the template they actually expanded; `expandPromptTemplate()` remains as a thin wrapper.
+- `skills.ts`: the prompt skill-listing guidance now tells the model to load a skill whenever its description even
+  loosely matches the task (loading an irrelevant skill costs little; missing a relevant one degrades the work), and
+  documents the default global skill directory (`~/.senpi/agent`).
+
+### Why
+
+- Favorites needed a discoverable command surface next to `scoped-models`; `/exit` matches shell muscle memory.
+- Invocation telemetry and session events need to know which template was expanded, not just the expanded text.
+- The old skill guidance ("when the task matches its description") under-triggered: agents skipped relevant skills
+  on loose matches.
+
+### Why an extension could not handle it
+
+- `BUILTIN_SLASH_COMMANDS` and the skill listing are baked into the core prompt/command surface; template expansion
+  metadata is produced inside the core expansion function every caller shares.
+
+### Expected merge conflict zones
+
+- LOW: additive list entries and the wrapper split in `prompt-templates.ts`.
+
+## Provider attribution branding (2026-08-17)
+
+### What changed
+
+- `provider-attribution.ts`: default OpenRouter attribution sends `X-OpenRouter-Title: <APP_NAME>` instead of `pi`,
+  and the Cloudflare `User-Agent` is `<APP_NAME>-coding-agent` instead of `pi-coding-agent`; types import from
+  `@earendil-works/pi-ai/compat`.
+
+### Why
+
+- Hardcoded `pi` strings leaked the upstream product identity on every attributed request; deriving both from
+  `APP_NAME` keeps attribution consistent with the fork's published name.
+
+### Why an extension could not handle it
+
+- Default attribution headers are applied by the runtime for models that have no configured headers, before any
+  extension can decorate the request.
+
+### Expected merge conflict zones
+
+- LOW: two header literals in `getDefaultAttributionHeaders()`.
+
+## Credential command retry and per-session environment (2026-08-17)
+
+### What changed
+
+- `resolve-config-value.ts`: command-backed config values retry up to three attempts with 250 ms / 1000 ms backoff
+  (blocking wait) before reporting unresolved, instead of failing on the first attempt.
+- `resolve-config-value.ts`: `resolveConfigValue()`/`resolveConfigValueUncached()` accept a per-session `env`; command
+  execution spawns with that environment merged over `process.env`, and uncached command results are no longer reused
+  across sessions that carry different environments.
+
+### Why
+
+- Auth-broker commands (`omp token …`) are cold-started and fail transiently (lock contention, slow spawn, a racing
+  OAuth refresh), and callers escalate an unresolved API key to a hard provider ejection — one blip kicked the session
+  off its model with no retry.
+- A process-wide cached command result produced under another session's environment is the wrong credential source.
+
+### Why an extension could not handle it
+
+- Config-value resolution runs inside model/auth runtime credential probes, beneath the extension loader.
+
+### Expected merge conflict zones
+
+- LOW: `executeCommandUncached()` retry loop and the `env` plumbing in the two shell-exec helpers.
+
+## SessionManager usage totals, entry identity, and materialized views (2026-08-17)
+
+### What changed
+
+- `session-manager.ts`: exported `UsageTotals` and O(1) `getUsageTotals()` — running input/output/cacheRead/cacheWrite/
+  cost totals plus the latest cache-hit rate, folded incrementally on assistant-message append and rebuilt on index
+  construction; totals cover ALL entries, not just the current branch, matching the footer hot path.
+- `session-manager.ts`: runtime message identity — `getSessionContextEntryId()`, `getMessageEntryPosition()`, and
+  `getEntryOrder()` map projected context messages back to their durable entry and append order via WeakMaps, so
+  compaction boundaries compare by append order rather than provider timestamps.
+- `session-manager.ts`: a mutation counter keys memoized materialized views — `getEntries()` returns the same shared
+  array between mutations (callers must not mutate it), no-arg `getBranch()` is memoized on (leaf, mutation), and
+  `getSessionName()` is O(1) from an incrementally maintained cache.
+- `session-manager.ts`: large payloads externalize through the resident string store — entries are stored in
+  externalized form and materialized on read (`getEntry`, `getBranch`, `getHeader`), with stats exposed via
+  `getResidentStoreStats()`.
+- `session-manager.ts`: `model_change` entries carry `reason: "fallback" | "fallback-revert"` plus the original
+  provider/model; context restoration keeps the primary model and restores the pre-fallback thinking level, including
+  the crashed-inside-the-window case, while a manual switch inside the window keeps the user's level.
+- `session-manager.ts`: `buildContextEntries()` skips compaction entries older than the boundary summary (the latest
+  summary supersedes them instead of double-counting); added `hasContextMessages()`, `hasThinkingLevelChanges()`, and
+  `countCompactions()`; inlined the UUIDv7 generator (no `uuid` dependency); session-directory docs name `~/.senpi`.
+
+### Why
+
+- The footer and RPC usage paths re-summed every assistant usage on each render; compaction classified history by
+  payload timestamps that a late-arriving entry could violate; and repeated materialization of unchanged sessions
+  dominated read hot paths.
+- Fallback windows previously leaked the fallback model's ephemeral thinking level into the restored primary model.
+
+### Why an extension could not handle it
+
+- Entry indexing, identity maps, and the mutation counter live inside the append-only store that constructs the
+  context every consumer (including extensions) reads from.
+
+### Expected merge conflict zones
+
+- MEDIUM: `session-manager.ts` index construction and the accessor bodies; LOW: additive helper methods.
+
+## Message identity, context provenance, and transport image budget (2026-08-17)
+
+### What changed
+
+- `messages.ts`: every converted message copies context provenance onto its LLM form via `copyContextProvenance()`.
+- `messages.ts`: `GOAL_CONTINUATION_MESSAGE_TYPE` messages keep only their latest occurrence in the model context
+  (`keepLatestGoalContinuationMessage()` applied in `convertToLlm()`), while `isContextExcludedCustomMessage()` stays
+  per-type false so compaction and branch summarization still see the entries.
+- `messages.ts`: `CompactionSummaryMessage` carries optional `details` and `createCompactionSummaryMessage()` accepts
+  it; the local `compactionSummary` role module-augmentation was dropped in favor of the upstream declaration.
+- `messages.ts`: transport image policy — `TRANSPORT_IMAGE_BUDGET_BYTES` (24 MiB), `elideOldImages()` walking
+  newest-to-oldest with `alwaysKeepNewest`/`maxHistoricalImages` protection, elision/blocking placeholders with
+  consecutive-dedupe, and `convertToLlmForTransport()` applying the `blockImages` setting at request-build time.
+
+### Why
+
+- Provider-native replay and cache-affinity features need stable message-to-context identity across conversion;
+  stale goal-continuation markers accumulated one per goal turn and misled later turns; and long sessions with inline
+  screenshots exceeded provider request-size walls (Anthropic's 32 MB) with no request-time bound.
+
+### Why an extension could not handle it
+
+- These are the conversion and request-build functions every provider request passes through, including the
+  compaction fallback path that runs with no extension participation.
+
+### Expected merge conflict zones
+
+- MEDIUM: `convertToLlm()` switch arms; LOW: additive transport-image helpers at end of file.
+
+## Shared file-storage lock policy (2026-08-17)
+
+### What changed
+
+- `lockfile-policy.ts` (fork-only): one `FILE_STORAGE_LOCK_OPTIONS` (`realpath: false`, `stale: 30 s`,
+  `update: 10 s`) for every proper-lockfile acquisition in the file-backed auth and settings stores.
+- `auth-storage.ts`: `lockSync()` acquires with the shared policy and stale detection reads its `stale` value;
+  credential writes re-read the latest storage content inside `withLock` instead of mutating an in-memory snapshot;
+  runtime credential overrides layer over stored credentials for reads and refresh; extension OAuth login builds its
+  interaction with a signal; typed exports (`AuthCredential`, `ApiKeyCredential`/`OAuthCredential`, `AuthStatus`,
+  `GetApiKeyOptions`) formalize the storage surface.
+
+### Why
+
+- proper-lockfile defaults (`stale: 10 s`, mtime refresh at `stale/2`) let a sync contender classify a live async lock
+  as stale in the 10–15 s gap and steal it; divergent per-store windows meant one store could out-vote another's live
+  holder. One policy makes no contender able to out-vote a live holder.
+
+### Why an extension could not handle it
+
+- The lock windows guard the auth and settings files themselves, which the extension loader reads through; an
+  extension cannot change how the files beneath it are locked.
+
+### Expected merge conflict zones
+
+- LOW: `lockfile-policy.ts` is fork-owned; LOW-MEDIUM: `auth-storage.ts` lock call sites and the withLock bodies.
+
+## Provider composition: ambient auth, extra body, upstream ids (2026-08-17)
+
+### What changed
+
+- `provider-composer.ts`: `ExtensionOAuthConfig` gains `check()` (auth health probe) and `resolveAmbient()` — request
+  auth for providers whose credentials live outside `auth.json` (an environment token or a CLI the provider shells
+  out to), so ambient users resolve instead of hitting "Provider is not configured"; never consulted once a
+  credential is stored.
+- `provider-composer.ts`: model definitions accept `upstreamModelId`, `serviceTier`, `promptPreset`,
+  `recoverTextToolCalls`, `extraBody`, and `cacheRetention`; providers accept `extraBody` and `cacheRetention`; the
+  `video` input modality joins `text`/`image`; model overrides support `thinkingLevelMapMode: "replace"` alongside
+  the merge default.
+- `provider-composer.ts`: `AuthStatus.source` is extended with the header-auth sources; api-key and header auth
+  helpers moved to fork-owned `provider-api-key-auth.ts` / `provider-header-auth.ts`; composition pulls
+  `transformContext` and `wrapStreamWithToolCallMiddleware` from `pi-ai` so composed providers engage the same
+  middleware and context transforms as native ones.
+
+### Why
+
+- Subscription/CLI-based providers had no way to express request auth without pretending to store an OAuth
+  credential, and per-model wire fields (upstream ids, service tiers, prompt presets) had no composition path from
+  `models.json` or extension providers to the outgoing request.
+
+### Why an extension could not handle it
+
+- Composition is the seam that turns an extension's provider description into the `pi-ai` provider object the
+  runtime streams through; the fields must exist on the composed model itself.
+
+### Expected merge conflict zones
+
+- MEDIUM: `ProviderConfigInput` shape and `applyModelOverride()`/`modelFromJson()` bodies — upstream adds model
+  fields here regularly; LOW: the fork-owned auth helper modules.
+
+## Model runtime wire identity, availability gating, and registry services (2026-08-17)
+
+### What changed
+
+- `model-runtime.ts`: `setWireIdentity(BRAND?.userAgent ?? APP_NAME)` runs at module load so outgoing requests carry
+  the fork identity; model refresh gains a `modelRefreshTimeoutMs` (default 15 s); network model refresh requires the
+  branded offline flag to be unset AND explicit `allowModelNetwork`.
+- `model-runtime.ts`: availability snapshot gating — `hasAvailabilitySnapshot()`/`hasFreshAvailabilitySnapshot()`;
+  builtin providers without `refreshModels` and outside the remote catalog's served set keep their local catalog; a
+  `createSync()` factory serves legacy `ModelRegistry` callers; `recomposeProvider()` deletes providers disabled in
+  `models.json` instead of composing them.
+- `model-runtime.ts`: request preparation merges compatibility `extraBody` with caller `extraBody`, rewrites the
+  request model id to the configured `upstreamModelId`, applies auth `baseUrl`, and enriches `onPayload` with the
+  resolved model and headers; streams wrap with model-recovery.
+- `model-registry.ts`: the registry holds its `AuthStorage` (constructor default plus `create()`/`inMemory()`
+  factories), answers `getAvailable()`/`hasConfiguredAuth()`/`isUsingOAuth()` from storage plus runtime status when no
+  availability snapshot exists, exposes `getUpstreamModelId()`/`getServiceTier()`, falls back to built-in provider
+  display names, and returns `extraBody`/`upstreamModelId`/`serviceTier` from `getApiKeyAndHeaders()`.
+
+### Why
+
+- The registry previously derived auth state from the runtime alone, so ambient/stored credentials were invisible
+  until a full availability refresh completed; wire identity and per-model wire fields had to be applied at the one
+  point every request passes through.
+
+### Why an extension could not handle it
+
+- The runtime is the credential-blind model collection every consumer (including extension tooling) resolves
+  through; identity and availability policy cannot be layered from a loaded extension.
+
+### Expected merge conflict zones
+
+- MEDIUM: `model-runtime.ts` `create()`/`createSync()` and `prepareRequest()`; LOW-MEDIUM: `model-registry.ts`
+  accessor bodies.
+
+## Resource loader: bundled builtins, generated shims, package dedupe (2026-08-17)
+
+### What changed
+
+- `resource-loader.ts`: vendored builtin extension packages resolve from the package root with explicit
+  source-tree versus installed-binary path candidates, and bundled builtin factories join user/project extensions
+  in one final load set.
+- `resource-loader.ts`: global default extensions materialize as generated shims under `<agentDir>/extensions` with
+  a banner; existing shims are recognized (including accepted legacy banners) and resolved back to their factory
+  instead of reloading as unknown user extensions.
+- `resource-loader.ts`: extension paths dedupe by nearest package identity (`package.json` name), so the same
+  installed package reached through different paths loads once; CLI `-e`/`-s` resources keep CLI precedence even
+  when they resolve through a package manifest.
+- `resource-loader.ts`: hooks resolve as a resource kind (`hookPaths`, enabled-hook resources, CLI hook paths);
+  `SYSTEM.md`/`APPEND_SYSTEM.md` file discovery was removed in favor of explicit prompt options (see
+  `packages/coding-agent/changes.md`); cached extension loading (`loadExtensionsCached`) was replaced by direct
+  `loadExtensions()` calls; enabled/disabled builtin extension settings are honored during final-set assembly.
+
+### Why
+
+- Bundled extensions, generated shims, and package-installed duplicates produced multiple loads of one logical
+  extension (duplicate commands/tools and confusing reload events), and trust resolution had to preserve builtin
+  factories while filtering user extensions.
+
+### Why an extension could not handle it
+
+- The loader is what discovers, dedupes, and constructs extensions; it runs before any of them exist.
+
+### Expected merge conflict zones
+
+- HIGH: `resource-loader.ts` resource resolution and the final extension-set assembly; the shim and package-identity
+  helpers are fork-owned.
+
+## models.json schema split and provider disablement (2026-08-17)
+
+### What changed
+
+- `model-config.ts`: validation and the `ModelsJson*` types moved to fork-owned `model-config-schema.ts`
+  (`validateModelsConfig`), with `model-config.ts` re-exporting the types augmented with `samplingParams`; the legacy
+  inline typebox schema remains as a commented reference for upstream diffs.
+- `model-config.ts`: `ModelConfig` tracks a disabled-provider set, exposes `isProviderDisabled()` for runtime
+  composition, accepts provider-level `cacheRetention`, and gained a synchronous `loadSync()` constructor used by
+  `ModelRuntime.createSync()`.
+
+### Why
+
+- One schema module is shared by config loading, authoring, and validation surfaces, so a field added for
+  `models.json` authoring cannot drift from what the runtime accepts; provider disablement needed a config-level
+  switch that composition honors.
+
+### Why an extension could not handle it
+
+- `models.json` is parsed during runtime bootstrap before extensions load; extensions register providers through
+  the composer, not the config loader.
+
+### Expected merge conflict zones
+
+- MEDIUM: `model-config.ts` constructor/load paths; NONE: `model-config-schema.ts` is fork-owned.
+
+## Model pattern service tiers and favorites resolution (2026-08-17)
+
+### What changed
+
+- `model-resolver.ts`: model patterns gain a service-tier decorator — grammar `<model-pattern>[:<auto|flex|priority>]
+  [:<thinking-level>]`, consumed right-to-left with the leftmost (slot-order) occurrence winning, and a full-pattern
+  match still tried first because real model ids contain colons.
+- `model-resolver.ts`: `resolveModelScopeFromModels()` reports per-pattern `PatternResolution` ownership records
+  (`ownedIds` after first-pattern-wins dedupe, unresolved patterns reported rather than dropped) for favorites
+  persistence; `ScopedModel`/`ParsedModelResult` carry `serviceTier`.
+- `model-resolver.ts`: scope sources accept `ModelRuntime`, `ModelRegistry`, or any `AvailableModelsSource` so a
+  caller holding a settled availability snapshot resolves without triggering another scan;
+  `getModelNarrowingPatterns()` unifies CLI versus legacy enabled-pattern inputs.
+- `model-resolver.ts`: default-model table adds/updates fork providers (`cursor: "auto"`, `opengateway`, `ollama`,
+  `alibaba-token-plan`, `zai`/`zai-coding-cn` → `glm-5.2`).
+
+### Why
+
+- Service tiers are per-model wire settings that users select in the same string they type a model in, and favorites
+  persistence needs to know exactly which canonical models a stored pattern owns in the current registry.
+
+### Why an extension could not handle it
+
+- Pattern parsing runs in CLI argument handling and scope resolution before sessions (and therefore extensions)
+  exist.
+
+### Expected merge conflict zones
+
+- MEDIUM: `parseModelPattern()` recursion and the `ResolveModelScopeResult` assembly; LOW: the default-model table.
+
+## Stderr takeover for hidden diagnostics (2026-08-17)
+
+### What changed
+
+- `output-guard.ts`: `takeOverStderr()`/`restoreStderr()` mirror the existing stdout takeover — `process.stderr.write`
+  is wrapped, hidden diagnostics are forwarded to a callback, and a callback failure falls back to writing the
+  (optionally formatted) original text through the saved writer and surfaces the error via the write callback;
+  chunk/encoding handling normalizes `Uint8Array` writes to text.
+
+### Why
+
+- While a TUI owns the terminal, dependency code writing to stderr corrupts the rendered frame the same way stdout
+  writes did; the stdout guard had no stderr counterpart, so hidden-diagnostic capture had to intercept each writer
+  ad hoc.
+
+### Why an extension could not handle it
+
+- The takeover must be installed around the whole process's stderr before rendering begins; extensions load after
+  the terminal is already owned.
+
+### Expected merge conflict zones
+
+- LOW: additive block after `restoreStdout()`; the stdout takeover above it is the pattern to follow on sync.
+## Expand explicit dollar skill tokens and publish invocation metadata (2026-08-16) ([PR #909](https://github.com/code-yeongyu/senpi/pull/909))
+
+### What changed
+
+- Skill composition accepts a leading `$name` run alongside `/skill:name`.
+- The desktop composer's explicit `$skill:name` token expands even when it appears inline, while bare inline
+  dollar tokens such as `$HOME` remain literal.
+- Successful expansion emits one ordered `skill_invocation` session event containing each resolved skill's name,
+  source path, and `dollar` or `slash` syntax.
+- Dollar and slash tokens share the existing duplicate, unknown, file-read, and five-skill cap behavior.
+- Token removal preserves unrelated blank lines, indentation, and literal dollar text, and token discovery stops after
+  a bounded 64-token prefix while leaving every unprocessed token literal.
+- Resolved extension commands and accepted prompt templates emit one `command_invocation` session event after
+  extension input interception, so transformed or rejected text cannot be reported as an invocation.
+
+### Why
+
+- OmO Desktop serializes a selected skill chip as `$skill:name`; treating it as prose made the new desktop picker
+  look successful while the runtime silently ignored the invocation.
+- TUI autocomplete needs a concise leading `$name` form without making arbitrary inline shell variables executable.
+- RPC consumers need typed invocation metadata instead of reparsing the expanded user prompt.
+- Prompt content outside explicit invocation token spans must remain byte-meaningful for pasted code and structured text.
+
+### Why an extension could not handle it
+
+- Prompt, steering, follow-up, RPC, and interactive entry paths must share one pre-provider expansion contract.
+- The session event union and prompt expansion boundary are core-owned and run before extensions can safely
+  normalize every entry surface.
+- Prompt-template resolution metadata is private session state; extensions cannot reliably emit accepted invocation
+  events after another extension transforms or handles the original input.
+
+### Expected merge-conflict zones
+
+- `agent-session.ts` skill parsing, prompt-template resolution, command dispatch, queueing, and `AgentSessionEvent`.
+- `prompt-templates.ts` expansion metadata.
+- Skill-composition and command-invocation regressions under `test/suite/regressions/`.
+
+## Cursor exec bridge (2026-08-16)
+
+### What changed
+
+- `cursor-exec-bridge.ts` (new): maps Cursor exec-channel frames onto the session's real tools through the
+  same wrapped `AgentTool.execute` path model-issued calls use. Legacy frames map read→`read`
+  (offset/limit kwargs), ls→`ls`, grep→`grep`, write→`write`, shell→`bash` (workingDirectory composed as a
+  quoted `cd` prefix; senpi's bash has no cwd kwarg); modern Pi frames map 1:1 (`pi_edit` →
+  `edits[{oldText,newText}]`, `pi_grep` flags, `pi_find` → `find`, `pi_ls` → `ls` with `limit`); MCP calls
+  dispatch by tool name. Args are validated with `validateToolArguments` before execution; every valid call
+  emits `tool_execution_start`, runs the session's vetoable extension `tool_call` preflight (including mutable
+  input and first-block semantics), and emits a matching `tool_execution_end`. Blocked calls return the reason
+  as an in-band error without invoking the tool. `delete`, `diagnostics`, and `mcpApprovalPreflight` handlers
+  are deliberately absent (typed refusals on the wire).
+- `cursor-exec-bridge-session.ts` (new): owns the late-bound session/Agent wiring. Tools resolve through the
+  session's full registry, preflight delegates to `AgentSession.preflightToolCall`, lifecycle events ride
+  `agent.emitExternalEvent`, and the active Agent signal remains the abort source.
+- `sdk.ts`: replaces the inline bridge options with one `createSessionCursorExecBridge(...)` call, reducing the
+  already-large session factory while preserving its post-Agent session-ref assignment.
+- `agent-session.ts`: `getRegisteredTool()` exposes the full registry (builtin + extension tools) because Cursor
+  drives its native tools over the exec channel regardless of the request's advertised set. The existing
+  `_emitBeforeToolCallHooks` implementation is renamed `preflightToolCall`; its event-queue wait guarantees
+  lifecycle correlation is visible before Cursor preflight.
+
+### Why
+
+- Cursor's protocol executes tools server-drivenly mid-stream; without the bridge every Cursor turn that
+  touches a tool would stall and time out. Without the shared preflight, server-driven calls bypassed extension
+  vetoes such as permission policy and loop-guard hard escalation.
+
+### Why an extension could not do this
+
+- The bridge must be wired into the Agent's loop config before any extension loads, and it needs the wrapped
+  tool registry (approvals, sandboxing, truncation) rather than raw tool definitions.
+
+### Expected merge conflict zones
+
+- LOW: `sdk.ts` Agent construction options (additive), `agent-session.ts` additive accessor.
+- NONE expected in `cursor-exec-bridge.ts`: fork-only file.
+
+## Cursor provider display name (2026-08-16)
+
+### What changed
+
+- `provider-display-names.ts`: added `cursor: "Cursor"` for the new builtin Cursor OAuth provider
+  (`packages/ai/src/providers/cursor.ts`). The `/login` list and auth status surfaces pick the name up
+  automatically from the provider registration; only the display-name map needed a row.
+
+### Why
+
+- Without the entry the provider id would render raw ("cursor") in provider name surfaces that consult
+  `BUILT_IN_PROVIDER_DISPLAY_NAMES`.
+
+### Why an extension could not do this
+
+- The display-name map for builtin providers is a core lookup table, not an extension surface.
+
+### Expected merge conflict zones
+
+- LOW: the alphabetical map in `provider-display-names.ts` when upstream adds providers.
+
+## JSONC settings parser, precedence, and write ownership (2026-08-16)
+
+### What changed
+
+- `settings-manager.ts` now strips line/block comments only outside quoted strings, removes trailing commas before object/array closers, and delegates final validation to `JSON.parse`; no dependency was added.
+- File storage selects `settings.jsonc` before `settings.json`, retains that selected path for writes, and reselects only at create/reload/project-trust load boundaries.
+- Selected-source metadata includes path, format, reason, and scope; `AgentSession` forwards reload decisions and replays startup decisions once to each host subscriber.
+
+### Why
+
+- A per-write filesystem probe could redirect a session to another flavor after load, while JSON-only parsing prevented maintainable commented settings. Selection boundaries make precedence and write ownership explicit.
+
+### Why an extension could not do this
+
+- Parsing and locking happen before extensions load, and the session emitter is the shared transport boundary used by RPC and TUI hosts.
+
+### Expected merge conflict zones
+
+- HIGH: `settings-manager.ts` path/storage/load/save sections.
+- MEDIUM: `agent-session.ts` event and subscription lifecycle.
+
+## Model and service-tier session events (2026-08-16)
+
+### What changed
+
+- `AgentSessionEvent` gained `model_changed` (model, post-switch thinking level, `ModelSelectSource`) and `service_tier_changed` (tier, fastMode). Both are emitted from the existing switch seams: `_switchActiveModel`, `_cycleFavoriteModel`, and `setSessionFastMode`.
+- `service_tier_changed` fires only when the effective tier or the fast-mode indicator actually moved (they move independently).
+- New read-only accessors: `cwd` (the value extensions already receive as `ctx.cwd`) and `effectiveServiceTier` (`serviceTier`, promoted to `"priority"` while session fast mode is on — what the wire actually carries).
+
+### Why
+
+- Host surfaces (RPC) had to infer the active model from session entries and could not see tier or fast-mode state at all. Emitting at the switch seams means every path — command, slash command, cycle, fallback, restore — reports the level actually in force afterwards, which per-model memory makes different from the requested level.
+- `effectiveServiceTier` exists so a client can never be shown `fastMode: true` alongside a tier that disagrees with it.
+
+### Why an extension could not handle it
+
+- Model switching, thinking-level clamping, and tier resolution are session-core state transitions; an extension observing `model_select` cannot report the post-clamp level atomically with the switch.
+
+## /fast per-model service-tier persistence seam (2026-08-16)
+
+### What changed
+
+- `setSessionFastMode(false)` now also clears a cached `"priority"` `_currentServiceTier` when the active model is a codex-responses model AND that priority is inherited from the catalog (`getCompatibilityRequestConfig(model).serviceTier === "priority"`). A priority the catalog does not explain is an explicit scoped/favorite `:priority` pin and is left alone. `_resolveServiceTier` is unchanged.
+
+### Why
+
+`/fast` now persists per model (see `extensions/builtin/changes.md`), and turning it off writes a remembered `"auto"` that must override an inherited catalog-priority tier immediately. The resolved tier is only recomputed on model switches, so a same-session `/fast off` (which deliberately does not swap models) would otherwise keep the badge on and keep sending `service_tier: "priority"` until a restart. The memory itself is applied in the service-tier extension (which holds the fresh settings read); caching it here instead would survive the off and leak the inherited tier back onto the wire.
+
+## Preserve per-model reasoning effort while reasoning is off (2026-08-16)
+
+### What changed
+
+- `SettingsManager` now persists `modelLastOnThinkingLevels` beside `modelThinkingLevels`.
+- Every non-off per-model thinking write refreshes the companion value; writing `off` changes only the effective
+  level, so startup remains off while a later `/reasoning on` can restore the previous effort.
+- The companion accessor validates runtime JSON and marks only the nested model key for concurrent-session merges.
+
+### Why
+
+- Persisting `off` into the only per-model field destroyed the effort the user expected to restore. A
+  session-scoped fallback hid that loss only until restart, making the same off/on sequence produce different
+  results before and after a restart.
+
+### Why an extension could not handle it
+
+- Ordinary thinking-level changes and startup restoration already flow through core settings. The remembered
+  non-off value must therefore be a storage invariant rather than extension-process state.
+
+### Expected merge conflict zones
+
+- LOW: `settings-manager.ts` beside the existing per-model thinking accessors.
+
+## Clamp fallback thinking levels canonically and restore the pre-fallback level (2026-08-16)
+
+### What changed
+
+- `retry-fallback/controller.ts` `selectThinking()` now delegates to `clampThinkingLevel` from
+  `@earendil-works/pi-ai` instead of falling back to the last (highest) supported level.
+- `session-manager.ts` `getSessionContextSettings()` captures the thinking level in effect when a fallback
+  window opens and restores it on `fallback-revert`, or at the end of the path when the window never closed.
+  A manual `model_change` still abandons the window, keeping the in-window level for the newly chosen model.
+
+### Why
+
+- The old fallback clamp escalated: a requested `off` against an always-on fallback model resolved to that
+  model's maximum level, silently spending the largest reasoning budget on an unattended retry. The canonical
+  clamp walks to the nearest supported level in either direction.
+- Session restoration already protected the model half of a fallback window (`originalProvider`/`originalModelId`)
+  but assigned `thinking_level_change` unconditionally, so a session interrupted inside a window came back with
+  the primary model and the fallback model's ephemeral thinking level.
+
+### Why an extension could not handle it
+
+- Both sites are core reducers: the retry controller picks the level before any extension observes the switch, and
+  session context restoration runs while rebuilding state from the session file.
+
+### Expected merge conflict zones
+
+- LOW: `retry-fallback/controller.ts` `selectThinking()`; `session-manager.ts` `getSessionContextSettings()`.
+
+## Skip pi.dev catalog overlay for fork-only builtin providers (2026-08-16)
+
+### What changed
+
+- `remote-catalog-provider.ts` exports `FORK_ONLY_BUILTIN_PROVIDERS` (`alibaba-token-plan`, `opengateway`) and
+  `remoteCatalogServesProvider(providerId, catalogBaseUrl?)`.
+- `model-runtime.ts` `create` and `createSync` skip the `withRemoteCatalog` wrap for fork-only builtin providers
+  when the default upstream catalog base URL is in use. A custom `catalogBaseUrl` keeps the wrap, so a fork-owned
+  catalog could serve these providers later.
+
+### Why
+
+- pi.dev is upstream infrastructure and does not serve fork-only provider ids. It answers them with a non-404
+  failure, which surfaced as a chronic `Could not refresh <id>; showing cached models` warning on every
+  model-selector refresh: transient-failure persists never write `lastModified`, so the four-hour freshness
+  throttle never engaged for always-failing providers.
+- Fork-only catalogs are already baked at build time, so skipping the overlay loses nothing.
+
+### Why an extension could not handle it
+
+- The wrap is applied inside `ModelRuntime` construction over the core-owned builtin provider list, before any
+  extension registers providers; extensions cannot unwrap a builtin.
+
+### Expected merge conflict zones
+
+- LOW: `model-runtime.ts` at the two `withRemoteCatalog` wrap sites; `remote-catalog-provider.ts` near the
+  top-level constants.
+
+## Let a superseding compaction claim pass admission quietly (2026-08-16)
+
+### What changed
+
+- New private `AgentSession._hasSupersedingCompactionClaim()`: true when a live (non-aborted)
+  compaction or auto-compaction controller is currently claimed. Compaction claims are
+  last-writer-wins (`_claimCompactionController` aborts the incumbent), so after an admission
+  compaction loses that race, the winner owns the route and re-gates admission itself.
+- The guard joins `_isCompactionOnCooldown()` / `_isCompactionDelegated()` at the admission-family
+  `RequiredCompactionError` sites: `_enforceCompactionBeforeProvider`,
+  `_enforceFinalProviderAdmission`, `_checkCompaction`'s inline overflow throw,
+  `_revalidateScheduledContinuationAdmission`, and the pre-retry compaction gate
+  ([#886](https://github.com/code-yeongyu/senpi/issues/886)).
+- User-initiated aborts keep throwing: `abortCompaction()` aborts the claimed controllers without
+  registering a replacement, so no live claimant exists and the guard stays false.
+
+### Why
+
+- On a resumed over-threshold session, a queued extension message (goal continuation, ttsr nudge)
+  races the user's own prompt; both run pre-prompt admission and the loser's compaction is aborted
+  mid-flight. Treating that abort like a failure threw
+  `Context remains above the compaction threshold because compaction did not complete` at the
+  losing caller (surfaced as `Runtime error (send_message)`), even though a newer compaction was
+  actively running. This mirrors the breaker-cooldown (#531) and SDK-delegation (#874) precedent:
+  when compaction cannot complete for a transient/ownership reason, admission proceeds and
+  overflow recovery remains the safety net.
+
+### Why an extension could not handle it
+
+- Required-compaction admission and the compaction controller registry are private `AgentSession`
+  state; extensions observe only the thrown error.
+
+### Expected merge conflict zones
+
+- `agent-session.ts` around `_isCompactionOnCooldown` and each guarded
+  `throw new RequiredCompactionError()` site.
+
 ## Admit provider-owned compaction lanes (2026-08-14)
 
 ### What changed
@@ -191,6 +2221,52 @@
 
 - LOW: `provider-display-names.ts` display-name map.
 
+## Ambient auth resolution honours the request signal (2026-08-13)
+
+### What changed
+
+- `ExtensionOAuthConfig.resolveAmbient()` (`provider-composer.ts`) accepts an optional `signal` alongside `ctx`.
+- The ambient-only api-key auth in `provider-api-key-auth.ts` forwards the `AbortSignal` that `ApiKeyAuth.check`
+  and `ApiKeyAuth.resolve` already receive, so an abandoned request stops waiting on ambient resolution.
+
+### Why
+
+- Ambient resolution can shell out to a provider CLI, which runs on the auth path of every request. Without the
+  signal an aborted turn still waited for that work to settle.
+
+### Expected merge conflict zones
+
+- LOW: the `resolveAmbient` signature in `provider-composer.ts` and the ambient auth callsites in
+  `provider-api-key-auth.ts`.
+
+## Compose ambient api-key auth for OAuth providers (2026-08-12)
+
+### What changed
+
+- `ExtensionOAuthConfig` (`provider-composer.ts`) gained an additive optional `resolveAmbient()` hook for providers
+  whose credentials live outside `auth.json` — an environment token, or a CLI the provider shells out to.
+- `composeApiKeyAuth` (`provider-api-key-auth.ts`) previously returned `undefined` for a provider with no inherited
+  auth, no configured key and no configured headers whenever `oauth` was present. It now returns ambient-only
+  api-key auth built from `resolveAmbient()` when the OAuth config supplies one, and still returns `undefined`
+  otherwise. The composed auth deliberately omits `login`, so the OAuth flow keeps ownership of login, and it
+  declines whenever a credential is passed, so a stored credential always wins.
+
+### Why this cannot be expressed externally
+
+- `resolveProviderAuth()` in `pi-ai` reads ambient credentials exclusively through `provider.auth.apiKey.resolve()`.
+  A provider that registers only `oauth` is therefore unresolvable with an empty `auth.json`, no matter what the
+  extension does: the composer discards its ambient credentials before `Models.getAuth()` runs. Availability and
+  resolution then disagree, because `Models.checkProviderAuth()` falls back to `oauth.check()` with no credential —
+  the provider advertises models it cannot authenticate, and every request fails
+  `Provider is not configured: <id>`.
+- This restores the resolution path that `apiKey: "claude-sdk-oauth-managed"` provided before 2acbb6e0c, without
+  restoring its false availability: the synthesized auth resolves only when the provider's own ambient probe says so,
+  where the literal sentinel reported configured unconditionally.
+
+### Expected merge conflict zones
+
+- LOW: the additive `ExtensionOAuthConfig.resolveAmbient` field in `provider-composer.ts`.
+- LOW: the early-return branch at the top of `composeApiKeyAuth` in `provider-api-key-auth.ts`.
 
 ## Retire extension generations after reload notifications (2026-08-12)
 
@@ -1953,3 +4029,39 @@ extension reloads. Test extension results preserve the same ownership contract.
 The trusted/untrusted extension result composition now carries forward the shared event bus used by
 both pre-trust and remaining extensions. Dropping it caused `ExtensionRunner` to allocate an
 unrelated fallback bus, silently disconnecting `pi.rpc.emit` on trust-requiring projects.
+
+## 2026-08-25 - reject upstream Radius session sharing artifacts
+
+### What changed
+
+- `packages/coding-agent/src/core/radius.ts`: intentionally absent from Senpi; upstream Radius sharing is rejected under the fork sharing policy.
+
+### Why
+
+- Senpi retains its gist-based `/share` flow and `pi.dev` viewer instead of adopting the upstream Radius service.
+
+### Why an extension could not handle it
+
+- Sharing implementation ownership is a core product policy decision, not an extension-level adaptation.
+
+### Expected merge conflict zones
+
+- NONE: the upstream-only Radius artifact remains excluded from the fork tree.
+
+## 2026-08-25 - Preserve upstream session event behavior
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` retains fork queue and compaction behavior while adopting upstream custom-message ordering.
+
+### Why
+
+- Session event ordering is a provider and persistence runtime contract.
+
+### Why this lives in the fork
+
+- Agent session orchestration executes below extension interception.
+
+### Expected merge conflict zones
+
+- Agent event dispatch and custom-message queue handling.

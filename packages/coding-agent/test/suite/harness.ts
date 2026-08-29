@@ -82,8 +82,13 @@ export interface HarnessOptions {
 	persistSession?: boolean;
 	autoTitleSessions?: boolean;
 	fallbackNow?: () => number;
+	retryRandom?: () => number;
 	transportImageBudget?: { budgetBytes: number; alwaysKeepNewest: number };
 	modelsJson?: Record<string, unknown>;
+	fileSettings?: boolean;
+	settingsFileName?: "settings.json" | "settings.jsonc";
+	settingsContent?: string;
+	retryProfile?: import("@earendil-works/pi-ai/utils/retry-profile/types").RetryPolicyProfile;
 }
 
 export interface Harness {
@@ -129,7 +134,17 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 	const sessionManager = options.persistSession
 		? SessionManager.create(tempDir, join(tempDir, "sessions"))
 		: SessionManager.inMemory();
-	const settingsManager = SettingsManager.inMemory(options.settings);
+	const agentDir = join(tempDir, "agent");
+	if (options.fileSettings) {
+		mkdirSync(agentDir, { recursive: true });
+		writeFileSync(
+			join(agentDir, options.settingsFileName ?? "settings.json"),
+			options.settingsContent ?? JSON.stringify(options.settings ?? {}, null, 2),
+		);
+	}
+	const settingsManager = options.fileSettings
+		? SettingsManager.create(tempDir, agentDir)
+		: SettingsManager.inMemory(options.settings);
 
 	const authStorage = AuthStorage.inMemory();
 	if (withConfiguredAuth) {
@@ -145,6 +160,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 			baseUrl: model.baseUrl,
 			apiKey: "faux-key",
 			api: fauxProvider.api,
+			...(options.retryProfile !== undefined ? { retryPolicy: options.retryProfile } : {}),
 			models: fauxProvider.models.map((registeredModel) => ({
 				id: registeredModel.id,
 				name: registeredModel.name,
@@ -220,7 +236,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		sessionManager,
 		settingsManager,
 		cwd: tempDir,
-		agentDir: join(tempDir, "agent"),
+		agentDir,
 		modelRuntime: getModelRuntime(modelRegistry),
 		resourceLoader,
 		baseToolsOverride: toolMap,
@@ -230,6 +246,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		extensionRunnerRef,
 		autoTitleSessions: options.autoTitleSessions,
 		fallbackNow: options.fallbackNow,
+		retryRandom: options.retryRandom ?? (() => 0.5),
 	});
 
 	const events: AgentSessionEvent[] = [];

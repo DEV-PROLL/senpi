@@ -7,6 +7,7 @@ import {
 	normalizeAppleTerminalInput,
 	normalizeNativeShiftEnterInput,
 	ProcessTerminal,
+	resolveEscapeTimeoutMs,
 } from "../src/terminal.ts";
 
 const isVitest = process.env.VITEST === "true";
@@ -78,6 +79,29 @@ function setupTerminalStopHarness(wasRaw: boolean, restoreRawMode: (mode: boolea
 		},
 	};
 }
+
+describe("resolveEscapeTimeoutMs", () => {
+	it("uses PI_TUI_ESC_TIMEOUT when configured", () => {
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "80" }), 80);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "80", SSH_TTY: "/dev/pts/1" }), 80);
+	});
+
+	it("ignores invalid PI_TUI_ESC_TIMEOUT values", () => {
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "abc" }), 10);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "0" }), 10);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "-5" }), 10);
+		assert.equal(resolveEscapeTimeoutMs({ PI_TUI_ESC_TIMEOUT: "" }), 10);
+	});
+
+	it("defaults to 100ms over SSH", () => {
+		assert.equal(resolveEscapeTimeoutMs({ SSH_CONNECTION: "10.0.0.1 22" }), 100);
+		assert.equal(resolveEscapeTimeoutMs({ SSH_TTY: "/dev/pts/1" }), 100);
+	});
+
+	it("defaults to 10ms otherwise", () => {
+		assert.equal(resolveEscapeTimeoutMs({}), 10);
+	});
+});
 
 describe("normalizeNativeShiftEnterInput", () => {
 	it("rewrites Return to CSI-u Shift+Enter when native Shift detection is enabled and Shift is pressed", () => {
@@ -296,7 +320,7 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 		const harness = setupNegotiation();
 		try {
 			harness.send("\x1b[");
-			advanceTimersByTime(10);
+			advanceTimersByTime(50); // StdinBuffer sequence timeout, not the lone-ESC timeout
 
 			assert.equal(harness.getInput(), undefined);
 
@@ -366,6 +390,87 @@ describe("ProcessTerminal stop", () => {
 	});
 
 	it("does not throw when raw-mode restoration fails during stop", () => {
+		// Given
+		const eio = Object.assign(new Error("setRawMode failed with errno: 5"), { errno: 5 });
+		const harness = setupTerminalStopHarness(false, () => {
+			throw eio;
+		});
+
+		try {
+			// When / Then
+			assert.doesNotThrow(() => harness.terminal.stop());
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("does not throw when Bun reports the dead terminal only in the message", () => {
+		// Given
+		const bunShimEio = new Error("setRawMode failed with errno: 5");
+		const harness = setupTerminalStopHarness(false, () => {
+			throw bunShimEio;
+		});
+
+		try {
+			// When / Then
+			assert.doesNotThrow(() => harness.terminal.stop());
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("does not throw when the message carries the EPIPE errno", () => {
+		// Given
+		const bunShimEpipe = new Error("setRawMode failed with errno: 32");
+		const harness = setupTerminalStopHarness(false, () => {
+			throw bunShimEpipe;
+		});
+
+		try {
+			// When / Then
+			assert.doesNotThrow(() => harness.terminal.stop());
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("rethrows raw-mode failures whose message carries no dead-terminal errno", () => {
+		// Given
+		const unrelated = new Error("boom");
+		const harness = setupTerminalStopHarness(false, () => {
+			throw unrelated;
+		});
+
+		try {
+			// When / Then
+			assert.throws(
+				() => harness.terminal.stop(),
+				(error: unknown) => error === unrelated,
+			);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("rethrows raw-mode failures carrying a non-dead errno in the message", () => {
+		// Given
+		const unrelated = new Error("setRawMode failed with errno: 22");
+		const harness = setupTerminalStopHarness(false, () => {
+			throw unrelated;
+		});
+
+		try {
+			// When / Then
+			assert.throws(
+				() => harness.terminal.stop(),
+				(error: unknown) => error === unrelated,
+			);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("does not throw when Node reports the dead terminal by error code", () => {
 		// Given
 		const eio = Object.assign(new Error("setRawMode failed"), { code: "EIO" });
 		const harness = setupTerminalStopHarness(false, () => {

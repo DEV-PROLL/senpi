@@ -51,5 +51,26 @@ export interface Model<TApi extends Api> {
 				? AnthropicMessagesCompat
 				: TApi extends "bedrock-converse-stream"
 					? BedrockCompat
-					: never;
+					: TApi extends "cursor-agent"
+						? CursorAgentCompat
+						: never;
+}
+
+/** Cursor agent protocol model metadata. */
+export interface CursorAgentCompat {
+	/** Request Cursor's max-mode (1M-context) variant of the model. */
+	cursorMaxMode?: boolean;
+	/**
+	 * Wire-reasoning capability for grouped Cursor catalog identities.
+	 * Presence is the capability gate: models without it never emit reasoning
+	 * parameters on the wire.
+	 */
+	cursorReasoning?: {
+		/** Base id into the static cursor capability table. */
+		capabilityId: string;
+		/** Fixed Claude thinking boolean for this selectable identity. */
+		thinkingMode?: boolean;
+		/** Exact catalog variant sent when no explicit selection exists. */
+		representativeVariantId: string;
+	};
 }

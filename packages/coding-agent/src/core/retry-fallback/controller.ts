@@ -1,12 +1,13 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
-import { getSupportedThinkingLevels } from "../thinking-levels.ts";
+import { type Api, clampThinkingLevel, type Model } from "@earendil-works/pi-ai";
 import {
 	baseSelector,
 	candidatesAfter,
 	canonicalizeFallbackChains,
+	type FallbackChains,
 	type FallbackSelector,
 	formatSelector,
+	hasExplicitFallbackOptOut,
 	parseFallbackSelector,
 	resolveChainKey,
 } from "./chains.ts";
@@ -35,6 +36,8 @@ export interface RetryFallbackControllerDeps {
 		getAll(): Model<Api>[];
 		/** Ranks bare-selector expansion: OAuth-credential providers come first. */
 		isUsingOAuth?(model: Model<Api>): boolean;
+		/** Filters bare-selector expansion: a definitive `false` keeps a lane that can never serve out of the chain. */
+		isFallbackEligible?(model: Model<Api>): boolean;
 	};
 	cooldowns: SelectorCooldowns;
 	logger: FallbackLogger;
@@ -59,6 +62,14 @@ export class RetryFallbackController {
 	private readonly triedSelectors = new Set<string>();
 	private state: ActiveFallbackState | undefined;
 	private lastExhaustedChainKey: string | undefined;
+	// Content-keyed memo of canonicalizeFallbackChains. Provider-error handling calls
+	// canTryFallback/nextCandidate several times per error; without this each call
+	// re-expands bare selectors and re-probes registry eligibility over the full
+	// model set. Keying on the serialized chains content means an unchanged config
+	// reuses the canonical result, while a chains edit invalidates immediately.
+	// Registry mutations without a chains change are not tracked here; they are rare
+	// and in practice coincide with a settings reload that replaces the chains object.
+	private canonicalCache: { key: string; chains: FallbackChains } | undefined;
 
 	constructor(deps: RetryFallbackControllerDeps) {
 		this.deps = deps;
@@ -79,7 +90,17 @@ export class RetryFallbackController {
 
 	clear(): void {
 		this.state = undefined;
+		this.canonicalCache = undefined;
 		this.resetTurn();
+	}
+
+	private canonicalChains(): FallbackChains {
+		const chains = this.deps.getSettings().chains;
+		const key = JSON.stringify(chains);
+		if (this.canonicalCache?.key === key) return this.canonicalCache.chains;
+		const canonical = canonicalizeFallbackChains(chains, this.deps.registry);
+		this.canonicalCache = { key, chains: canonical };
+		return canonical;
 	}
 
 	canTryFallback(): boolean {
@@ -95,7 +116,7 @@ export class RetryFallbackController {
 	hasConfiguredChain(): boolean {
 		const current = this.deps.getCurrentSelector();
 		if (!current) return false;
-		const chains = canonicalizeFallbackChains(this.deps.getSettings().chains, this.deps.registry);
+		const chains = this.canonicalChains();
 		return resolveChainKey(current.model, current.thinkingLevel, chains) !== undefined;
 	}
 
@@ -181,8 +202,16 @@ export class RetryFallbackController {
 		const settings = this.deps.getSettings();
 		const current = this.deps.getCurrentSelector();
 		if (!settings.modelFallback || !current) return undefined;
-		const chains = canonicalizeFallbackChains(settings.chains, this.deps.registry);
-		const chainKey = resolveChainKey(current.model, current.thinkingLevel, chains) ?? this.state?.chainKey;
+		const chains = this.canonicalChains();
+		// Order matters: a model's own chain wins, then the active episode keeps
+		// owning its walk (its last rung usually has no key of its own), and only
+		// a session with neither falls back to the wildcard lane.
+		const chainKey =
+			resolveChainKey(current.model, current.thinkingLevel, chains) ??
+			this.state?.chainKey ??
+			(hasExplicitFallbackOptOut(settings.chains, current.model, current.thinkingLevel)
+				? undefined
+				: resolveChainKey(current.model, current.thinkingLevel, chains, { allowWildcard: true }));
 		const entries = chainKey ? chains[chainKey] : undefined;
 		if (!chainKey || !entries) {
 			if (reserve) this.deps.logger.debug("no_chain", { selector: formatSelector(current.model) });
@@ -230,8 +259,10 @@ export class RetryFallbackController {
 		inherited: ThinkingLevel | undefined,
 	): ThinkingLevel {
 		const requested = selector.thinkingLevel ?? inherited ?? "off";
-		const supported = getSupportedThinkingLevels(model);
-		return supported.includes(requested) ? requested : (supported[supported.length - 1] ?? "off");
+		// Canonical clamp walks to the NEAREST supported level. Picking the highest
+		// supported level instead would escalate an "off" request to max reasoning on
+		// always-on fallback models.
+		return clampThinkingLevel(model, requested);
 	}
 
 	private skip(candidate: string, skipReason: string): void {

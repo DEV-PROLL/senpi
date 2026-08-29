@@ -1,4 +1,5 @@
 import type {
+	Context,
 	ImageContent,
 	Message,
 	Model,
@@ -7,7 +8,12 @@ import type {
 	ThinkingBudgets,
 	Transport,
 } from "@earendil-works/pi-ai";
-import { runAgentLoop, runAgentLoopContinue } from "./agent-loop.ts";
+import {
+	buildProviderContext as buildProviderContextFromAgentContext,
+	runAgentLoop,
+	runAgentLoopContinue,
+} from "./agent-loop.ts";
+import { ProviderRetryWatchdogAbortError } from "./assistant-terminal-state.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AfterToolCallContext,
@@ -125,6 +131,8 @@ export interface AgentOptions {
 	removedToolHints?: Record<string, string>;
 	resolveUnknownToolCall?: AgentLoopConfig["resolveUnknownToolCall"];
 	abortServerSideFallback?: boolean;
+	/** Cursor exec-channel tool handlers; see {@link AgentLoopConfig.cursorExecHandlers}. */
+	cursorExecHandlers?: AgentLoopConfig["cursorExecHandlers"];
 }
 
 export interface AgentContinuationOptions {
@@ -246,6 +254,16 @@ export class Agent {
 	public resolveUnknownToolCall?: AgentLoopConfig["resolveUnknownToolCall"];
 	/** Forwarded to the stream function; providers without server-side fallback ignore it. */
 	public abortServerSideFallback?: boolean;
+	/** Cursor exec-channel tool handlers; see {@link AgentLoopConfig.cursorExecHandlers}. */
+	public cursorExecHandlers?: AgentLoopConfig["cursorExecHandlers"];
+
+	async buildProviderContext(context: AgentContext, signal?: AbortSignal): Promise<Context> {
+		return buildProviderContextFromAgentContext(
+			context,
+			{ convertToLlm: this.convertToLlm, transformContext: this.transformContext },
+			signal,
+		);
+	}
 
 	constructor(options: AgentOptions) {
 		// Older compiled consumers may omit options or streamFn even though the current API requires them.
@@ -274,6 +292,7 @@ export class Agent {
 		this.removedToolHints = runtimeOptions.removedToolHints ?? {};
 		this.resolveUnknownToolCall = runtimeOptions.resolveUnknownToolCall;
 		this.abortServerSideFallback = runtimeOptions.abortServerSideFallback;
+		this.cursorExecHandlers = runtimeOptions.cursorExecHandlers;
 	}
 
 	/**
@@ -355,8 +374,8 @@ export class Agent {
 	}
 
 	/** Abort the current run, if one is active. */
-	abort(): void {
-		this.activeRun?.abortController.abort();
+	abort(reason?: unknown): void {
+		this.activeRun?.abortController.abort(reason);
 	}
 
 	/**
@@ -563,6 +582,7 @@ export class Agent {
 		return {
 			model: this._state.model,
 			reasoning: this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel,
+			thinkingSelection: this._state.thinkingSelection,
 			sessionId: this.sessionId,
 			onPayload: this.onPayload,
 			onResponse: this.onResponse,
@@ -574,6 +594,7 @@ export class Agent {
 			initialRequestStreamStartTimeoutMs: options.initialRequestStreamStartTimeoutMs,
 			maxRetryDelayMs: this.maxRetryDelayMs,
 			abortServerSideFallback: this.abortServerSideFallback,
+			cursorExecHandlers: this.cursorExecHandlers,
 			toolExecution: this.toolExecution,
 			removedToolHints: this.removedToolHints,
 			resolveUnknownToolCall: this.resolveUnknownToolCall,
@@ -701,6 +722,7 @@ export class Agent {
 			usage: EMPTY_USAGE,
 			stopReason: aborted ? "aborted" : "error",
 			errorMessage: error instanceof Error ? error.message : String(error),
+			...(error instanceof ProviderRetryWatchdogAbortError ? { abortSource: "provider" as const } : {}),
 			timestamp: Date.now(),
 		} satisfies AgentMessage;
 		await this.processEvents({ type: "message_start", message: failureMessage });
@@ -771,5 +793,21 @@ export class Agent {
 		for (const listener of this.listeners) {
 			await listener(event, signal);
 		}
+	}
+
+	/**
+	 * Emit a host-generated event through the normal listener pipeline.
+	 *
+	 * Used by the Cursor exec bridge: bridge-run tools execute inside the
+	 * provider stream, outside the loop's executor, so their
+	 * `tool_execution_start`/`tool_execution_end` lifecycle must be injected
+	 * here or the live tool card for a synthesized call never resolves.
+	 * A bridge execution may settle after an aborted run has already ended; its
+	 * late lifecycle event belongs to that finished run and must be discarded.
+	 */
+	async emitExternalEvent(event: AgentEvent, runSignal?: AbortSignal): Promise<void> {
+		const activeSignal = this.activeRun?.abortController.signal;
+		if (!activeSignal || (runSignal && runSignal !== activeSignal)) return;
+		await this.processEvents(event);
 	}
 }

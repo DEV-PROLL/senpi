@@ -1,5 +1,7 @@
 # RPC Mode
 
+The shared Unix socket host uses `<agentDir>/rpc-host-daemon/host.pid` and `settings.json` as its ownership state. Clients attach to a compatible existing host regardless of which client surface started it; only incompatible unmanaged owners are refused.
+
 RPC mode enables headless operation of the coding agent via a JSON protocol over stdin/stdout. This is useful for embedding the agent in other applications, IDEs, or custom UIs.
 
 **Note for Node.js/TypeScript users**: If you're building a Node.js application, consider using `AgentSession` directly from `@code-yeongyu/senpi` instead of spawning a subprocess. See [`src/core/agent-session.ts`](../src/core/agent-session.ts) for the API. For a subprocess-based TypeScript client, see [`src/modes/rpc/rpc-client.ts`](../src/modes/rpc/rpc-client.ts).
@@ -38,17 +40,80 @@ Multi-session mode lets one `senpi --mode rpc` process serve several independent
 ### Starting multi-session mode
 
 ```bash
+# Shared JSONL over stdio (legacy multi-session host)
 senpi --mode rpc --multi-session [options]
+
+# One shared host over a Unix socket; each accepted connection has its own JSONL feed
+senpi --mode rpc --listen unix:///tmp/senpi-rpc.sock [options]
+senpi --mode rpc --listen /tmp/senpi-rpc.sock [options]
 ```
 
+`--listen unix://` selects the default per-agent socket path. Unix abstract socket names may be supplied as
+`unix://@name` where supported by the host platform. Socket mode accepts concurrent connections while retaining one
+process-global session registry.
+
+Socket event visibility is an all-sessions broadcast: every connected client receives lifecycle and agent events from
+every open session, each tagged with its routing `sessionId`. Correlated responses and extension UI requests are sent
+only to the connection that issued the command. This lets a non-owner observe a foreign turn without requiring a
+separate subscription protocol.
+
+### Session auto-titling
+
+Auto-generated session titles are on by default only for interactive launches. RPC hosts opt in with
+`--auto-title-sessions`:
+
+```bash
+senpi --mode rpc --multi-session --auto-title-sessions
+```
+
+With the flag, every session the host opens (classic or multi-session) generates a title from its first user prompt and
+publishes it to clients through the existing `session_info_changed` event; no new command or event is involved. Sessions
+resumed with existing context messages are never retitled, with or without the flag.
+
 Startup: `senpi --mode rpc --multi-session` → NO default session is constructed (no default `AgentSessionRuntime`, no default extension/watcher load). Classic `senpi --mode rpc` is byte-identical to today. Mode is fixed at process start; there is no runtime transition.
+
+### Interactive sessions and shared-host opt-out
+
+Interactive launches use the shared RPC host by default when a persisted session is available. A cold start takes approximately 1.3 seconds on the first launch; warm attachment to an existing compatible host is fast. To use the local runtime directly for a launch, set `SENPI_DISABLE_SHARED_HOST=1`. This uses the same local fallback runtime and does not change RPC socket behavior for other clients.
+
+### Shared host lifecycle (cold start + idle exit)
+
+The lifecycle supervisor is also available to bundled/rebranded runtimes through the hidden internal launch route `--internal-rpc-host-supervisor`. This route is wire-invisible and intended only for desktop launchers: it receives the public socket, ownership directory, and the runtime command/arguments to wrap, then runs the same `host-lifecycle.ts` implementation used by `ensureHost()`. Normal CLI modes do not use or advertise this route.
+
+Hosts started through `ensureHost()` are wrapped by a lifecycle supervisor that owns the public socket and spawns the
+real RPC host on a private internal hop. The policy lives in `<agentDir>/rpc-host-daemon/settings.json`:
+
+```json
+{ "socket": "…/rpc.sock", "capabilities": ["extension_events", "custom_unsupported"], "coldStart": "transient", "idleExitMs": 900000 }
+```
+
+- `coldStart` — `transient` (default): the host exists for the current login session and idle-exits. `persistent`:
+  no idle exit; the host stays until it is stopped or dies.
+- `idleExitMs` — idle-exit window in milliseconds, default `900000` (15 minutes).
+
+Environment overrides beat the file, and invalid values fall through to the next source: `SENPI_RPC_HOST_COLD_START`
+(`transient`|`persistent`) and `SENPI_RPC_HOST_IDLE_EXIT_MS` (positive integer milliseconds).
+
+The host exits only after the window elapses with NO attached client connections and NO active turns — continuously.
+Any connection or agent turn resets the window, so a busy host never exits, and the exit itself is clean: the RPC host
+receives SIGTERM first, flushes pending output, removes its socket, and the supervisor then removes `host.pid` and
+`settings.json` (the stderr log stays for diagnostics). After an idle exit, the next `ensureHost()` transparently
+starts a fresh host. `get_protocol_info` over the public socket behaves exactly as before; the supervisor is
+wire-transparent.
+
+The RPC host can never outlive its supervisor. It is spawned with an extra inherited pipe on fd 3 whose write end the
+supervisor holds and never writes to; the kernel closes that end whenever the supervisor dies — including `SIGKILL`, an
+OOM kill, or a crash, where no signal handler runs — so the host reads EOF, shuts down cleanly and removes its private
+internal directory. The supervisor also exports `SENPI_RPC_HOST_WATCH_PPID` as a polling fallback. Both bindings are
+set only by the supervisor: a host started any other way (plain `senpi --mode rpc --listen …`, embedders, hand-started
+hosts) sees neither variable and is unaffected. A host whose supervisor is alive is never touched by this binding.
 
 ### D1 normative table (multi-session mode)
 
 | Command | Params | Success data | Notes |
 | --- | --- | --- | --- |
-| `get_protocol_info` | - | `{ protocolVersion: 1, capabilities: ["multi_session"], mode: "classic"\|"multi" }` | Answered in BOTH modes; side-effect-free; THE capability probe. |
-| `open_session` | `sessionPath?`, `cwd?`, `provider?`, `modelId?`, `thinkingLevel?`, `permissionPreset?` (all optional; paths MUST be absolute) | `{ sessionId, state: RpcSessionState }` | `sessionPath` = today's `--session` semantics (open-if-exists else create persisting there, `session-manager.ts:926-940`); `provider`/`modelId` applied only on create (resume restores the session's model — mirrors `SenpiSessionRuntime.ts:198-200`); params form the immutable launch profile (D8). |
+| `get_protocol_info` | - | `{ protocolVersion: 1, serverVersion: string, capabilities: string[], mode: "classic"\|"multi" }` | Answered in BOTH modes; side-effect-free; the capability probe. Multi-session hosts include `multi_session` plus the negotiated launch capabilities. |
+| `open_session` | `sessionPath?`, `cwd?`, `provider?`, `modelId?`, `thinkingLevel?`, `permissionPreset?` (all optional; paths MUST be absolute) | `{ sessionId, state: RpcSessionState, attached?: true }` | `sessionPath` = today's `--session` semantics (open-if-exists else create persisting there, `session-manager.ts:926-940`); `provider`/`modelId` applied only on create (resume restores the session's model — mirrors `SenpiSessionRuntime.ts:198-200`); params form the immutable launch profile (D8). When the path is already held by a fully-open session, the open ATTACHES to it: same routing handle, `attached: true`, one more attachment counted; the runtime is torn down only when the last attachment closes. |
 | `close_session` | `sessionId` | `{}` | Aborts active work, awaits agent idle + settled persistence, flushes queued events, detaches subscriptions; its response is the LAST record tagged with that handle — no events after (test-pinned). |
 | `list_sessions` | - | `{ sessions: [{ sessionId, durableSessionId, sessionPath, cwd, name, status }] }` | Includes `opening`/`closing` entries with their status. |
 | every existing command | + `sessionId` (REQUIRED in multi mode) | unchanged | Routed to that session. |
@@ -63,7 +128,7 @@ In the response `error` field, machine-matchable:
 
 - `unknown_session`
 - `session_closing`
-- `session_path_in_use`
+- `session_path_in_use` (path held by a session still `opening` or already `closing`; a fully-open session is attached instead)
 - `missing_session_id` (session-scoped command without `sessionId` in multi mode)
 - `multi_session_disabled` (`open_session` in classic mode)
 - `invalid_path` (relative `sessionPath`/`cwd`)
@@ -79,7 +144,7 @@ Strict FIFO per session; one total stdout order; cross-session order unspecified
 
 ### Duplicate/idempotency
 
-Duplicate `open_session` while a path reservation is held → `session_path_in_use`. `close_session` on unknown/already-closed → `unknown_session` error. Request `id`s are client-owned; the server echoes them without dedup.
+Duplicate `open_session` while a path reservation is held by a fully-open session → ATTACH (`attached: true`, same handle); while held by an `opening`/`closing` entry → `session_path_in_use`. `close_session` releases one attachment; the runtime is disposed only when the last attachment closes. `close_session` on unknown/already-closed → `unknown_session` error. Request `id`s are client-owned; the server echoes them without dedup.
 
 ## Protocol Overview
 
@@ -97,6 +162,9 @@ This matters for clients:
 - Split records on `\n` only
 - Accept optional `\r\n` input by stripping a trailing `\r`
 - Do not use generic line readers that treat Unicode separators as newlines
+- Send JSON objects only; valid JSON primitives and arrays receive a parse-style error response
+- Keep each encoded input record at or below 16,777,216 characters. Oversized records receive one parse-style error,
+  are discarded through the next LF, and do not desynchronize following records
 
 In particular, Node `readline` is not protocol-compliant for RPC mode because it also splits on `U+2028` and `U+2029`, which are valid inside JSON strings.
 
@@ -136,16 +204,22 @@ Queued prompts cannot include `thinkingLevel`; wait for the current turn to comp
 
 **Extension commands**: If the message is an extension command (e.g., `/mycommand`), it executes immediately even during streaming. Extension commands manage their own LLM interaction via `pi.sendMessage()`.
 
-**Input expansion**: Skill commands (`/skill:name`) and prompt templates (`/template`) are expanded before sending/queueing.
+**Input expansion**: Leading skill tokens (`/skill:name`, `$name`, or `$skill:name`), inline explicit
+desktop skill tokens (`$skill:name`), and prompt templates (`/template`) are expanded before
+sending/queueing. Bare inline dollar text remains literal.
 
 Response:
 ```json
-{"id": "req-1", "type": "response", "command": "prompt", "success": true}
+{"id": "req-1", "type": "response", "command": "prompt", "success": true, "data": { "disposition": "started" }}
 ```
+
+The prompt success response carries `data.disposition` (`"started"` | `"queued"` | `"handled"`), captured from the host session's own disposition callback so proxied clients can resolve optimistic-echo contracts exactly like the local path. Older hosts omit `data`; clients must then degrade to canonical-only rendering (treat the echo as rejected). The response is emitted before the user `message_start` event on the same connection, and disposition callbacks registered through the client run synchronously inside response-frame dispatch — never through the resolved promise's microtask.
 
 `success: true` means the prompt was accepted, queued, or handled immediately. `success: false` means the prompt was rejected before acceptance. Failures after acceptance are reported through the normal event and message stream, not as a second `response` for the same request id.
 
 The `images` field is optional. Each image uses `ImageContent` format: `{"type": "image", "data": "base64-encoded-data", "mimeType": "image/png"}`.
+The `message` field for `prompt`, `steer`, and `follow_up` is limited to 1,000,000 characters;
+image payloads are not counted toward this text limit.
 
 #### steer
 
@@ -204,6 +278,29 @@ Response:
 {"type": "response", "command": "abort", "success": true}
 ```
 
+#### clear_queue
+
+Remove queued steering and follow-up messages and return their text.
+
+```json
+{"type": "clear_queue"}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "clear_queue",
+  "success": true,
+  "data": {
+    "steering": ["Change direction"],
+    "followUp": ["Summarize when finished"]
+  }
+}
+```
+
+To implement interactive Esc behavior, send `clear_queue` before `abort`, then restore the returned text in the client editor. `abort` continues queued messages when they remain in the session.
+
 #### new_session
 
 Start a fresh session. Can be cancelled by a `session_before_switch` extension event handler.
@@ -246,6 +343,8 @@ Response:
   "data": {
     "model": {...},
     "thinkingLevel": "medium",
+    "serviceTier": "priority",
+    "fastMode": true,
     "isStreaming": false,
     "isCompacting": false,
     "steeringMode": "all",
@@ -261,6 +360,8 @@ Response:
 ```
 
 The `model` field is a full [Model](#model) object or `null`. The `sessionName` field is the display name set via `set_session_name`, or omitted if not set.
+
+`serviceTier` is the tier a request would carry right now (`"auto"`, `"flex"`, or `"priority"`), omitted when no tier applies. `fastMode` is `true` when the active model is served at the priority ("fast") tier — either because fast mode is on for this session or because the model selection itself pins `priority`. The two never disagree: whenever `fastMode` is `true`, `serviceTier` is `"priority"`.
 
 #### get_messages
 
@@ -365,8 +466,18 @@ Response:
 {"type": "response", "command": "set_thinking_level", "success": true}
 ```
 
-Pass `"scope": "turn"` to change only the current session level without rewriting the global default. The command
-returns an error when the active model cannot apply the requested level.
+Pass `"scope": "turn"` to change only the current session level without rewriting the model's remembered level. The
+command returns an error when the active model cannot apply the requested level, and a rejected request leaves the
+session level unchanged — a failed `set_thinking_level` never mutates state.
+
+```json
+{
+  "type": "response",
+  "command": "set_thinking_level",
+  "success": false,
+  "error": "Thinking level low is not supported by the active model."
+}
+```
 
 #### cycle_thinking_level
 
@@ -405,6 +516,67 @@ Response:
   }
 }
 ```
+
+### Fast mode
+
+#### set_fast_mode
+
+Turn fast mode (the OpenAI Codex `priority` service tier) on or off for the active model. The choice is remembered
+per model, so a later session on the same model starts the same way; `enabled: false` records an explicit `"auto"`
+so it also overrides a tier inherited from the model catalog.
+
+```json
+{"type": "set_fast_mode", "enabled": true}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "set_fast_mode",
+  "success": true,
+  "data": {
+    "enabled": true,
+    "serviceTier": "priority",
+    "provider": "openai-codex",
+    "modelId": "gpt-5.6-sol"
+  }
+}
+```
+
+`serviceTier` is the tier just recorded for the model (`"priority"` on, `"auto"` off). `provider`/`modelId` identify
+the model the preference was stored under: a `-fast` catalog variant and its base model share one entry, so the
+reported id can be the base model rather than the model that was active.
+
+The command returns an error instead of a silent no-op when the request cannot be applied:
+
+| Situation | `error` |
+|-----------|---------|
+| Active model is not an OpenAI Codex model | `Fast mode is only available for OpenAI Codex models.` |
+| `enabled: false` while the model selection pins `:priority` | `Fast mode is fixed by the active model selection's priority tier.` |
+| `enabled` is not a boolean | `set_fast_mode requires a boolean 'enabled' field.` |
+
+A successful call emits a [`service_tier_changed`](#service_tier_changed) event.
+
+#### get_fast_mode
+
+Read the current fast-mode state.
+
+```json
+{"type": "get_fast_mode"}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "get_fast_mode",
+  "success": true,
+  "data": {"enabled": true, "serviceTier": "priority"}
+}
+```
+
+`serviceTier` is `null` when no tier applies. It matches `get_state.serviceTier`.
 
 ### Queue Modes
 
@@ -865,7 +1037,8 @@ The current session name is available via `get_state` in the `sessionName` field
 
 #### get_commands
 
-Get available commands (extension commands, prompt templates, and skills). These can be invoked via the `prompt` command by prefixing with `/`.
+Get the ordered command surface (extension commands, prompt templates, and skills). Extension and prompt rows are
+invoked through `prompt` with `/name`; skill rows use `$name` or the compatibility form `/skill:name`.
 
 ```json
 {"type": "get_commands"}
@@ -879,17 +1052,18 @@ Response:
   "success": true,
   "data": {
     "commands": [
-      {"name": "session-name", "description": "Set or clear session name", "source": "extension", "sourceInfo": {"path": "/home/user/.senpi/agent/extensions/session.ts", "source": "auto", "scope": "user", "origin": "top-level"}},
-      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "sourceInfo": {"path": "/home/user/myproject/.senpi/prompts/fix-tests.md", "source": "auto", "scope": "project", "origin": "top-level"}},
-      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "sourceInfo": {"path": "/home/user/.senpi/agent/skills/brave-search/SKILL.md", "source": "auto", "scope": "user", "origin": "top-level"}}
+      {"name": "session-name", "description": "Set or clear session name", "source": "extension", "syntax": "slash", "sourceInfo": {"path": "/home/user/.senpi/agent/extensions/session.ts", "source": "auto", "scope": "user", "origin": "top-level"}},
+      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "syntax": "slash", "sourceInfo": {"path": "/home/user/myproject/.senpi/prompts/fix-tests.md", "source": "auto", "scope": "project", "origin": "top-level"}},
+      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "syntax": "dollar", "sourceInfo": {"path": "/home/user/.senpi/agent/skills/brave-search/SKILL.md", "source": "auto", "scope": "user", "origin": "top-level"}}
     ]
   }
 }
 ```
 
 Each command has:
-- `name`: Command name (invoke with `/name`)
+- `name`: Command identity without its leading invocation marker
 - `description`: Human-readable description (optional for extension commands)
+- `syntax`: Canonical marker clients should insert (`"slash"` for extension/prompt rows, `"dollar"` for skills)
 - `source`: What kind of command:
   - `"extension"`: Registered via `pi.registerCommand()` in an extension
   - `"prompt"`: Loaded from a prompt template `.md` file
@@ -1015,7 +1189,46 @@ Events are streamed to stdout as JSON lines during agent operation. Events do no
 | `summarization_retry_finished` | Summarization retry loop completes |
 | `extension_error` | Extension threw an error |
 | `extension_event` | Capability-gated extension-owned event (`extension_events` clients only) |
+| `commands_changed` | Ordered command/skill candidate snapshot changed |
+| `command_invocation` | Accepted extension-command or prompt-template invocation metadata |
+| `skill_invocation` | Ordered explicit skill metadata after prompt expansion |
 | `loaded_surfaces_changed` | Loaded skills, extensions, or MCP inventory changed; re-read `get_commands` and `get_loaded_surfaces` |
+| `model_changed` | Active model changed (any source), with the thinking level in force afterwards |
+| `service_tier_changed` | Effective service tier or fast-mode state changed |
+
+Event types are additive: a client that does not recognise a type must ignore that record rather than fail. `model_changed`
+and `service_tier_changed` were added after the initial protocol and are safe to ignore.
+
+### model_changed
+
+Emitted after the session's active model changed, whatever caused it: a `set_model` or `cycle_model` command, a slash
+command, a retry fallback, or a session restore.
+
+```json
+{
+  "type": "model_changed",
+  "model": {"provider": "openai-codex", "id": "gpt-5.6-sol", "...": "..."},
+  "thinkingLevel": "xhigh",
+  "source": "cycle"
+}
+```
+
+`model` is a full [Model](#model) object. `thinkingLevel` is the level in force **after** the switch — each model
+remembers its own level, so this is that model's restored level (clamped to what it supports), not the level the
+previous model was using. `source` is one of `"set"`, `"cycle"`, `"restore"`, `"fallback"`, or `"fallback-revert"`.
+
+Clients that previously inferred the active model from `entry_appended` records can consume this instead.
+
+### service_tier_changed
+
+Emitted when the tier requests would carry, or the fast-mode indicator, changes — a `set_fast_mode` command, the
+`/fast` slash command, or a model switch that resolves a different tier.
+
+```json
+{"type": "service_tier_changed", "tier": "priority", "fastMode": true}
+```
+
+`tier` is omitted when no tier applies. The pair matches `get_state.serviceTier` / `get_state.fastMode`.
 
 ### extension_event
 
@@ -1036,6 +1249,30 @@ Emitted when an extension calls `pi.rpc.emit(name, data)` and the client adverti
 `name` is extension-owned and `data` is opaque to Senpi. Consumers should validate the payload for
 the specific event name before applying it. In multi-session mode the record also includes the
 routing `sessionId`; delivery preserves the owning session and per-session event order.
+
+The terminal builtin emits `terminal_monitor_state` on this path whenever the active monitor set
+changes. `data` is `{ activeCount, monitors }`, where each monitor entry has `id`, `description`,
+`paused`, and `startedAtMs`. The matching in-process `pi.events` channel is unchanged and is not
+forwarded. Clients receive the wire record only when they advertise the `extension_events`
+capability:
+
+```json
+{
+  "type": "extension_event",
+  "name": "terminal_monitor_state",
+  "data": {
+    "activeCount": 1,
+    "monitors": [
+      {
+        "id": "bash_1",
+        "description": "watch checks",
+        "paused": false,
+        "startedAtMs": 1710000000000
+      }
+    ]
+  }
+}
+```
 
 ### agent_start
 
@@ -1097,6 +1334,14 @@ Emitted during streaming of assistant messages. Contains a delta event without a
 ```json
 {
   "type": "message_update",
+  "usage": {
+    "input": 100,
+    "output": 1,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 101,
+    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0}
+  },
   "assistantMessageEvent": {
     "type": "text_delta",
     "contentIndex": 0,
@@ -1115,23 +1360,32 @@ The `assistantMessageEvent` field contains one of these delta types:
 | `thinking_start` | Thinking block started |
 | `thinking_delta` | Thinking content chunk |
 | `thinking_end` | Thinking block ended |
-| `toolcall_start` | Tool call started |
+| `toolcall_start` | Tool call started (includes `id` and `toolName`) |
 | `toolcall_delta` | Tool call arguments chunk |
 | `toolcall_end` | Tool call ended (includes full `toolCall` object) |
 
 Example streaming a text response:
 ```json
-{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0}}
-{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello"}}
-{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" world"}}
-{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hello world"}}
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello"}}
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" world"}}
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Hello world"}}
+```
+
+The top-level `usage` field contains the latest cumulative provider-reported usage. It may remain
+zero until completion when a provider does not report usage during streaming.
+
+Example starting a tool call:
+```json
+{"type":"message_update","usage":{...},"assistantMessageEvent":{"type":"toolcall_start","contentIndex":1,"id":"call_abc123","toolName":"write"}}
 ```
 
 `message_update` intentionally omits the former cumulative `message` field and
 `assistantMessageEvent.partial`. Clients that need a live partial message must assemble it
 from `message_start` and subsequent events using `contentIndex`. Treat `message_end.message`
-as authoritative. For tool calls, buffer `toolcall_delta.delta`; `toolcall_end.toolCall`
-contains the completed call.
+as authoritative. For tool calls, `toolcall_start` provides the call `id` and `toolName`;
+buffer `toolcall_delta.delta` for arguments. `toolcall_end.toolCall` contains the completed
+call.
 
 ### bash_execution_update
 
@@ -1303,6 +1557,66 @@ For branch summaries, `source` is `"branchSummary"` and no `reason` is present.
 ```json
 {
   "type": "summarization_retry_finished"
+}
+```
+
+### skill_invocation
+
+Emitted once after one or more explicit skill tokens are expanded. `skills` preserves invocation order.
+`syntax` reports the token form that selected the skill; `path` is the resolved `SKILL.md` path.
+
+```json
+{
+  "type": "skill_invocation",
+  "skills": [
+    {
+      "name": "debugging",
+      "path": "/project/.agents/skills/debugging/SKILL.md",
+      "syntax": "dollar"
+    },
+    {
+      "name": "review",
+      "path": "/project/.agents/skills/review/SKILL.md",
+      "syntax": "slash"
+    }
+  ]
+}
+```
+
+In multi-session mode the normal routing `sessionId` is added. This event does not mutate loaded
+surfaces; clients continue to use `loaded_surfaces_changed` plus `get_loaded_surfaces` for MCP reveal.
+
+### commands_changed
+
+Emitted whenever a post-bind runtime reload changes the ordered command surface. The initial surface is available
+through `get_commands` and does not emit this invalidation event. The `commands` payload has the same shape and
+ordering as `get_commands`; identical snapshots are not re-emitted.
+
+```json
+{
+  "type": "commands_changed",
+  "commands": [
+    {"name": "session-name", "source": "extension", "syntax": "slash", "sourceInfo": {"path": "/project/extensions/session.ts", "source": "auto", "scope": "project", "origin": "top-level"}},
+    {"name": "skill:debugging", "source": "skill", "syntax": "dollar", "sourceInfo": {"path": "/project/.agents/skills/debugging/SKILL.md", "source": "auto", "scope": "project", "origin": "top-level"}}
+  ]
+}
+```
+
+### command_invocation
+
+Emitted exactly once after the session resolves an extension command, or after a prompt template survives extension
+input interception and prompt acceptance. Unknown, transformed, or rejected commands do not produce this event;
+skills continue to use `skill_invocation`.
+
+```json
+{
+  "type": "command_invocation",
+  "command": {
+    "name": "session-name",
+    "source": "extension",
+    "syntax": "slash",
+    "sourceInfo": {"path": "/project/extensions/session.ts", "source": "auto", "scope": "project", "origin": "top-level"}
+  }
 }
 ```
 

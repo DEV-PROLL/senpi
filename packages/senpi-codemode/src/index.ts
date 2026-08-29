@@ -13,10 +13,16 @@ import {
 	enabledLanguagesFrom,
 	type SessionRuntime,
 } from "./extension/runtime-factory.ts";
+import { jsRuntimeInfo, jsRuntimeLabel } from "./extension/runtime-info.ts";
 import type { CodemodeSessionManager, CreateCodemodeSessionManagerOptions } from "./extension/session-manager.ts";
 import { SessionManagerProxy } from "./extension/session-manager-proxy.ts";
 import { WAKE_SOURCE_STATE_EVENT, type WakeSourceState } from "./extension/wake-source-state.ts";
 import { EvalDetachedCellManager, type EvalDetachedCellStatusEntry } from "./tool/detached-cell-manager.ts";
+import {
+	EVAL_EXECUTION_EVENT,
+	type EvalExecutionEventPayload,
+	toEvalExecutionRpcPayload,
+} from "./tool/eval-execution-event.ts";
 import { createEvalTool } from "./tool/eval-tool.ts";
 import { renderEvalCall, renderEvalResult } from "./tool/render.ts";
 
@@ -38,9 +44,14 @@ export interface CodemodeExtensionAPI {
 	executeTool: AgentExecuteTool;
 	getActiveTools(): string[];
 	getAllTools(): readonly EvalSchemaToolInfo[];
-	sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
-	/** Optional host event bus; a host without one turns wake-source emission into a harmless no-op. */
+	sendMessage(
+		message: { customType: string; content: string; display: boolean },
+		options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
+	): void;
+	/** Optional host event bus; a host without one turns extension event emission into a harmless no-op. */
 	events?: { emit(name: string, data: unknown): void };
+	/** Optional host RPC surface for forwarding extension-owned events to connected clients. */
+	rpc?: { emit(name: string, data: unknown): void };
 }
 
 export interface SenpiCodemodeOptions {
@@ -61,7 +72,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 	let activeContext: ExtensionContext | undefined;
 	let activeCells: EvalDetachedCellManager | undefined;
 	const notifier = new EvalNotifier({
-		sendUserMessage: (content, notifyOptions) => pi.sendUserMessage(content, notifyOptions),
+		sendMessage: (message, notifyOptions) => pi.sendMessage(message, notifyOptions),
 		getContext: () => activeContext,
 		getMode: () => "wake",
 	});
@@ -90,6 +101,11 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 		modelId: string | undefined,
 		cellManager: EvalDetachedCellManager,
 	): void => {
+		const onCellSettled = (payload: EvalExecutionEventPayload): void => {
+			if (activeCells !== cellManager) return;
+			pi.rpc?.emit(EVAL_EXECUTION_EVENT, toEvalExecutionRpcPayload(payload));
+			pi.events?.emit(EVAL_EXECUTION_EVENT, payload);
+		};
 		pi.registerTool(
 			createEvalTool({
 				enabledLanguages: runtime.enabledLanguages,
@@ -102,10 +118,12 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 				artifactsDir: runtime.artifactsDir,
 				cellManager,
 				executionTracker: manager,
+				onCellSettled,
 				renderers,
 				spawns: runtime.spawns,
 				spawnDefaultAgent: runtime.settings.taskTools.task,
 				hostLine: hostLine(),
+				runtimes: runtime.runtimes,
 				...(modelId === undefined ? {} : { modelId }),
 			}),
 		);
@@ -139,6 +157,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			executionTracker: manager,
 			renderers,
 			hostLine: hostLine(),
+			runtimes: { js: jsRuntimeInfo() },
 		}),
 	);
 	pi.registerRemovedToolHint(
@@ -193,7 +212,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 
 function hostLine(): string {
 	const cpu = os.cpus()[0]?.model?.trim();
-	return [`${os.platform()} ${os.arch()}`, cpu, `${os.availableParallelism()} cores`]
+	return [`${os.platform()} ${os.arch()}`, cpu, `${os.availableParallelism()} cores`, jsRuntimeLabel()]
 		.filter((part): part is string => !!part)
 		.join(" \u00b7 ");
 }

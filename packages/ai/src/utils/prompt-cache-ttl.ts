@@ -57,6 +57,7 @@ export function getAnthropicCompat(
 		allowEmptySignature: model.compat?.allowEmptySignature ?? false,
 		unsignedThinkingReplay:
 			model.compat?.unsignedThinkingReplay ?? (model.compat?.allowEmptySignature ? "empty-signature" : "text"),
+		allowedFallbackModels: model.compat?.allowedFallbackModels ?? [],
 		supportsStrictTools: model.compat?.supportsStrictTools ?? false,
 		supportsToolReferences: model.compat?.supportsToolReferences ?? defaultSupportsToolReferences(model),
 		// Default: first-party Anthropic only. Anthropic-compatible providers
@@ -77,6 +78,7 @@ export type ResolvedOpenAICompletionsCompat = Omit<
 	| "supportsPromptCacheKey"
 	| "chatTemplateArgs"
 	| "supportsThinkingTokenBudget"
+	| "thinkingTokenBudgetField"
 > & {
 	cacheControlFormat?: OpenAICompletionsCompat["cacheControlFormat"];
 	supportsPromptCacheKey?: OpenAICompletionsCompat["supportsPromptCacheKey"];
@@ -85,6 +87,7 @@ export type ResolvedOpenAICompletionsCompat = Omit<
 	toolSchemaFlavor?: OpenAICompletionsCompat["toolSchemaFlavor"];
 	chatTemplateArgs?: OpenAICompletionsCompat["chatTemplateArgs"];
 	supportsThinkingTokenBudget?: OpenAICompletionsCompat["supportsThinkingTokenBudget"];
+	thinkingTokenBudgetField?: OpenAICompletionsCompat["thinkingTokenBudgetField"];
 };
 
 /**
@@ -109,6 +112,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Reso
 	const isCloudflareAiGateway = provider === "cloudflare-ai-gateway" || baseUrl.includes("gateway.ai.cloudflare.com");
 	const isNvidia = provider === "nvidia" || baseUrl.includes("integrate.api.nvidia.com");
 	const isAntLing = provider === "ant-ling" || baseUrl.includes("api.ant-ling.com");
+	const isDeepSeek = provider === "deepseek" || baseUrl.toLowerCase().includes("deepseek.com");
 
 	const isNonStandard =
 		isNvidia ||
@@ -118,7 +122,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Reso
 		baseUrl.includes("api.x.ai") ||
 		isTogether ||
 		baseUrl.includes("chutes.ai") ||
-		baseUrl.includes("deepseek.com") ||
+		isDeepSeek ||
 		isZai ||
 		isMoonshot ||
 		provider === "opencode" ||
@@ -129,6 +133,7 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Reso
 
 	const useMaxTokens =
 		baseUrl.includes("chutes.ai") ||
+		isDeepSeek ||
 		isMoonshot ||
 		isCloudflareAiGateway ||
 		isTogether ||
@@ -137,7 +142,6 @@ function detectOpenAICompletionsCompat(model: Model<"openai-completions">): Reso
 		isZai;
 
 	const isGrok = provider === "xai" || baseUrl.includes("api.x.ai");
-	const isDeepSeek = provider === "deepseek" || baseUrl.includes("deepseek.com");
 	const isOpenRouterDeveloperRoleModel =
 		isOpenRouter && (model.id.startsWith("anthropic/") || model.id.startsWith("openai/"));
 	const openRouterCacheControlPrefixes = ["anthropic/", "qwen/", "google/"];
@@ -224,6 +228,7 @@ export function getOpenAICompletionsCompat(model: Model<"openai-completions">): 
 		chatTemplateArgs: model.compat.chatTemplateArgs ?? detected.chatTemplateArgs,
 		zaiToolStream: model.compat.zaiToolStream ?? detected.zaiToolStream,
 		supportsThinkingTokenBudget: model.compat.supportsThinkingTokenBudget ?? detected.supportsThinkingTokenBudget,
+		thinkingTokenBudgetField: model.compat.thinkingTokenBudgetField ?? detected.thinkingTokenBudgetField,
 		supportsStrictMode: model.compat.supportsStrictMode ?? detected.supportsStrictMode,
 		toolSchemaFlavor: model.compat.toolSchemaFlavor ?? detected.toolSchemaFlavor,
 		toolCallFormat: model.compat.toolCallFormat ?? detected.toolCallFormat,

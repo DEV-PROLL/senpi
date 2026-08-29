@@ -3,7 +3,7 @@ import type { FallbackChains } from "./chains.ts";
 export interface ProviderRetrySettings {
 	timeoutMs?: number;
 	streamStartTimeoutMs?: number;
-	streamRetryTimeoutMs?: number; // first-request liveness cap after a provider timeout; default: 30000, 0 disables
+	streamRetryTimeoutMs?: number; // retry-continuation watchdog cap after a provider timeout; reconciled to max(cap, streamStartTimeoutMs) so a granted stream-start budget is never cut short; default: 30000, 0 disables
 	maxRetries?: number;
 	maxRetryDelayMs?: number;
 }
@@ -13,6 +13,7 @@ export interface RetrySettings {
 	maxRetries?: number;
 	baseDelayMs?: number;
 	provider?: ProviderRetrySettings;
+	providers?: Record<string, import("./profile-override.ts").RetryPolicyOverride>;
 	modelFallback?: boolean;
 	fallbackChains?: Record<string, string[]>;
 	fallbackRevertPolicy?: "cooldown-expiry" | "never";
@@ -38,6 +39,15 @@ export const DEFAULT_FALLBACK_CHAINS: FallbackChains = {
 	// vendor-prefixed id `kimi-k3` (e.g. OpenCode Go), which the conservative `k3`
 	// family matcher intentionally cannot capture (issue #793).
 	"claude-fable-5": ["k3:max", "kimi-k3:max", "claude-opus-5:xhigh", "claude-opus-4-8:xhigh"],
+	// Last-resort lane for models with no chain of their own. resolveChainKey
+	// falls through exact -> base -> "*", so any current model whose upstream
+	// hard-fails can still escape instead of wedging the session terminal
+	// (desktop thread 487d7c29, 2026-08-28: nine consecutive upstream 500s on a
+	// chainless model, zero fallback attempts). Same lane order as the Fable
+	// default: cheap family escape first, then the Opus tiers. The candidate
+	// walk skips the failing model itself ("self"), tried selectors, cooldowns,
+	// and unauthenticated providers. Disable with the `"*": []` tombstone.
+	"*": ["k3:max", "kimi-k3:max", "claude-opus-5:xhigh", "claude-opus-4-8:xhigh"],
 };
 
 function cloneDefaultFallbackChains(): Record<string, readonly string[]> {

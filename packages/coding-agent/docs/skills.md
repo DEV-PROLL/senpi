@@ -35,9 +35,10 @@ Senpi loads skills from:
 - CLI: `--skill <path>` (repeatable, additive even with `--no-skills`)
 
 Discovery rules:
-- In `~/.senpi/agent/skills/` and `.senpi/skills/`, direct root `.md` files are discovered as individual skills
+- In `~/.senpi/agent/skills/` and `.senpi/skills/`, direct root `.md` files are discovered as individual skills when they have valid skill frontmatter with a non-empty `description`
 - In all skill locations, directories containing `SKILL.md` are discovered recursively
-- In `~/.agents/skills/` and project `.agents/skills/`, root `.md` files are ignored
+- In `~/.agents/skills/` and project `.agents/skills/`, root `.md` files are ignored, but nested `.md` files in grouping folders are discovered when they declare skill frontmatter
+- Root Markdown files other than `SKILL.md` that do not look like skills are ignored silently
 
 Disable discovery with `--no-skills` (explicit `--skill` paths still load).
 
@@ -71,16 +72,27 @@ For project-level Claude Code skills, add to `.senpi/settings.json`:
 
 This is progressive disclosure: only descriptions are always in context, full instructions load on-demand.
 
-## Skill Commands
+## Skill Invocation
 
-Skills register as `/skill:name` commands:
+Skills register as `/skill:name` commands and also participate in the prompt-leading `$` picker:
 
 ```bash
 /skill:brave-search           # Load and execute the skill
 /skill:pdf-tools extract      # Load skill with arguments
+$brave-search                 # Equivalent leading dollar invocation
 ```
 
-Arguments after the command are appended to the skill content as `User: <args>`.
+Type `$` at the beginning of the interactive editor to browse commands and skills together. Selecting
+a command inserts its canonical `/name ` form; selecting a skill inserts `$name `. Additional leading
+`$` tokens reopen only the skill list, so multiple skills can be composed in source order.
+
+OmO Desktop skill chips serialize as `$skill:name`. Senpi expands that explicit form even when it
+appears inline. Bare inline dollar text remains literal, so `Use $HOME` and `explain $brave-search`
+do not become skill invocations.
+
+After resolving the explicit tokens, Senpi removes only those tokens and wraps the remaining text once
+as the user request. Unknown tokens stay literal, duplicates are skipped, and at most five distinct
+skills expand per prompt.
 
 Toggle skill commands via `/settings` in interactive mode or in `settings.json`:
 
@@ -212,7 +224,7 @@ Senpi validates skills against the Agent Skills standard. Most issues produce wa
 
 Unknown frontmatter fields are ignored.
 
-**Exception:** Skills with missing description are not loaded.
+Declared skills with missing descriptions are not loaded. Malformed `SKILL.md` files and `SKILL.md` files without a description produce warnings and are not loaded. Other Markdown files without valid skill frontmatter are ignored.
 
 Name collisions (same name from different locations) warn and keep the first skill found.
 

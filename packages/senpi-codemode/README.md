@@ -20,11 +20,21 @@ task-tool names are known.
 - Loopback, bearer-authenticated kernel bridge with bounded JSONL frames.
 - Structured status events for file operations, environment access, phases,
   bridge activity, and delegated task progress.
+- One versioned `senpi.eval.execution` event at terminal cell settlement. The
+  in-process event bus receives bounded per-call arguments and result previews
+  for extension-owned consumers; external RPC clients receive a 32 KiB-capped
+  metadata-only projection with wall time, kernel time, exact call counts,
+  pending-call counts, and bounded per-tool aggregates.
 - Bounded streaming output with head/tail previews, column clamping, and
   session-adjacent spill files for large streams.
 - TUI and HTML-export rendering for syntax-highlighted cells, status rows,
   task progress, structured display values, truncation warnings, and image
   fallbacks.
+- Runtime identity badges in eval headers — `eval py (3.14.7, ~/.venv/bin/python3)`,
+  `eval js (node 26.7.0, /opt/…/bin/node)` — with the same `runtime` info on
+  `EvalToolDetails` and its `cells` for RPC consumers; interpreter detection
+  resolves absolute executable paths, and the eval prompt host line names the
+  JS runtime (`node`/`bun`).
 - JavaScript import rewriting for supported local modules and package imports
   in the persistent Node.js worker.
 - GPT models receive a terse `eval` prompt dialect that prioritizes composing

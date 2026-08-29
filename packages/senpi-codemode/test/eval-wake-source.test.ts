@@ -154,8 +154,8 @@ class WiringPi {
 	async executeTool(): Promise<never> {
 		throw new Error("nested tool execution was not expected");
 	}
-	sendUserMessage(content: string): void {
-		this.messages.push(content);
+	sendMessage(message: { customType: string; content: string; display: boolean }): void {
+		this.messages.push(message.content);
 	}
 	async emit(event: string, payload: unknown, ctx: ExtensionContext): Promise<void> {
 		for (const entry of this.handlers.filter((handler) => handler.event === event)) await entry.handler(payload, ctx);
@@ -268,7 +268,7 @@ describe("wake source liveness wiring", () => {
 
 		kernel.completeDeferredRun(result("wire-cell", "42"));
 		await vi.waitFor(() =>
-			expect(busEmissions.at(-1)).toEqual({
+			expect(busEmissions.filter((emission) => emission.name === "wake_source_state").at(-1)).toEqual({
 				name: "wake_source_state",
 				data: { source: "senpi-codemode", activeCount: 0, items: [] },
 			}),

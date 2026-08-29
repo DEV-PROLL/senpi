@@ -53,6 +53,7 @@ import { computeEffectiveKeepRecentTokens, computeEffectiveThreshold } from "./p
 import { buildPrompt, type MergedCompactionPromptVariant } from "./prompts.ts";
 import { repairOrphanedToolResults } from "./repair-tool-pairs.ts";
 import { allowSummarizationRetry, DEFAULT_SUMMARIZATION_RETRY_POLICY } from "./summarization-retry.ts";
+import { normalizeSummarizationTurnOrder } from "./summarization-turn-order.ts";
 import { extractTaskIntent, resolveInheritedTaskIntent } from "./task-intent.ts";
 import * as truncation from "./tool-truncation.ts";
 import { computeStructuralYield } from "./yield.ts";
@@ -79,6 +80,7 @@ export interface SpeculativeCompactionContext {
 	getMessageRevision(): number;
 	getSystemPrompt?(): string;
 	prepareProviderRequest?(messages: AgentMessage[]): Promise<ProviderRequestPreparation>;
+	isIdle?(): boolean;
 	applyCompaction(
 		precomputed: CompactionResult,
 		options: {
@@ -288,7 +290,9 @@ async function generateSummaryMessage(options: {
 		const providerRequest = await options.context.prepareProviderRequest?.(requestMessages);
 		const requestContext = {
 			systemPrompt: options.snapshot.systemPrompt ?? options.prompt.system,
-			messages: repairOrphanedToolResults(convertToLlm(providerRequest?.messages ?? requestMessages)),
+			messages: repairOrphanedToolResults(
+				normalizeSummarizationTurnOrder(convertToLlm(providerRequest?.messages ?? requestMessages)),
+			),
 			...(options.snapshot.tools && options.snapshot.tools.length > 0 ? { tools: options.snapshot.tools } : {}),
 		};
 		const headers = providerRequest
@@ -633,6 +637,10 @@ export async function applyGeneratedCompaction(
 	compaction: CompactionResult | undefined,
 	signal?: AbortSignal,
 ): Promise<SpeculativeCompactionResult> {
+	const provider = context.model?.provider;
+	if ((provider === "cursor" || provider === "cursor-cli-oauth") && context.isIdle && !context.isIdle()) {
+		return { applied: false, reason: "rejected" };
+	}
 	if (!snapshot || !compaction) return { applied: false, reason: "unavailable" };
 
 	if (snapshot.generation !== getCurrentGeneration()) {

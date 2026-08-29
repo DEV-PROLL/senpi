@@ -44,7 +44,10 @@ export type ProxyAssistantMessageEvent =
 	| { type: "toolcall_start"; contentIndex: number; id: string; toolName: string }
 	| { type: "toolcall_delta"; contentIndex: number; delta: string }
 	| {
-			/** Servers SHOULD send the final ToolCall; flagged incomplete calls emit no argument deltas, so delta reconstruction alone cannot represent them. */
+			/**
+			 * Servers SHOULD send the final ToolCall; flagged incomplete calls emit no argument deltas, so delta
+			 * reconstruction alone cannot represent them, and metadata such as `namespace` only exists on the final call.
+			 */
 			type: "toolcall_end";
 			contentIndex: number;
 			toolCall?: ToolCall;
@@ -67,6 +70,7 @@ type ProxySerializableStreamOptions = Pick<
 	| "samplingParams"
 	| "maxTokens"
 	| "reasoning"
+	| "thinkingSelection"
 	| "cacheRetention"
 	| "sessionId"
 	| "headers"
@@ -110,6 +114,7 @@ function buildProxyRequestOptions(options: ProxyStreamOptions): ProxySerializabl
 		samplingParams: options.samplingParams,
 		maxTokens: options.maxTokens,
 		reasoning: options.reasoning,
+		thinkingSelection: options.thinkingSelection,
 		cacheRetention: options.cacheRetention,
 		sessionId: options.sessionId,
 		headers: options.headers,

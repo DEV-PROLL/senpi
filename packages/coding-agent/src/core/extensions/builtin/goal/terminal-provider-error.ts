@@ -8,7 +8,9 @@ import { lastAssistantMessage } from "./last-assistant-message.ts";
 // NNNs` suffix vary, so they are not part of the match.
 const SDK_OAUTH_EXHAUSTION_MARKERS = ["API Error: Server is temporarily limiting requests", "accounts exhausted"];
 
-function isSdkOauthAccountExhaustion(message: { api?: string; stopReason?: string; content?: unknown } | undefined): boolean {
+function isSdkOauthAccountExhaustion(
+	message: { api?: string; stopReason?: string; content?: unknown } | undefined,
+): boolean {
 	if (message?.api !== "claude-sdk-oauth" || message.stopReason !== "stop") return false;
 	const text = Array.isArray(message.content)
 		? message.content.map((part) => (part?.type === "text" ? part.text : "")).join("\n")
@@ -21,5 +23,5 @@ export function didTerminalProviderErrorEndTurn(event: AgentEndEvent): boolean {
 	if (event.willRetry !== false) return false;
 	const message = lastAssistantMessage(event.messages);
 	if (isSdkOauthAccountExhaustion(message)) return true;
-	return message?.stopReason === "error" || (message?.stopReason === "aborted" && event.abortSource === undefined);
+	return message?.stopReason === "error" || (message?.stopReason === "aborted" && event.abortSource !== "user");
 }
