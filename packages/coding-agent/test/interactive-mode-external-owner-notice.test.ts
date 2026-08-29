@@ -58,10 +58,13 @@ const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 	event: Record<string, unknown>,
 ) => Promise<void>;
 
-function externalOwnerEvent(reason = "threshold") {
+// Real production shape: core `_rejectCompaction(..., true, reason)` emits the
+// external-owner rejection with `aborted: true` (agent-session.ts _rejectCompaction).
+function externalOwnerEvent(reason = "pre_prompt") {
 	return {
 		type: "compaction_end",
 		reason,
+		aborted: true,
 		accepted: false,
 		rejectionCause: "external-owner",
 		errorMessage: EXTERNAL_OWNER_MESSAGE,
@@ -82,7 +85,7 @@ describe("external-owner compaction rejection rendering", () => {
 		initTheme("dark");
 	});
 
-	test("two auto external-owner rejections render exactly one muted notice and no error line", async () => {
+	test("two real-shape (aborted) auto external-owner rejections render exactly one muted notice and no error line", async () => {
 		const fakeThis = makeFakeThis();
 
 		await handleEvent.call(fakeThis, externalOwnerEvent());
@@ -155,6 +158,71 @@ describe("external-owner compaction rejection rendering", () => {
 
 		await handleEvent.call(fakeThis, externalOwnerEvent());
 		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(2);
+	});
+
+	test("cycleModel re-arms the one-time notice and clears the footer marker", async () => {
+		const fakeThis = Object.assign(makeFakeThis(), {
+			session: {
+				abortCompaction: vi.fn(),
+				cycleModel: vi.fn().mockResolvedValue({
+					model: { id: "next-model", name: "Next Model", reasoning: false },
+					thinkingLevel: "off",
+				}),
+				favoriteModels: [],
+			},
+			updateEditorBorderColor: vi.fn(),
+			showRiskyMainModelWarning: vi.fn(),
+			maybeWarnAboutAnthropicSubscriptionAuth: vi.fn().mockResolvedValue(undefined),
+		});
+		const cycleModel = Reflect.get(InteractiveMode.prototype, "cycleModel") as (
+			this: typeof fakeThis,
+			direction: "forward" | "backward",
+		) => Promise<void>;
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		await cycleModel.call(fakeThis, "forward");
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(false);
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(2);
+	});
+
+	test("retry_fallback_applied re-arms the one-time notice and clears the footer marker", async () => {
+		const fakeThis = Object.assign(makeFakeThis(), {
+			showNoticeBox: vi.fn(),
+			setExtensionStatus: vi.fn(),
+		});
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		await handleEvent.call(fakeThis, {
+			type: "retry_fallback_applied",
+			from: "model-a",
+			to: "model-b",
+			reason: "provider-error",
+		});
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(false);
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(2);
+	});
+
+	test("transcript rebuilds re-arm the notice so the next rejection renders it again", async () => {
+		const fakeThis = makeFakeThis();
+		const rebuildChatFromMessages = Reflect.get(InteractiveMode.prototype, "rebuildChatFromMessages") as (
+			this: FakeThis,
+		) => void;
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(1);
+
+		// Branch navigation / reload / settings rebuilds clear the chat and rerender.
+		rebuildChatFromMessages.call(fakeThis);
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(false);
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(0);
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(1);
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(true);
 	});
 
 	test("rebindCurrentSession tolerates harness contexts without a footer", async () => {
