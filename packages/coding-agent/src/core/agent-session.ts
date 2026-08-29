@@ -865,7 +865,14 @@ export function truncateToolResultBodies(
 				: 0),
 		0,
 	);
-	const effectiveMaxBytes = totalBodyBytes > maxBytes ? Math.max(0, maxBytes - textPartCount * markerBytes) : maxBytes;
+	// Cursor serializes history twice (root prompt JSON and turn blobs), with
+	// protobuf/envelope metadata around both copies. Keep a conservative raw
+	// body budget so the representation that reaches the wire stays bounded.
+	const serializedBodyMaxBytes = Math.floor(maxBytes / 2.5);
+	const effectiveMaxBytes =
+		totalBodyBytes > serializedBodyMaxBytes
+			? Math.max(0, serializedBodyMaxBytes - textPartCount * markerBytes)
+			: serializedBodyMaxBytes;
 	let usedBytes = 0;
 	let changed = false;
 	const result = messages.slice();
@@ -892,7 +899,7 @@ export function truncateToolResultBodies(
 			const text = part.text;
 			const graphemes = [...segmenter.segment(text)].map((segment) => segment.segment);
 			const fullBytes = byteLength(text);
-			if (graphemes.length <= maxChars && usedBytes + fullBytes <= maxBytes) {
+			if (graphemes.length <= maxChars && usedBytes + fullBytes <= effectiveMaxBytes) {
 				usedBytes += fullBytes;
 				continue;
 			}
@@ -5504,14 +5511,14 @@ export class AgentSession {
 			fromHook: fromExtension,
 		};
 
-		const simulatedMessages = buildSessionContext(
+		let simulatedMessages = buildSessionContext(
 			[...pathEntries, simulatedCompactionEntry],
 			simulatedCompactionEntry.id,
 		).messages;
 		// Size the same retained context that will be admitted to Cursor. Persisted JSONL
 		// remains verbatim, but the in-memory request representation is bounded first.
 		if (model.provider === "cursor" || model.provider === "cursor-cli-oauth") {
-			truncateToolResultBodies(simulatedMessages);
+			simulatedMessages = truncateToolResultBodies(simulatedMessages).messages ?? simulatedMessages;
 		}
 		const contextTokens = estimateMessagesTokens(filterContextExcludedMessages(simulatedMessages));
 		const settings = this.settingsManager.getCompactionSettings();
