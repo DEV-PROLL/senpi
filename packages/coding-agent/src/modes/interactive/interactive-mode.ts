@@ -3799,7 +3799,9 @@ export class InteractiveMode {
 		// so they work correctly regardless of which editor is active
 		this.defaultEditor.onEscape = () => {
 			if (this.session.isStreaming || this.session.retryAttempt > 0) {
-				void this.abortAndFireQueuedMessages();
+				void this.abortAndFireQueuedMessages().catch((error) =>
+					this.showError(error instanceof Error ? error.message : String(error)),
+				);
 			} else if (this.session.isBashRunning) {
 				this.session.abortBash();
 			} else if (this.isBashMode) {
