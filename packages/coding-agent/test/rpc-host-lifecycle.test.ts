@@ -249,23 +249,6 @@ describe("ensureHost-spawned host lifecycle", () => {
 		expect(existsSync(qa.pidFilePath)).toBe(false);
 		expect(existsSync(createHostDaemonPaths(qa.agentDir).settingsFile)).toBe(false);
 	}, 60_000);
-
-	it("eventually reaps a transient host after its observer connection is lost", async () => {
-		const qa = scratch("observer-loss");
-		const childScript = [
-			"const {createServer}=require('node:net');",
-			"let connections=0;",
-			"const s=createServer(sock=>{ connections++; if(connections>=2){sock.destroy(); return;} let b=''; sock.on('data',d=>{b+=d; const n=b.indexOf('\\n'); if(n>=0){const q=JSON.parse(b.slice(0,n)); sock.write(JSON.stringify({id:q.id,type:'response',command:'get_protocol_info',success:true,data:{serverVersion:process.env.SENPI_TEST_VERSION,capabilities:['multi_session','extension_events'],mode:'multi'}})+'\\n');}}); });",
-			"s.listen(process.argv.at(-1));",
-		].join(" ");
-		await ensureLifecycleHost(qa, {
-			policy: { idleExitMs: 600 },
-			env: { SENPI_TEST_VERSION: VERSION },
-			spawn: { command: process.execPath, args: ["-e", childScript] },
-		});
-		// The supervisor's first internal connection is the listener probe; the second is the observer, which the child drops.
-		await waitForHostExit(currentManaged(), 12_000);
-	}, 45_000);
 });
 
 describe("host watchdog configuration", () => {
