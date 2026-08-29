@@ -64,14 +64,19 @@ export async function executeBashWithOperations(
 	let callbackError: unknown;
 	let hasCallbackError = false;
 	const callbackPromises = new Set<Promise<void>>();
-	const waitForCallbacks = async (allowAbandonment: boolean): Promise<void> => {
-		if (callbackPromises.size === 0) return;
-		const settled = Promise.allSettled([...callbackPromises]).then(() => undefined);
-		if (!allowAbandonment) {
-			await settled;
-			return;
+	const waitForCallbacks = async (allowAbandonment: boolean): Promise<boolean> => {
+		if (callbackPromises.size === 0) return true;
+		const settled = Promise.allSettled([...callbackPromises]).then(() => true);
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const bounded = new Promise<false>((resolve) => {
+			timeout = setTimeout(resolve, allowAbandonment ? 100 : NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS, false);
+			timeout.unref?.();
+		});
+		try {
+			return await Promise.race([settled, bounded]);
+		} finally {
+			if (timeout) clearTimeout(timeout);
 		}
-		await Promise.race([settled, new Promise<void>((resolve) => setTimeout(resolve, 100))]);
 	};
 	let outputChunkStart = 0;
 	let outputBytes = 0;
@@ -310,11 +315,15 @@ export async function executeBashWithOperations(
 
 	// Normal completion has a generous bound for observer callbacks: unlike the
 	// cancellation path, it must not hang forever on an observer that never
-	// settles, while still allowing legitimately slow callbacks to finish.
-	await Promise.race([
-		waitForCallbacks(false),
-		new Promise<void>((resolve) => setTimeout(resolve, NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS)),
-	]);
+	// settles, while still allowing legitimately slow callbacks to finish. A
+	// callback that exceeds the public bound is an execution failure, not silent
+	// abandonment, so its spill is cleaned before the caller is released.
+	const callbacksSettled = await waitForCallbacks(false);
+	if (!callbacksSettled) {
+		return await closeTempFileAndCleanup(
+			new Error(`Bash output callback did not settle within ${NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS}ms`),
+		);
+	}
 	if (hasCallbackError) {
 		return await closeTempFileAndCleanup(callbackError);
 	}

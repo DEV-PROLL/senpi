@@ -79,10 +79,10 @@ export async function createInteractiveHostRuntime(
 			opened.state,
 			options.onWarning,
 		);
-		if (opened.state.isBashRunning) {
-			// Execution callback maps are connection-local. A reattached proxy cannot
-			// safely resume UUID-tagged updates from the old connection, so terminate
-			// the orphaned host execution; the host capture path cleans its spill.
+		if (opened.state.isBashRunning && !opened.attached) {
+			// Only a newly opened session can have an execution orphaned by a
+			// previous connection. An attach is an observer of the same live runtime;
+			// aborting it would cancel work owned by the surviving attachment.
 			await client.abortBash().catch(() => {});
 		}
 		return new RemoteInteractiveRuntime(localRuntime, remoteSession, client) as unknown as AgentSessionRuntime;
@@ -235,14 +235,19 @@ function createRemoteSessionProxy(
 		});
 	};
 	let state = { ...initialState };
-	const waitForBashCallbacks = async (promises: Set<Promise<void>>, allowAbandonment: boolean): Promise<void> => {
-		if (promises.size === 0) return;
-		const settled = Promise.allSettled([...promises]).then(() => undefined);
-		if (!allowAbandonment) {
-			await settled;
-			return;
+	const waitForBashCallbacks = async (promises: Set<Promise<void>>, allowAbandonment: boolean): Promise<boolean> => {
+		if (promises.size === 0) return true;
+		const settled = Promise.allSettled([...promises]).then(() => true);
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const bounded = new Promise<false>((resolve) => {
+			timeout = setTimeout(resolve, allowAbandonment ? 100 : 5_000, false);
+			timeout.unref?.();
+		});
+		try {
+			return await Promise.race([settled, bounded]);
+		} finally {
+			if (timeout) clearTimeout(timeout);
 		}
-		await Promise.race([settled, new Promise<void>((resolve) => setTimeout(resolve, 100))]);
 	};
 	const executionNamespace = randomUUID();
 	const cleanupRemoteBashOutput = async (path: string): Promise<void> => {
@@ -543,7 +548,11 @@ function createRemoteSessionProxy(
 							executionId,
 							operations: options?.operations as Record<string, unknown> | undefined,
 						});
-						await waitForBashCallbacks(execution.promises, false);
+						const callbacksSettled = await waitForBashCallbacks(execution.promises, false);
+						if (!callbacksSettled) {
+							if (result.fullOutputPath) await cleanupRemoteBashOutput(result.fullOutputPath);
+							throw new Error("Bash output callback did not settle within 5000ms");
+						}
 						if (execution.hasError) {
 							if (result.fullOutputPath) await cleanupRemoteBashOutput(result.fullOutputPath);
 							throw execution.error;

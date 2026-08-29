@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+### Fixed
+
+- Bash callback settlement is bounded on direct, shared-host, and harness execution paths so never-settling callbacks cannot hang commands or silently lose spill cleanup failures.
+
+- Deterministic compaction fallback now supports replay-safe Gemini opaque provider state (thoughtSignature, thinkingSignature, textSignature, and empty visible text blocks) and recovers earlier safe boundaries without breaking atomic tool-call chains ([#947](https://github.com/code-yeongyu/senpi/pull/947)).
+
+### New Features
+
 ### Breaking Changes
 
 ### Added
@@ -110,6 +120,7 @@
 
 ### Fixed
 
+- Shift+Enter now inserts a newline instead of submitting in direct Warp-on-WSL sessions, while plain Enter and other terminal paths remain unchanged ([#1109](https://github.com/code-yeongyu/senpi/pull/1109) by [@deopa0402](https://github.com/deopa0402)).
 - Goal tool results (`create_goal`, `update_goal`, `get_goal`) now render as a TUI widget — status-colored header with compact token and elapsed usage, objective preview (full objective plus created/updated timestamps when expanded), and the blocked reason — instead of dumping the raw JSON payload into the transcript. The model-facing JSON result text is unchanged.
 
 - The interactive fast-mode indicator and RPC fast-mode state now clear when a session switches from a Codex model to a non-Codex model, instead of retaining a stale `⚡` marker from the previous provider.

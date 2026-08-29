@@ -5,6 +5,7 @@
 ### What changed
 
 - `packages/coding-agent/src/core/agent-session.ts`
+- `packages/coding-agent/src/core/bash-executor.ts`
 
 ### Why
 
@@ -17,6 +18,7 @@
 ### Expected merge conflict zones
 
 - `packages/coding-agent/src/core/agent-session.ts`
+- `packages/coding-agent/src/core/bash-executor.ts`
 
 ## 2026-08-29 - Complete shared-host shell callback propagation
 
@@ -37,54 +39,41 @@
 
 - LOW: bash callback dispatch in `agent-session.ts` and shared-host execution routing.
 
-## 2026-08-29 - Observe async local shell callback failures
+## 2026-08-29 - Bound bash callback settlement and cleanup
 
 ### What changed
 
-- `packages/coding-agent/src/core/agent-session.ts`: shared-host bash callback failures are observed through cleanup.
-- `packages/coding-agent/src/core/bash-executor.ts`: async `onChunk` rejections are now observed,
-  abort the active command, and preserve the original rejection reason through spill cleanup.
-- Extended `test/suite/regressions/bash-spill-local-on-chunk.test.ts` with stdout and stderr
-  regressions for rejected strings, objects, and Errors, including unhandled-rejection coverage.
+- `packages/coding-agent/src/core/bash-executor.ts` bounds callback settlement on normal completion, reports callback abandonment as an execution error, and clears or unreferences its race timer.
 
 ### Why
 
-- An async callback assigned to the synchronous callback type previously left rejected promises
-  unhandled, allowed execution to resolve successfully, and left large-output spill files behind.
+- A never-settling output callback could hang a command indefinitely or leave a late callback failure and large-output spill unobserved.
 
 ### Why an extension could not handle it
 
-- Callback invocation and process cancellation are owned by the core executor and local shell
-  operations, before extension code can observe or finalize the spill lifecycle.
+- Bash callback settlement and spill-file cleanup are owned by the core executor lifecycle before extension code can observe the completed command.
 
 ### Expected merge conflict zones
 
-- `bash-executor.ts`: callback invocation and command cleanup settlement.
-- `bash-spill-local-on-chunk.test.ts`: local stream callback regression coverage.
+- `packages/coding-agent/src/core/bash-executor.ts`: callback settlement timeout and final spill cleanup.
 
-## 2026-08-29 - Route local shell callback failures through spill cleanup
+## 2026-08-29 - GLM-5.3 model resolver defaults
 
 ### What changed
 
-- `packages/coding-agent/src/core/tools/bash.ts`: local stdout/stderr data listeners now catch
-  arbitrary `onData` failures, stop the child process, and rethrow through the executor's cleanup
-  boundary so failed large-output spills are finalized and removed.
-- Added `test/suite/regressions/bash-spill-local-on-chunk.test.ts` with a real local shell command
-  whose `onChunk` callback throws a string.
+- `packages/coding-agent/src/core/model-resolver.ts`: retain the GLM-5.3 Z.AI global and China default model and prompt-preset resolution introduced by this PR.
 
 ### Why
 
-- A callback throw from a real local stream listener escaped the executor promise, allowing the
-  command to resolve and leaving its spill file on disk.
+- The new Z.AI model family must remain the default for both coding-plan provider variants after synchronizing with upstream changes.
 
 ### Why an extension could not handle it
 
-- The local process data listeners are installed by the built-in `createLocalShellOperations`
-  backend, before extension callbacks reach the executor's cleanup boundary.
+- Provider defaults and model-pattern resolution are core resolver behavior that runs before extension hooks and cannot be replaced by an extension.
 
 ### Expected merge conflict zones
 
-- `tools/bash.ts`: local stream listener registration and abort handling.
+- `packages/coding-agent/src/core/model-resolver.ts`: provider default mappings and model pattern resolution.
 
 ## 2026-08-29 - Make externally owned compaction delegation sticky
 
@@ -105,6 +94,24 @@
 
 - `agent-session.ts`: compaction state, automatic admission methods, rejection handling, model selection invalidation, and tree navigation.
 
+## 2026-08-29 - Experimental bash eval-only policy
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: adds the `experimental.bashEvalOnly` setting and its getter.
+- `packages/coding-agent/src/core/agent-session.ts`: resolves the policy from settings in the constructor and on reload, hides the `bash` and `powershell` tools while the registered `eval` tool is present, executes them through the registry without activation, publishes per-tool eval-cell hints, adds system-prompt guidance, and retains withheld tools so disarming restores direct access.
+
+### Why
+
+- Codemode can keep invoking `bash` and `powershell` from eval cells while preventing those tools from being advertised as direct model tools. The policy is inert when codemode's `eval` tool is unavailable, so shell access is never lost.
+
+### Why an extension could not handle it
+
+- Active tool visibility, lazy activation, the wrapped registry, and the agent-loop removed-tool hint map are coordinated inside `AgentSession`; an extension cannot atomically enforce these boundaries.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: active-tool selection, tool registry refresh, reload, and system-prompt assembly.
 ## 2026-08-29 - Withheld tools are filtered at the advertisement seam
 
 ### What changed
@@ -287,24 +294,21 @@
 
 - `packages/coding-agent/src/core/bash-executor.ts`: attaches an `error` listener as soon as the
   full-output `WriteStream` is created, records the first failure, and rejects the bash execution
-  through the existing close boundary even when the stream failed before command settlement.
+  through the terminal `close` boundary even when a late filesystem close failure follows `finish`.
+- The close helper waits for `close`, preserves the first storage failure, and removes its error and
+  close listeners after settlement so a stream cannot resolve successfully before final storage state
+  is known or retain listeners after cleanup.
 - Successful command finalization now runs outside the command-execution catch, so an already-set
   abort signal cannot reinterpret a spill close failure as a successful cancelled result.
 - Decoder flushing and output preparation now close the spill stream before propagating a callback
   or formatting failure; if cleanup also fails, both errors are preserved in an `AggregateError`.
-- `packages/coding-agent/src/core/bash-executor.ts`: spill finalization now settles only after
-  terminal `close`, rejects premature close, and preserves command-plus-close failures in causal
-  `AggregateError` order.
-- Failed executor spills are removed after stream teardown; successful and surfaced cancelled
-  results retain their readable `fullOutputPath`, and removal failures are preserved after the
-  primary error.
 
 ### Why
 
 - A full `/tmp` or exhausted user quota can make the spill stream emit `ENOSPC` or `EDQUOT` while
-  command output is still arriving. The only previous listener was installed after execution
-  finished, so the early `error` event escaped to the process-level `uncaughtException` handler and
-  terminated the interactive session instead of failing only the bash tool call.
+  command output is still arriving, or during the final filesystem close after `finish`. The close
+  path must therefore wait for `close`, rather than treating `finish` as durable completion; the first
+  storage failure is reported instead of returning a successful result with an incomplete path.
 
 ### Why an extension could not handle it
 
@@ -314,8 +318,6 @@
 ### Expected merge conflict zones
 
 - LOW: the temp-file stream creation and close lifecycle in `bash-executor.ts`.
-- MEDIUM: the `executeBashWithOperations` settlement flow now owns terminal close, causal error
-  precedence, and failure-only artifact cleanup.
 
 ## 2026-08-26 - Continue provider fallback after failed required compaction
 

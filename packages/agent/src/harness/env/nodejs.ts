@@ -563,10 +563,20 @@ export class NodeExecutionEnv implements ExecutionEnv {
 					// this generous bound preserves slow, legitimate callbacks without hanging
 					// the execution forever.
 					const callbacksSettled = Promise.allSettled([...callbackPromises]);
-					await Promise.race([
-						callbacksSettled,
-						new Promise<void>((resolve) => setTimeout(resolve, NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS)),
-					]);
+					let callbackTimeout: ReturnType<typeof setTimeout> | undefined;
+					const callbackBound = new Promise<boolean>((resolve) => {
+						callbackTimeout = setTimeout(() => resolve(false), NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS);
+						callbackTimeout.unref?.();
+					});
+					try {
+						const settled = await Promise.race([callbacksSettled.then(() => true), callbackBound]);
+						if (!settled && !callbackError) {
+							settle(err(new ExecutionError("callback_error", "Output callback did not settle within 5000ms")));
+							return;
+						}
+					} finally {
+						if (callbackTimeout) clearTimeout(callbackTimeout);
+					}
 					if (callbackError) {
 						settle(err(callbackError));
 						return;
