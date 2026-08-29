@@ -15,6 +15,8 @@
 
 ### Fixed
 
+- `cursor-cli-oauth` no longer mixes Cursor's internal tool-call protocol, arguments, and results into assistant text; Cursor still owns execution, while Senpi now stores and renders only the model's actual prose ([OmO #7169](https://github.com/code-yeongyu/oh-my-openagent/issues/7169)).
+
 - On the `claude-sdk-oauth` lane, the "Compaction rejected: the Claude Agent SDK owns compaction for
   this session" notice now renders at most once per delegation episode as a muted informational line
   instead of repainting a red error line every turn, and the footer context meter shows an `(SDK)`
