@@ -18,6 +18,63 @@
 
 - `packages/coding-agent/src/core/agent-session.ts`
 
+## 2026-08-29 - Final shared-host bash callback coverage
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`
+- `packages/coding-agent/src/core/bash-executor.ts`
+
+### Why
+
+- Preserve callback rejection through shared-host cleanup.
+
+### Why an extension could not handle it
+
+- Core callback dispatch owns this boundary.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`
+- `packages/coding-agent/src/core/bash-executor.ts`
+
+## 2026-08-29 - Complete shared-host shell callback propagation
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` now observes asynchronous bash output callbacks and preserves the original callback failure through cleanup.
+- `packages/coding-agent/src/modes/interactive/interactive-host-runtime.ts` aborts shared-host commands when those callbacks reject and rethrows the original value at the client boundary.
+
+### Why
+
+- The shared-host execution path could otherwise resolve successfully after an asynchronous callback rejection and leave its large-output spill file behind.
+
+### Why an extension could not handle it
+
+- The callback is dispatched by the core session and RPC host boundary before extension code can finalize execution cleanup.
+
+### Expected merge conflict zones
+
+- LOW: bash callback dispatch in `agent-session.ts` and shared-host execution routing.
+
+## 2026-08-29 - Bound bash callback settlement and cleanup
+
+### What changed
+
+- `packages/coding-agent/src/core/bash-executor.ts` bounds callback settlement on normal completion, reports callback abandonment as an execution error, and clears or unreferences its race timer.
+
+### Why
+
+- A never-settling output callback could hang a command indefinitely or leave a late callback failure and large-output spill unobserved.
+
+### Why an extension could not handle it
+
+- Bash callback settlement and spill-file cleanup are owned by the core executor lifecycle before extension code can observe the completed command.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/bash-executor.ts`: callback settlement timeout and final spill cleanup.
+
 ## 2026-08-29 - GLM-5.3 model resolver defaults
 
 ### What changed
@@ -40,19 +97,6 @@
 
 ### What changed
 
-- `packages/coding-agent/src/core/agent-session.ts`: Cursor tool-result truncation is immutable and request-scoped, bounds worst-case escaped/enveloped serialized payload cost, preserves newest results under the aggregate bound, and omits the marker when its serialized cost cannot fit.
-
-### Why
-
-- Cursor serializes tool-result history into duplicated JSON and protobuf envelopes; the request view must be bounded before provider admission.
-
-### Why an extension could not handle it
-
-- AgentSession owns provider admission and the request-only transform boundary.
-
-### Expected merge conflict zones
-
-- `packages/coding-agent/src/core/agent-session.ts`
 - `packages/coding-agent/src/core/agent-session.ts`: remember the provider and model id after an automatic compaction is rejected by an external owner, suppressing repeated automatic attempts until that key changes, compaction is accepted, or runtime ownership is reconfigured by reload/registry refresh. Manual compaction remains admitted.
 - Added `test/suite/regressions/1174-sticky-delegated-compaction.test.ts` covering repeated turns, manual compaction, and model changes.
 

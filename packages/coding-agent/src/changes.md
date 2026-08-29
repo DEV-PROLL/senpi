@@ -19,6 +19,25 @@
 
 - LOW: Cursor admission constants and `truncateToolResultBodies()` in `agent-session.ts`.
 
+## 2026-08-29 - Propagate shared-host bash callback failures
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` observes asynchronous bash output callbacks and preserves callback failures through cleanup.
+- `packages/coding-agent/src/modes/interactive/interactive-host-runtime.ts` aborts shared-host commands when callbacks reject and rethrows the original value.
+
+### Why
+
+- Public shared-host bash execution could resolve successfully after an asynchronous callback rejection and leave large-output spill files behind.
+
+### Why an extension could not handle it
+
+- Core session and RPC proxy callback dispatch occurs before extension code can finalize execution cleanup.
+
+### Expected merge conflict zones
+
+- LOW: bash callback dispatch in the core session and interactive host runtime.
+
 ## Honor --auto-title-sessions outside interactive mode (2026-08-28)
 
 ### What changed
