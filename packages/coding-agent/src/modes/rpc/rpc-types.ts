@@ -6,7 +6,7 @@
  */
 
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { ImageContent, Model } from "@earendil-works/pi-ai";
+import type { ImageContent, Model, ThinkingSelection } from "@earendil-works/pi-ai";
 import type { AgentAbortSource } from "../../core/agent-abort-provenance.ts";
 import type { PromptDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
@@ -260,6 +260,12 @@ export interface RpcLoadedMcpServer {
 export interface RpcSessionState {
 	model?: Model<any>;
 	thinkingLevel: ThinkingLevel;
+	/**
+	 * Explicit selector provenance for `thinkingLevel`, absent for SDK-defaulted
+	 * effective levels. An attached client cannot distinguish "the user chose high"
+	 * from "high is simply the effective level" without it.
+	 */
+	thinkingSelection?: ThinkingSelection;
 	/**
 	 * Abort owner of the most recent aborted turn, or the in-flight one while it is
 	 * still settling. Retained after settle: the live session getter is transient, so a
@@ -618,6 +624,12 @@ export type RpcExtensionUIResponse =
 export interface RpcThinkingLevelChangedEvent {
 	type: "thinking_level_changed";
 	level: ThinkingLevel;
+	/**
+	 * Selector provenance in force after the change; absent when the level is an
+	 * SDK-defaulted effective level rather than an explicit choice. Additive: an old
+	 * client that does not know the field ignores it.
+	 */
+	thinkingSelection?: ThinkingSelection;
 }
 
 export interface RpcHighReasoningWarningEvent {
@@ -659,6 +671,8 @@ export interface RpcModelChangedEvent {
 	thinkingLevel: ThinkingLevel;
 	/** Why the model changed: "set", "cycle", "restore", "fallback", or "fallback-revert". */
 	source: string;
+	/** Selector provenance for `thinkingLevel` after the switch, when one was explicit. */
+	thinkingSelection?: ThinkingSelection;
 }
 
 /** Emitted when the effective service tier or fast-mode state of the session changes. */

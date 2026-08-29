@@ -161,6 +161,7 @@ export function buildRpcSessionState(session: AgentSession, lastAbortSource?: Ag
 	return {
 		model: session.model,
 		thinkingLevel: session.thinkingLevel,
+		...(session.thinkingSelection ? { thinkingSelection: session.thinkingSelection } : {}),
 		...(lastAbortSource ? { lastAbortSource } : {}),
 		serviceTier: session.effectiveServiceTier,
 		fastMode: session.isFastModeActive(),
@@ -716,6 +717,13 @@ export function createRpcConnectionHandler(
 				}
 				if (event.type === "command_invocation") {
 					outputEvent(event satisfies RpcCommandInvocationEvent);
+					return;
+				}
+				if (event.type === "thinking_level_changed" || event.type === "model_changed") {
+					// Core emits the effective level only; the selection provenance lives beside it
+					// on the session and is what distinguishes an explicit choice from a default.
+					const thinkingSelection = session.thinkingSelection;
+					outputEvent(thinkingSelection === undefined ? event : { ...event, thinkingSelection });
 					return;
 				}
 				if (event.type === "agent_end") {

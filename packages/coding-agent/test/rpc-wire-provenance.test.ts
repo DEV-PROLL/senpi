@@ -9,6 +9,7 @@
  *
  *  1. Session replacement is not broadcast to other attached clients.
  *  4. User abort provenance is lost across the RPC boundary.
+ *  8. Thinking-selection provenance is absent from state and change events.
  */
 
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
@@ -198,6 +199,42 @@ describe("RPC wire provenance", () => {
 		await handler.handleInputLine(JSON.stringify({ id: "state-4", type: "get_state" }));
 		const stateResponse = await collected.waitFor((record) => record.id === "state-4");
 		expect((stateResponse.data as Record<string, unknown>).lastAbortSource).toBe("user");
+
+		await handler.dispose();
+	});
+
+	// Finding 8 -----------------------------------------------------------------
+	it("publishes thinking-selection provenance in session state and the thinking change event", async () => {
+		const harness = await newHarness();
+		const collected = makeSink();
+		const host = makeRuntimeHost(harness.session);
+		const handler = createRpcConnectionHandler(host.runtimeHost, collected.sink);
+		await handler.ready;
+
+		const levels = harness.session.getAvailableThinkingLevels();
+		const target = levels.find((level) => level !== harness.session.thinkingLevel);
+		// Guard the fixture: a single-level model would make this vacuous.
+		expect(target).toBeDefined();
+
+		const changed = collected.waitFor((record) => record.type === "thinking_level_changed");
+		await handler.handleInputLine(
+			JSON.stringify({ id: "think-1", type: "set_thinking_level", level: target, scope: "session" }),
+		);
+
+		// An explicit client selection must be distinguishable on the wire from an
+		// SDK-defaulted effective level; only `thinkingSelection` carries that.
+		expect(await changed).toMatchObject({
+			type: "thinking_level_changed",
+			level: target,
+			thinkingSelection: { level: target, source: "explicit" },
+		});
+
+		await handler.handleInputLine(JSON.stringify({ id: "state-8", type: "get_state" }));
+		const stateResponse = await collected.waitFor((record) => record.id === "state-8");
+		expect((stateResponse.data as Record<string, unknown>).thinkingSelection).toEqual({
+			level: target,
+			source: "explicit",
+		});
 
 		await handler.dispose();
 	});
