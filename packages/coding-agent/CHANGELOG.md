@@ -15,6 +15,11 @@
 
 ### Fixed
 
+- On the `claude-sdk-oauth` lane, the "Compaction rejected: the Claude Agent SDK owns compaction for
+  this session" notice now renders at most once per delegation episode as a muted informational line
+  instead of repainting a red error line every turn, and the footer context meter shows an `(SDK)`
+  marker while the SDK owns compaction. Manual `/compact` feedback is unchanged.
+
 ### Removed
 
 ## [2026.8.29] - 2026-08-29
