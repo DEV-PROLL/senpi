@@ -7,9 +7,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	EvalDetachedCellManager,
 	type EvalDetachedCellNotification,
+	type EvalDetachedCellSnapshot,
 	type EvalDetachedCellStatusEntry,
 } from "../src/tool/detached-cell-manager.ts";
+import { detachedKernelBusyError } from "../src/tool/detached-eval-result.ts";
 import { createEvalTool } from "../src/tool/eval-tool.ts";
+import type { EnabledEvalLanguages, EvalLanguage } from "../src/tool/types.ts";
 import { errorResult, FakeKernel, FakeManager, fakeExtensionContext, result } from "./eval/fakes.ts";
 
 type TextContent = Extract<AgentToolResult<unknown>["content"][number], { type: "text" }>;
@@ -458,6 +461,187 @@ describe("eval detached cell status emissions", () => {
 			[{ cellId: "untitled-cell", language: "js", summary: "untitled detached", startedAtMs: expect.any(Number) }],
 		]);
 		await manager.stop("untitled-cell");
+		await manager.flushNotifications();
+	});
+});
+
+describe("detachedKernelBusyError", () => {
+	const snapshot = {
+		cellId: "cell-9",
+		language: "py",
+		state: "detached",
+		outputTail: "still going",
+		result: { content: [], details: { language: "py", durationMs: 0, toolCalls: [], truncated: false } },
+		stateRetained: undefined,
+	} as const satisfies EvalDetachedCellSnapshot;
+
+	it("names each idle kernel and keeps busy language, cell id, peek, do-not-re-run, and output tail", () => {
+		const message = detachedKernelBusyError(snapshot, ["js", "rb"]).message;
+		expect(message).toBe(
+			'The py eval kernel is busy running detached cell cell-9 - peek with eval({ action: "peek", cell_id: "cell-9" }) or continue this step in an idle kernel: js, rb. Do not re-run the busy cell. Current output tail:\nstill going',
+		);
+	});
+
+	it("omits any idle-kernel claim when no other language is free", () => {
+		const message = detachedKernelBusyError(snapshot, []).message;
+		expect(message).not.toMatch(/idle kernel/iu);
+		expect(message).toContain("The py eval kernel is busy running detached cell cell-9");
+		expect(message).toContain('eval({ action: "peek", cell_id: "cell-9" })');
+		expect(message).toMatch(/Do not re-run/u);
+		expect(message).toContain("still going");
+	});
+});
+
+describe("eval detached kernel busy error idle-kernel hint", () => {
+	function createBusyTool(
+		manager: EvalDetachedCellManager,
+		entries: Array<readonly [string, FakeKernel]>,
+		enabledLanguages: EnabledEvalLanguages,
+	) {
+		return createEvalTool({
+			enabledLanguages,
+			kernelManager: new FakeManager(entries),
+			cellTimeoutSeconds: 1,
+			executeTool: vi.fn(),
+			cellManager: manager,
+		});
+	}
+
+	async function detachLanguage(
+		tool: ReturnType<typeof createBusyTool>,
+		kernel: FakeKernel,
+		cellId: string,
+		language: EvalLanguage,
+	): Promise<void> {
+		const started = kernel.deferNextRun();
+		const execution = tool.execute(
+			cellId,
+			{ language, code: "await forever", summary: `detach ${language}`, on_timeout: "detach" },
+			undefined,
+			undefined,
+			interactiveContext(),
+		);
+		await started;
+		await vi.advanceTimersByTimeAsync(1_000);
+		await execution;
+	}
+
+	async function busyMessage(
+		tool: ReturnType<typeof createBusyTool>,
+		cellId: string,
+		language: EvalLanguage,
+	): Promise<string> {
+		const rejection = await tool
+			.execute(
+				cellId,
+				{ language, code: "sideEffect()", summary: `blocked ${language}` },
+				undefined,
+				undefined,
+				interactiveContext(),
+			)
+			.then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+		expect(rejection).toBeInstanceOf(Error);
+		return (rejection as Error).message;
+	}
+
+	function idleSection(message: string): string | undefined {
+		const match = /idle kernel:\s*([^.]*)/u.exec(message);
+		return match?.[1]?.trim();
+	}
+
+	it("names each idle enabled kernel when only one language is busy", async () => {
+		vi.useFakeTimers();
+		const manager = new EvalDetachedCellManager();
+		const py = new FakeKernel([{ type: "text", stream: "stdout", data: "py still computing\n" }]);
+		const tool = createBusyTool(
+			manager,
+			[
+				["py", py],
+				["js", new FakeKernel([])],
+				["rb", new FakeKernel([])],
+			],
+			{ js: true, py: true, rb: true, jl: false },
+		);
+
+		await detachLanguage(tool, py, "busy-py", "py");
+		const message = await busyMessage(tool, "blocked-py", "py");
+
+		expect(message).toContain("The py eval kernel is busy running detached cell busy-py");
+		expect(message).toContain('eval({ action: "peek", cell_id: "busy-py" })');
+		expect(message).toMatch(/Do not re-run/u);
+		expect(message).toContain("py still computing");
+		const idle = idleSection(message);
+		expect(idle).toBeDefined();
+		expect(idle).toContain("js");
+		expect(idle).toContain("rb");
+		expect(idle).not.toContain("py");
+		expect(message).toMatch(/continue this step in an idle kernel/u);
+
+		await manager.stop("busy-py");
+		await manager.flushNotifications();
+	});
+
+	it("omits any idle-kernel claim when only one language is enabled", async () => {
+		vi.useFakeTimers();
+		const manager = new EvalDetachedCellManager();
+		const js = new FakeKernel([{ type: "text", stream: "stdout", data: "js still computing\n" }]);
+		const tool = createBusyTool(manager, [["js", js]], { js: true, py: false, rb: false, jl: false });
+
+		await detachLanguage(tool, js, "busy-js", "js");
+		const message = await busyMessage(tool, "blocked-js", "js");
+
+		expect(message).toContain("The js eval kernel is busy running detached cell busy-js");
+		expect(message).toContain('eval({ action: "peek", cell_id: "busy-js" })');
+		expect(message).toMatch(/Do not re-run/u);
+		expect(message).toContain("js still computing");
+		expect(message).not.toMatch(/idle kernel/iu);
+
+		await manager.stop("busy-js");
+		await manager.flushNotifications();
+	});
+
+	it("names only remaining idle kernels when several languages are busy, and omits the claim when none are idle", async () => {
+		vi.useFakeTimers();
+		const manager = new EvalDetachedCellManager();
+		const js = new FakeKernel([{ type: "text", stream: "stdout", data: "js still computing\n" }]);
+		const py = new FakeKernel([{ type: "text", stream: "stdout", data: "py still computing\n" }]);
+		const rb = new FakeKernel([{ type: "text", stream: "stdout", data: "rb still computing\n" }]);
+		const tool = createBusyTool(
+			manager,
+			[
+				["js", js],
+				["py", py],
+				["rb", rb],
+			],
+			{ js: true, py: true, rb: true, jl: false },
+		);
+
+		await detachLanguage(tool, js, "busy-js", "js");
+		await detachLanguage(tool, py, "busy-py", "py");
+
+		const jsWhileRbIdle = await busyMessage(tool, "blocked-js", "js");
+		expect(jsWhileRbIdle).toContain("The js eval kernel is busy running detached cell busy-js");
+		expect(jsWhileRbIdle).toContain('eval({ action: "peek", cell_id: "busy-js" })');
+		expect(jsWhileRbIdle).toMatch(/Do not re-run/u);
+		expect(jsWhileRbIdle).toContain("js still computing");
+		expect(idleSection(jsWhileRbIdle)).toBe("rb");
+
+		const pyWhileRbIdle = await busyMessage(tool, "blocked-py", "py");
+		expect(idleSection(pyWhileRbIdle)).toBe("rb");
+		expect(pyWhileRbIdle).toContain("py still computing");
+
+		await detachLanguage(tool, rb, "busy-rb", "rb");
+		const jsWhenNoneIdle = await busyMessage(tool, "blocked-js-again", "js");
+		expect(jsWhenNoneIdle).not.toMatch(/idle kernel/iu);
+		expect(jsWhenNoneIdle).toContain("The js eval kernel is busy running detached cell busy-js");
+		expect(jsWhenNoneIdle).toContain("js still computing");
+
+		await manager.stop("busy-js");
+		await manager.stop("busy-py");
+		await manager.stop("busy-rb");
 		await manager.flushNotifications();
 	});
 });

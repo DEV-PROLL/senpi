@@ -1,5 +1,216 @@
 # changes
 
+## Honor --auto-title-sessions outside interactive mode (2026-08-28)
+
+### What changed
+
+- `packages/coding-agent/src/main.ts` resolves session auto-titling through the exported `resolveAutoTitleSessions(appMode, parsed, hasContextMessages)` helper: interactive launches keep titling by default, any app mode opts in with `--auto-title-sessions`, and sessions resumed with context messages are still never retitled. Because the shared `createRuntime` closure is also what the multi-session RPC host calls through `RpcSessionRegistry.openSession`, both the classic and multi-session RPC paths honor the flag without extra plumbing.
+
+### Why
+
+- RPC clients (the desktop app spawns `--mode rpc --multi-session`) never received generated session titles even though `setSessionName()` already emits `session_info_changed` and the RPC connection handler already forwards it.
+
+### Why an extension could not handle it
+
+- The auto-title decision is made while the entrypoint constructs the first `AgentSession`, before extensions load.
+
+### Expected merge conflict zones
+
+- LOW: the `autoTitleSessions` argument in the `createAgentSessionFromServices` call and the helper beside `toProjectTrustMode`.
+
+## Credential accounts in auth check --json (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/main.ts`: `auth check --json` output gains a non-secret `accounts` array (name/source/blocked/pinned) for the checked provider, sourced from `core/credential-accounts.ts`; enrichment failures never turn a readable auth state into an error, and non-JSON output is unchanged.
+
+### Why
+
+- Scripts consuming `auth check --json` need visibility into a provider's credential pool without parsing auth.json themselves.
+
+### Why an extension could not handle it
+
+- The auth-check CLI output is composed in the entrypoint's command handling, which extensions cannot alter.
+
+### Expected merge conflict zones
+
+- LOW: one enrichment block in the auth-check branch.
+
+## 2026-08-25 - Keep JSON startup logging off stdout
+
+### What changed
+
+- `packages/coding-agent/src/main.ts` takes over stdout for JSON `--help` and redirects `console.log` to stderr for the lifetime of JSON-mode execution, restoring the original logger on process exit.
+
+### Why
+
+- Machine-readable JSON output must remain clean while startup diagnostics and trusted chatter continue to be visible on stderr.
+
+### Why an extension could not handle it
+
+- CLI mode selection and stdout ownership happen before extensions load and are process-wide runtime behavior.
+
+### Expected merge conflict zones
+
+- LOW: JSON-mode startup setup around `resolveAppMode()` and stdout takeover.
+
+## Coding-agent entry surfaces re-diverge from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/config.ts` keeps the bun global-launcher repair command, brand-profile
+  and `envValue` plumbing, nearest-parent config discovery, and multi-step self-update commands.
+- `packages/coding-agent/src/index.ts` keeps the fork public surface: `sanitizeTerminalLabel`,
+  `OAuthCredential`, `CacheFriendlySummaryOptions`, the filesystem-policy and extension-RPC contract types, and notice primitives.
+- `packages/coding-agent/src/migrations.ts` keeps the fork migration chain (brand-dir,
+  extension-system, legacy-senpi dirs) in place of upstream's commands-to-prompts migration.
+- `packages/coding-agent/src/package-manager-cli.ts` keeps senpi-branded update help text and the
+  removable `omo-local-update` beta hook.
+- `packages/coding-agent/src/main.ts` keeps the fork stdout contract for JSON mode: stdout takeover
+  also applies to `--help` in JSON mode, and `console.log` is redirected to stderr for the process
+  lifetime so machine-readable stdout stays clean of stray logging.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that the new upstream tree does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- Export lists in `packages/coding-agent/src/index.ts`, the migration registry in
+  `packages/coding-agent/src/migrations.ts`, and update-help templates in
+  `packages/coding-agent/src/package-manager-cli.ts`.
+
+## Preserve zero-usage context estimation for auto-compaction (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: allow the fork-owned estimated context size to drive threshold compaction even when no prior assistant usage index exists.
+
+### Why
+
+- The fork's zero-usage regression guard depends on message estimation; upstream's no-usage early return silently disables compaction for malformed or provider-zero usage responses.
+
+### Why an extension could not handle it
+
+- Automatic compaction admission is internal session state evaluated before extension compaction hooks run.
+
+### Expected merge conflict zones
+
+- HIGH: `_checkCompaction` threshold accounting and fork compaction safeguards.
+
+## Restore fork settings paths and interactive startup seams after upstream merge (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: preserve fork `.senpi` settings discovery while adopting upstream BOM-tolerant parsing and path-bearing diagnostics.
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: retain the fork's testable tmux-keyboard startup seam while adopting the upstream startup warning flow.
+
+### Why
+
+- The fork's branded config directory and interactive startup contracts are production behavior; allowing upstream `.pi` assumptions or an unmocked method call breaks settings persistence and startup diagnostics.
+
+### Why an extension could not handle it
+
+- Settings source selection and interactive startup dispatch run before extensions are loaded.
+
+### Expected merge conflict zones
+
+- HIGH: settings source resolution, error reporting, and interactive startup checks.
+
+## Preserve highlight.js package export compatibility after upstream merge (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/utils/syntax-highlight.ts`: use highlight.js package-export subpaths compatible with the fork's pinned 11.12.0 release, including the root package for lazy grammar loading.
+
+### Why
+
+- Upstream's source import suffixes are not exported by highlight.js 11.12.0 under Node and Vite, preventing child-process startup and causing the test prerequisite to fail.
+
+### Why an extension could not handle it
+
+- Syntax-highlighter module resolution happens during CLI and TUI module loading, before extensions are initialized.
+
+### Expected merge conflict zones
+
+- MEDIUM: highlight.js imports and deferred grammar loading in the syntax-highlighting utility.
+
+## 2026-08-25 - brand executable name for shell-command contexts
+
+### What changed
+
+- `packages/coding-agent/src/config.ts`: exports `APP_COMMAND` from `BRAND?.command`, falling back to `APP_NAME`, so shell-command strings can use the real binary when it differs from the display name.
+
+### Why
+
+- A brand can present as `OmO` while the installed executable is `omo`. Resume hints and other copy-paste commands must name the binary the shell can run.
+
+### Why an extension could not handle it
+
+- Brand identity constants are resolved at module load, before the extension loader exists; every later command-line interpolation reads these exports.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/config.ts` identity constants next to `APP_NAME`.
+
+## 2026-08-25 - Lazy-load the interactive mode at the CLI mode seam
+
+### What changed
+
+- `packages/coding-agent/src/main.ts`: RPC and print mode imports remain eager, while `InteractiveMode` is loaded dynamically only after the final mode is known to be interactive.
+
+### Why
+
+- RPC children are headless and never construct the interactive TUI. Keeping the interactive mode import in the shared static mode barrel made the full component tree parse during RPC startup. The dynamic boundary removes that interactive-only work from the RPC boot path while preserving the same interactive import immediately before its first use.
+
+### Why an extension could not handle it
+
+- Mode selection and entry-module loading happen before extensions are loaded; only the CLI coordinator can keep an unused mode graph out of the RPC child entry.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/main.ts` mode imports and the final interactive dispatch branch.
+## Export client-side RPC socket host ensuring (2026-08-24)
+
+### What changed
+
+- `packages/coding-agent/src/index.ts` and `packages/coding-agent/src/modes/index.ts` export `ensureHost`, its state-path helper, result/options types, and the pinned shared-host capability profile.
+
+### Why
+
+- Desktop and other package consumers need to auto-start or reuse the compatible shared RPC socket host through a supported library API.
+
+### Why an extension could not handle it
+
+- The package entry point owns the supported programmatic API before any session or extension runtime exists.
+
+### Expected merge conflict zones
+
+- LOW: additive RPC exports in the two index modules.
+
+## Route RPC listen addresses into the shared multi-session host (2026-08-23)
+
+### What changed
+
+- `packages/coding-agent/src/main.ts` forwards the parsed RPC `--listen` address to `runMultiSessionHost` while preserving the existing no-default-runtime startup branch.
+
+### Why
+
+- The Unix-socket transport must own one process-global multi-session host rather than constructing the classic single-session runtime before binding.
+
+### Why an extension could not handle it
+
+- Main-mode dispatch and pre-runtime host selection happen before session extensions exist.
+
+### Expected merge conflict zones
+
+- LOW: the existing multi-session dispatch object in `main.ts`.
+
+
 ## 2026-08-22 - emit agent_idle after settlement-deferred turns resolve
 
 ### What changed
@@ -2376,3 +2587,21 @@ The retry budget, abortable retry sleep, provider continuation, and active model
 ### Why extension system couldn't handle this
 
 The instrumented transitions (`_emit`, queue internals, `RequiredCompactionError` admission, the TUI compaction queue, clipboard catch) are private `AgentSession`/`InteractiveMode` state with no extension-visible hook carrying the needed fields; field debugging of "stuck forever" sessions (Discord report 2026-07-30) requires a single post-hoc timeline in the logs directory.
+
+## 2026-08-25 - Upstream public runtime surface sync coverage
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/index.ts`, `packages/coding-agent/src/modes/rpc/rpc-client.ts`, and `packages/coding-agent/src/modes/rpc/rpc-types.ts` preserve the fork session behavior and public exports while adopting upstream RPC queue clearing and event additions.
+
+### Why
+
+- These runtime and public API paths are directly changed by the upstream sync and require exact nearest-tracker coverage.
+
+### Why this lives in the fork
+
+- Session orchestration and public API exports execute before extension code can compensate for divergence.
+
+### Expected merge conflict zones
+
+- Agent-session event handling, coding-agent barrel exports, and RPC command/client/response unions.

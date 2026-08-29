@@ -24,6 +24,10 @@ export interface RpcSessionEntry {
 	profile: Readonly<RpcSessionLaunchProfile>;
 	durableSessionId?: string;
 	sessionPath?: string;
+	/** Canonical reservation key for path-opened sessions; matches the reservations set. */
+	reservationKey?: string;
+	/** Live attachments (open + later attaches). The runtime is disposed only when the last one closes. */
+	attachments: number;
 	lifecycleMutex: Promise<void>;
 }
 
@@ -46,6 +50,8 @@ export interface OpenRpcSession {
 	sessionId: string;
 	durableSessionId: string;
 	sessionPath?: string;
+	/** True when this open attached to an already-open session instead of creating one. */
+	attached?: boolean;
 }
 
 function canonicalPath(path: string): string {
@@ -75,7 +81,25 @@ export class RpcSessionRegistry {
 	async openSession(profile: RpcSessionLaunchProfile): Promise<OpenRpcSession> {
 		this.validateProfile(profile);
 		const sessionPath = profile.sessionPath ? canonicalPath(profile.sessionPath) : undefined;
-		if (sessionPath && this.reservations.has(sessionPath)) throw new RpcSessionRegistryError("session_path_in_use");
+		if (sessionPath && this.reservations.has(sessionPath)) {
+			// Attach-on-open: a live session outlives individual client attachments, so a
+			// resume (or a second surface) for an already-hosted path joins the existing
+			// runtime instead of failing. Entries still opening or closing keep the
+			// exclusive reservation and reject as before.
+			const existing = [...this.entries].find(
+				([, entry]) => entry.reservationKey === sessionPath && entry.state === "open",
+			);
+			if (!existing) throw new RpcSessionRegistryError("session_path_in_use");
+			const [handle, entry] = existing;
+			entry.attachments += 1;
+			if (!entry.durableSessionId) throw new RpcSessionRegistryError("session_path_in_use");
+			return {
+				sessionId: handle,
+				durableSessionId: entry.durableSessionId,
+				sessionPath: entry.sessionPath,
+				attached: true,
+			};
+		}
 		if (sessionPath) this.reservations.add(sessionPath);
 
 		// Resume vs create parity (D1 + omo SenpiSessionRuntime.ts:198-200):
@@ -94,6 +118,8 @@ export class RpcSessionRegistry {
 			scope: new ProviderScope(),
 			profile: storedProfile,
 			sessionPath,
+			reservationKey: sessionPath,
+			attachments: 1,
 			lifecycleMutex: Promise.resolve(),
 		};
 		this.entries.set(handle, entry);
@@ -135,6 +161,16 @@ export class RpcSessionRegistry {
 		}
 	}
 
+	/**
+	 * Read-only lookup with no state transitions or attachment accounting.
+	 * Exists so lifecycle decisions (e.g. deferring a dropped connection's
+	 * release while a turn is still streaming) can inspect the live entry
+	 * without claiming it.
+	 */
+	peek(handle: string): RpcSessionEntry | undefined {
+		return this.entries.get(handle);
+	}
+
 	getForCommand(handle: string, command: string): RpcSessionEntry {
 		const entry = this.entries.get(handle);
 		if (!entry) throw new RpcSessionRegistryError("unknown_session");
@@ -148,16 +184,23 @@ export class RpcSessionRegistry {
 	/**
 	 * Starts a close synchronously. Call this before disposing any session-owned
 	 * binding so a concurrent command cannot reach a half-disposed handler.
+	 * Each call releases one attachment; the entry transitions to "closing" only
+	 * when the last attachment closes, so callers must check the returned state
+	 * and skip finalization while other attachments remain.
 	 */
 	beginClose(handle: string): RpcSessionEntry {
 		const entry = this.entries.get(handle);
 		if (entry?.state !== "open") throw new RpcSessionRegistryError("unknown_session");
+		entry.attachments -= 1;
+		if (entry.attachments > 0) return entry;
 		entry.state = "closing";
 		return entry;
 	}
 
 	async close(handle: string): Promise<void> {
-		this.beginClose(handle);
+		const entry = this.beginClose(handle);
+		// Other attachments may still own the live session; only the last close finalizes.
+		if (entry.state !== "closing") return;
 		return this.closeMarked(handle);
 	}
 

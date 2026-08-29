@@ -677,6 +677,14 @@ type AssistantEventReader = {
 	dispose(): void;
 };
 
+function abortError(reason: unknown): Error {
+	return reason instanceof Error ? reason : new Error("Request was aborted");
+}
+
+function closeAssistantIterator(iterator: AsyncIterator<AssistantMessageEvent>): void {
+	void Promise.resolve(iterator.return?.()).catch(() => undefined);
+}
+
 function normalizeTimeoutMs(timeoutMs: number | undefined): number | undefined {
 	return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : undefined;
 }
@@ -710,8 +718,8 @@ function createAssistantEventReader(
 	return {
 		next: async () => {
 			if (signal?.aborted) {
-				void iterator.return?.();
-				return Promise.reject(new Error("Request was aborted"));
+				closeAssistantIterator(iterator);
+				return Promise.reject(abortError(signal.reason));
 			}
 			// The start bound applies only until the provider proves the request is
 			// alive with its first event; afterwards the idle bound governs as before.
@@ -727,6 +735,7 @@ function createAssistantEventReader(
 				abortPromise,
 				onIdleTimeout,
 				stream,
+				signal,
 			);
 			if (!result.done) sawFirstEvent = true;
 			return result;
@@ -742,6 +751,7 @@ async function readNextAssistantEvent(
 	abortPromise: Promise<typeof ABORTED> | undefined,
 	onIdleTimeout?: (error: Error) => void,
 	stream?: Pick<AssistantMessageEventStream, "hasPendingLocalWork">,
+	signal?: AbortSignal,
 ): Promise<IteratorResult<AssistantMessageEvent>> {
 	if (idleTimeoutMs === undefined && abortPromise === undefined) {
 		return iterator.next();
@@ -771,7 +781,7 @@ async function readNextAssistantEvent(
 					return;
 				}
 				const error = makeTimeoutError(idleTimeoutMs);
-				void iterator.return?.();
+				closeAssistantIterator(iterator);
 				settle(() => reject(error));
 				// Abort after settling so the failure surfaces as an idle timeout,
 				// not as a generic abort, while the dead request still gets torn down.
@@ -784,8 +794,8 @@ async function readNextAssistantEvent(
 		void next.then(
 			(result) => {
 				if (result === ABORTED) {
-					void iterator.return?.();
-					settle(() => reject(new Error("Request was aborted")));
+					closeAssistantIterator(iterator);
+					settle(() => reject(abortError(signal?.reason)));
 					return;
 				}
 				settle(() => resolve(result));

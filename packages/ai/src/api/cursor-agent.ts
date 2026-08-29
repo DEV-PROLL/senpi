@@ -1440,7 +1440,7 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 	switch (execCase) {
 		case "readArgs": {
 			const args = execMsg.message.value;
-			if (!args.toolCallId) args.toolCallId = randomUUID();
+			ensureUniqueCursorExecToolCallId(output, args);
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "read", {
 				path: args.path,
 				offset: args.offset,
@@ -1465,7 +1465,7 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 		}
 		case "lsArgs": {
 			const args = execMsg.message.value;
-			if (!args.toolCallId) args.toolCallId = randomUUID();
+			ensureUniqueCursorExecToolCallId(output, args);
 			// The bridge maps `ls` onto the local `ls` tool; mirror that here so
 			// the synthesized block matches the toolResult's `toolName`.
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "ls", { path: piLsPath(args.path) });
@@ -1483,7 +1483,7 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 		}
 		case "grepArgs": {
 			const args = execMsg.message.value;
-			if (!args.toolCallId) args.toolCallId = randomUUID();
+			ensureUniqueCursorExecToolCallId(output, args);
 			// Cursor's model sometimes emits `grepArgs` with an empty `pattern`
 			// and a non-empty `glob`, expecting grep to list files matching the
 			// glob. Reject that up front with an actionable error.
@@ -1514,7 +1514,7 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 		}
 		case "writeArgs": {
 			const args = execMsg.message.value;
-			if (!args.toolCallId) args.toolCallId = randomUUID();
+			ensureUniqueCursorExecToolCallId(output, args);
 			// Match the bridge: prefer `fileText`, fall back to decoded `fileBytes`.
 			const content = args.fileText ?? new TextDecoder().decode(args.fileBytes ?? new Uint8Array());
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "write", {
@@ -1544,7 +1544,7 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 		}
 		case "deleteArgs": {
 			const args = execMsg.message.value;
-			if (!args.toolCallId) args.toolCallId = randomUUID();
+			ensureUniqueCursorExecToolCallId(output, args);
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "delete", { path: args.path });
 			const { execResult } = await resolveExecHandler(
 				args,
@@ -1560,7 +1560,7 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 		}
 		case "shellArgs": {
 			const args = execMsg.message.value;
-			if (!args.toolCallId) args.toolCallId = randomUUID();
+			ensureUniqueCursorExecToolCallId(output, args);
 			const normalizedArgs: ShellArgs = { ...args, workingDirectory: args.workingDirectory || process.cwd() };
 			const shellTimeout = args.timeout && args.timeout > 0 ? args.timeout : undefined;
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "bash", {
@@ -1581,7 +1581,7 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 		}
 		case "shellStreamArgs": {
 			const args = execMsg.message.value;
-			if (!args.toolCallId) args.toolCallId = randomUUID();
+			ensureUniqueCursorExecToolCallId(output, args);
 			const shellStreamTimeout = args.timeout && args.timeout > 0 ? args.timeout : undefined;
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "bash", {
 				command: composeShellCommand(args.command, args.workingDirectory || undefined),
@@ -1890,7 +1890,7 @@ async function dispatchExecServerMessage(context: ExecDispatchContext): Promise<
 			// Same `ShellArgs`/`ShellResult` pair as `shellArgs`, under its own
 			// frame number, so the existing shell handler answers it unchanged.
 			const args = execMsg.message.value;
-			if (!args.toolCallId) args.toolCallId = randomUUID();
+			ensureUniqueCursorExecToolCallId(output, args);
 			const normalizedArgs: ShellArgs = { ...args, workingDirectory: args.workingDirectory || process.cwd() };
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "bash", {
 				command: composeShellCommand(args.command, args.workingDirectory || undefined),
@@ -3302,6 +3302,29 @@ function endCurrentThinkingBlock(
 		partial: output,
 	});
 	state.setThinkingBlock(null);
+}
+
+/**
+ * Ensure a Cursor exec frame's tool-call id is present and unique within the
+ * assistant message before a block is synthesized from it. Cursor reuses one
+ * parent tool-call id across the exec sub-frames of a compound tool
+ * (StrReplace → read + write); recording both verbatim persists duplicate
+ * `toolCall` ids, which Anthropic later rejects wholesale on resume
+ * (`tool_use` ids must be unique), bricking the session. Exported for tests.
+ */
+export function ensureUniqueCursorExecToolCallId(output: AssistantMessage, args: { toolCallId?: string }): void {
+	if (!args.toolCallId) {
+		args.toolCallId = randomUUID();
+		return;
+	}
+	const base = args.toolCallId;
+	let candidate = base;
+	let suffix = 2;
+	while (output.content.some((block) => block.type === "toolCall" && block.id === candidate)) {
+		candidate = `${base}-${suffix}`;
+		suffix += 1;
+	}
+	args.toolCallId = candidate;
 }
 
 /**

@@ -833,6 +833,14 @@ export class SessionManager {
 		}
 	}
 
+	/**
+	 * Reload session entries from the session file on disk.
+	 */
+	reloadFromDisk(): void {
+		if (!this.sessionFile || !existsSync(this.sessionFile)) return;
+		this._setSessionFile(this.sessionFile);
+	}
+
 	/** Switch to a different session file (used for resume and branching) */
 	setSessionFile(sessionFile: string): void {
 		this._setSessionFile(sessionFile);
@@ -1034,6 +1042,28 @@ export class SessionManager {
 		this._accumulateUsage(residentEntry);
 		this.mutationCount++;
 		this._persist(residentEntry);
+	}
+
+	/**
+	 * Append an already-materialized entry without rewriting its identity or tree
+	 * fields. This is the transport seam for entries captured by another manager.
+	 */
+	appendEntry(entry: SessionEntry): void {
+		this._appendEntry(entry);
+		const order = this.entryOrdersById.get(entry.id);
+		if (entry.type === "message" && order !== undefined) {
+			this.messageEntryPositions.set(entry.message, { entryId: entry.id, order });
+		}
+		if (entry.type === "session_info") this.sessionNameCache = entry.name?.trim() || undefined;
+		if (entry.type === "label") {
+			if (entry.label) {
+				this.labelsById.set(entry.targetId, entry.label);
+				this.labelTimestampsById.set(entry.targetId, entry.timestamp);
+			} else {
+				this.labelsById.delete(entry.targetId);
+				this.labelTimestampsById.delete(entry.targetId);
+			}
+		}
 	}
 
 	private _materializeEntry(entry: SessionEntry): SessionEntry {
@@ -1493,13 +1523,14 @@ export class SessionManager {
 		if (branchFromId !== null && !this.byId.has(branchFromId)) {
 			throw new Error(`Entry ${branchFromId} not found`);
 		}
+		const fromId = this.leafId ?? "root";
 		this.leafId = branchFromId;
 		const entry: BranchSummaryEntry = {
 			type: "branch_summary",
 			id: generateId(this.byId),
 			parentId: branchFromId,
 			timestamp: new Date().toISOString(),
-			fromId: branchFromId ?? "root",
+			fromId,
 			summary,
 			details,
 			usage,
