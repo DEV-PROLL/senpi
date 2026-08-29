@@ -227,7 +227,7 @@ export function createRequiredCompactionFallback(
 		const resultIndex = results[0];
 		if (call.incomplete) markInvalidRange(0, resultIndex + 1);
 		else if (callIndex < resultIndex) markInvalidRange(callIndex + 1, resultIndex + 1);
-		else markInvalidRange(0, resultIndex + 1);
+		else markInvalidRange(0, Math.max(callIndex, resultIndex) + 1);
 	}
 	for (const [id, results] of toolResults) {
 		if (toolCalls.has(id)) continue;

@@ -30,14 +30,15 @@ function isUsage(value: unknown): boolean {
 
 const base64SignaturePattern = /^[A-Za-z0-9+/]+={0,2}$/;
 
-/**
- * Validates opaque provider signature without exposing or logging content.
- * Base64 string of valid multiple-of-4 length or bounded string for provider replay.
- */
-function isValidProviderSignature(sig: unknown): boolean {
-	if (typeof sig !== "string" || sig.length === 0 || sig.length > 65_536) return false;
-	if (sig.length % 4 !== 0) return false;
-	return base64SignaturePattern.test(sig);
+/** Validate an opaque provider signature without exposing or logging content. */
+function isValidOpaqueSignature(sig: unknown): sig is string {
+	return typeof sig === "string" && sig.length > 0 && sig.length <= 65_536;
+}
+
+/** Gemini signatures are base64; other providers use bounded opaque strings. */
+function isValidProviderSignature(sig: unknown, providerIsGoogle: boolean): sig is string {
+	if (!isValidOpaqueSignature(sig)) return false;
+	return !providerIsGoogle || (sig.length % 4 === 0 && base64SignaturePattern.test(sig));
 }
 
 function hasSafeAssistantContent(content: unknown, providerIsGoogle: boolean): boolean {
@@ -47,11 +48,7 @@ function hasSafeAssistantContent(content: unknown, providerIsGoogle: boolean): b
 		switch (block.type) {
 			case "text":
 				if (typeof block.text !== "string") return false;
-				if (
-					block.textSignature !== undefined &&
-					providerIsGoogle &&
-					!isValidProviderSignature(block.textSignature)
-				) {
+				if (block.textSignature !== undefined && !isValidProviderSignature(block.textSignature, providerIsGoogle)) {
 					return false;
 				}
 				break;
@@ -64,11 +61,11 @@ function hasSafeAssistantContent(content: unknown, providerIsGoogle: boolean): b
 				) {
 					return false;
 				}
-				// Redacted thinking or thinking with a signature
+				// Redacted thinking requires a bounded opaque signature for replay.
 				if (
-					block.thinkingSignature !== undefined &&
-					providerIsGoogle &&
-					!isValidProviderSignature(block.thinkingSignature)
+					(block.thinkingSignature !== undefined &&
+						!isValidProviderSignature(block.thinkingSignature, providerIsGoogle)) ||
+					(block.redacted === true && !isValidOpaqueSignature(block.thinkingSignature))
 				) {
 					return false;
 				}
@@ -85,8 +82,7 @@ function hasSafeAssistantContent(content: unknown, providerIsGoogle: boolean): b
 				}
 				if (
 					block.thoughtSignature !== undefined &&
-					providerIsGoogle &&
-					!isValidProviderSignature(block.thoughtSignature)
+					!isValidProviderSignature(block.thoughtSignature, providerIsGoogle)
 				) {
 					return false;
 				}

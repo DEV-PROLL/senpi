@@ -469,6 +469,33 @@ describe("required compaction deterministic fallback", () => {
 		}
 	});
 
+	it("rejects malformed non-Google thinking signatures and unsigned redacted thinking", () => {
+		for (const content of [
+			[{ type: "thinking" as const, thinking: "hidden", thinkingSignature: 123 }],
+			[{ type: "thinking" as const, thinking: "hidden", redacted: true }],
+		]) {
+			const harness = createBlockingContext({ usageTokens: 9_900 });
+			const assistantId = harness.sessionManager.appendMessage({
+				...fauxAssistantMessage("", { timestamp: 4, stopReason: "stop" }),
+				provider: "anthropic",
+				model: "claude-sonnet-4",
+				content: content as never,
+			});
+			const branchEntries = harness.sessionManager.getBranch();
+			const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+
+			expect(
+				createRequiredCompactionFallback(
+					{ ...preparation, firstKeptEntryId: assistantId },
+					100_000,
+					"summarization-timeout",
+					{},
+					branchEntries,
+				),
+			).toBeUndefined();
+		}
+	});
+
 	it("finds a declaring assistant beyond five entries for a long tool chain", () => {
 		const harness = createBlockingContext({ usageTokens: 9_900 });
 		const assistantId = harness.sessionManager.appendMessage({
@@ -571,6 +598,35 @@ describe("required compaction deterministic fallback", () => {
 
 		expect(result).toBeUndefined();
 		expect(elapsedMs).toBeLessThan(10_000);
+	});
+
+	it("rejects a tool call whose only result precedes it", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "reversed",
+			toolName: "read",
+			content: [{ type: "text", text: "stale result" }],
+			isError: false,
+			timestamp: 4,
+		});
+		const assistantId = harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage([
+				{ type: "toolCall", id: "reversed", name: "read", arguments: {}, thoughtSignature: validSig },
+			]),
+		);
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+
+		expect(
+			createRequiredCompactionFallback(
+				{ ...preparation, firstKeptEntryId: assistantId },
+				100_000,
+				"summarization-timeout",
+				{},
+				branchEntries,
+			),
+		).toBeUndefined();
 	});
 
 	it("rejects duplicate tool results instead of replaying them", () => {
