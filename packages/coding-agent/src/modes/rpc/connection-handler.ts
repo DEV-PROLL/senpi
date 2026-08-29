@@ -461,7 +461,6 @@ export function createRpcConnectionHandler(
 		},
 
 		setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
-			// Only support string arrays in RPC mode - factory functions are ignored
 			if (content === undefined || Array.isArray(content)) {
 				output({
 					type: "extension_ui_request",
@@ -471,8 +470,13 @@ export function createRpcConnectionHandler(
 					widgetLines: content as string[] | undefined,
 					widgetPlacement: options?.placement,
 				} as RpcExtensionUIRequest);
+				return;
 			}
-			// Component factories are not supported in RPC mode - would need TUI access
+			// A component factory closes over live TUI/theme state and cannot cross
+			// the RPC boundary. Never drop it silently: an opted-in client can show
+			// the same explicit degradation notice used by ctx.ui.custom.
+			const request = buildCustomUnsupportedRequest(clientCapabilities, "widget component");
+			if (request) output(request);
 		},
 
 		setFooter(_factory: unknown): void {

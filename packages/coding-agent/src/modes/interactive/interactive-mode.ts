@@ -2756,6 +2756,7 @@ export class InteractiveMode {
 		widgetKey?: string;
 		widgetLines?: string[];
 		widgetPlacement?: "aboveEditor" | "belowEditor";
+		extensionName?: string;
 		text?: string;
 	}): Promise<
 		| { type: "extension_ui_response"; id: string; value: string }
@@ -2805,6 +2806,12 @@ export class InteractiveMode {
 				this.setExtensionWidget(request.widgetKey ?? "", request.widgetLines, {
 					placement: request.widgetPlacement,
 				});
+				return undefined;
+			case "custom_unsupported":
+				this.showExtensionNotify(
+					`${request.extensionName ?? "This extension"} requires the classic TUI; its component widget cannot be rendered in the shared host.`,
+					"warning",
+				);
 				return undefined;
 			default:
 				return undefined;
