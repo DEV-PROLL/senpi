@@ -43,6 +43,8 @@ export interface EnsureHostOptions {
 		readonly env?: Readonly<Record<string, string>>;
 		/** Extra CLI args forwarded through the supervisor to the host process. */
 		readonly hostArgs?: readonly string[];
+		/** Runs after endpoint ownership is locked; deterministic concurrency-test gate. */
+		readonly afterLockAcquired?: () => Promise<void>;
 	};
 }
 
@@ -88,6 +90,7 @@ export async function ensureHost(options: EnsureHostOptions): Promise<EnsuredHos
 	await writeFile(lockTarget, "", { flag: "a", mode: 0o600 });
 	const release = await properLockfile.lock(lockTarget, { ...lockOptions, lockfilePath: `${lockTarget}.lock` });
 	try {
+		await options._test?.afterLockAcquired?.();
 		return await ensureHostLocked(paths, socket, options.agentDir ?? getAgentDir(), options.policy, options._test);
 	} finally {
 		await release();
