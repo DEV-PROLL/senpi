@@ -1,4 +1,8 @@
 import assert from "node:assert";
+import * as fs from "node:fs";
+import * as net from "node:net";
+import * as os from "node:os";
+import * as path from "node:path";
 import { mock, describe as nodeDescribe, it as nodeIt } from "node:test";
 import { vi, describe as vitestDescribe, it as vitestIt } from "vitest";
 import { setKittyProtocolActive } from "../src/keys.ts";
@@ -143,6 +147,54 @@ describe("normalizeAppleTerminalInput", () => {
 });
 
 describe("normalizeWarpWslShiftEnterInput", () => {
+	it("rejects regular files, directories, and symlinks to non-sockets", () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tui-wsl-"));
+		const regularFile = path.join(tempDir, "regular-file");
+		const directory = path.join(tempDir, "directory");
+		const symlinkToFile = path.join(tempDir, "symlink-to-file");
+		fs.writeFileSync(regularFile, "not a socket");
+		fs.mkdirSync(directory);
+		fs.symlinkSync(regularFile, symlinkToFile);
+		const env = { WARP_SESSION_ID: "session", WSL_INTEROP: "/run/WSL/123_interop" };
+		try {
+			for (const entry of [regularFile, directory, symlinkToFile]) {
+				assert.equal(
+					normalizeWarpWslShiftEnterInput("\n", env, "linux", () => fs.statSync(entry).isSocket()),
+					"\n",
+					entry,
+				);
+			}
+		} finally {
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	it("accepts a symlink to a real socket", async () => {
+		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tui-wsl-"));
+		const socketPath = path.join(tempDir, "interop.sock");
+		const socketAlias = path.join(tempDir, "interop-alias");
+		const server = net.createServer();
+		try {
+			await new Promise<void>((resolve, reject) => {
+				server.once("error", reject);
+				server.listen(socketPath, resolve);
+			});
+			fs.symlinkSync(socketPath, socketAlias);
+			assert.equal(
+				normalizeWarpWslShiftEnterInput(
+					"\n",
+					{ WARP_SESSION_ID: "session", WSL_INTEROP: "/run/WSL/123_interop" },
+					"linux",
+					() => fs.statSync(socketAlias).isSocket(),
+				),
+				"\x1b[13;2u",
+			);
+		} finally {
+			server.close();
+			fs.rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("rewrites Warp-on-WSL LF as explicit Shift+Enter", () => {
 		assert.equal(
 			normalizeWarpWslShiftEnterInput("\n", {

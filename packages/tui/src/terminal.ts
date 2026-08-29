@@ -70,7 +70,13 @@ export function normalizeWarpWslShiftEnterInput(
 	data: string,
 	env: NodeJS.ProcessEnv = process.env,
 	platform: NodeJS.Platform = process.platform,
-	socketExists: (socketPath: string) => boolean = fs.existsSync,
+	socketExists: (socketPath: string) => boolean = (socketPath) => {
+		try {
+			return fs.statSync(socketPath).isSocket();
+		} catch {
+			return false;
+		}
+	},
 ): string {
 	if (data !== "\n" || platform !== "linux") return data;
 	if (
