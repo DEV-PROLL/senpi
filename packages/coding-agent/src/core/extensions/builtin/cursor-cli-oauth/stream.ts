@@ -34,6 +34,7 @@ import {
 	type CursorCliOauthConfig,
 	createCursorCliOauthConfig,
 	cursorAgentNotInstalledError,
+	isCursorCliOauthLaneEnabled,
 } from "./oauth-login.ts";
 import {
 	type CursorCliRecapExchange,
@@ -43,6 +44,7 @@ import {
 	cursorCliSessionRouter,
 } from "./session-router.ts";
 import { type CursorCliOauthProviderSettings, loadCursorCliOauthProviderSettingsFromDisk } from "./settings.ts";
+import { resolveCursorCliSpawnModel } from "./spawn-model.ts";
 import type { CursorCliStreamEvent, CursorCliToolCallEvent } from "./stream-parser.ts";
 import { CursorCliAbortError, type CursorCliTransportHandle, spawnCursorCli } from "./transport.ts";
 
@@ -440,7 +442,10 @@ export function streamCursorCliOauth(
 			// Fresh per turn: settings, credentials, and executable resolution are
 			// never cached across turns, so back-to-back turns observe changes.
 			const settings = deps.settings ?? loadCursorCliOauthProviderSettingsFromDisk(cwdDirectory);
-			if (!settings.enabled) throw new Error(DISABLED_MESSAGE);
+			// An explicit `enabled: false` is the kill switch; the flagless ambient
+			// case is refused below, once the stored slots are known, so the turn path
+			// and `assessConfiguration` share one opt-in rule.
+			if (settings.explicitlyDisabled) throw new Error(DISABLED_MESSAGE);
 			const executableDeps: CursorAgentExecutableDeps = {
 				...defaultCursorAgentExecutableDeps(),
 				settings: { executablePath: settings.executablePath },
@@ -472,13 +477,15 @@ export function streamCursorCliOauth(
 			for (const warning of policy.warnings) appendNotice(mapper, warning.message);
 			const stored = await store.read(CURSOR_CLI_OAUTH_PROVIDER_ID);
 			const storedAccounts = stored?.type === "oauth" ? listAccounts(stored as CursorCliOauthCredential) : [];
+			if (!isCursorCliOauthLaneEnabled(settings, storedAccounts.length)) throw new Error(DISABLED_MESSAGE);
 			if (storedAccounts.length === 0) throw new Error(NO_ACCOUNTS_MESSAGE);
 
 			const prompt = lastUserPrompt(context);
 			const senpiSessionId = options?.affinitySessionId ?? options?.sessionId ?? DEFAULT_CURSOR_AFFINITY_KEY;
+			const spawnModel = resolveCursorCliSpawnModel(model as Model<"cursor-agent">, options?.thinkingSelection);
 			const turnInput: CursorCliSessionTurnInput = {
 				prompt,
-				model: model.id,
+				model: spawnModel,
 				recentExchanges: recapExchanges(context),
 			};
 
@@ -510,7 +517,7 @@ export function streamCursorCliOauth(
 								applyCursorCliDenyConfig(home, policy.denyCommands);
 								const handle = spawnCursorCli({
 									prompt: attempt.prompt,
-									model: model.id,
+									model: spawnModel,
 									resumeChatId: attempt.resumeChatId,
 									force: policy.force,
 									executionMode: policy.executionMode,

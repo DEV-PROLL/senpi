@@ -68,18 +68,19 @@ function hasValidToolChains(messages: ReturnType<typeof filterContextExcludedMes
 		if (msg.role === "assistant" && Array.isArray(msg.content)) {
 			for (const block of msg.content) {
 				if (isRecord(block) && block.type === "toolCall" && typeof block.id === "string") {
+					if (declaredCalls.has(block.id)) return false;
 					declaredCalls.add(block.id);
 				}
 			}
 		} else if (msg.role === "toolResult" && typeof msg.toolCallId === "string") {
-			// A tool result without its preceding tool call in the retained messages is an invalid cut
-			if (!declaredCalls.has(msg.toolCallId)) {
+			// Every retained result must resolve exactly one preceding call.
+			if (!declaredCalls.has(msg.toolCallId) || resolvedCalls.has(msg.toolCallId)) {
 				return false;
 			}
 			resolvedCalls.add(msg.toolCallId);
 		}
 	}
-	return true;
+	return declaredCalls.size === resolvedCalls.size;
 }
 
 /**
@@ -251,10 +252,9 @@ export function createRequiredCompactionFallback(
 		return prepared;
 	}
 
-	// 2. If prepared boundary cut an atomic signed chain or was rejected, check if an earlier safe boundary exists
-	// Scan backward up to 5 entries before prepared boundary to find complete chain boundary
-	const minBoundary = Math.max(0, preparedBoundaryIndex - 5);
-	for (let index = preparedBoundaryIndex - 1; index >= minBoundary; index--) {
+	// 2. If prepared boundary cut an atomic signed chain or was rejected, walk backward
+	// to the actual chain boundary. The chain length is determined by the session.
+	for (let index = preparedBoundaryIndex - 1; index >= 0; index--) {
 		const entry = branchEntries[index];
 		if (entry.type === "compaction") break;
 		// Only consider message turn starts or assistant call starts

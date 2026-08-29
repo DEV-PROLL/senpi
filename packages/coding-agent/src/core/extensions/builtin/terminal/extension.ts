@@ -56,7 +56,7 @@ function bundleSinks(pi: ExtensionAPI, state: TerminalExtensionState): TerminalE
 		onMonitorEvent: (event) => state.monitorNotifier?.notifyEvent(event),
 		onMonitorState: (snapshot) => {
 			state.statusTicker.sync(snapshot);
-			pi.events?.emit(TERMINAL_MONITOR_STATE_EVENT, {
+			const payload = {
 				activeCount: snapshot.length,
 				monitors: snapshot.map((entry) => ({
 					id: entry.id,
@@ -64,7 +64,9 @@ function bundleSinks(pi: ExtensionAPI, state: TerminalExtensionState): TerminalE
 					paused: entry.paused,
 					startedAtMs: entry.startedAtMs,
 				})),
-			});
+			};
+			pi.events?.emit(TERMINAL_MONITOR_STATE_EVENT, payload);
+			pi.rpc?.emit(TERMINAL_MONITOR_STATE_EVENT, payload);
 			pi.events?.emit(WAKE_SOURCE_STATE_EVENT, {
 				source: "terminal-monitors",
 				activeCount: snapshot.length,

@@ -1,4 +1,694 @@
+## 2026-08-28 - Restore Bedrock global GPT-5.6 strict tool sampling
+
+### What changed
+
+- `packages/ai/src/providers/data/amazon-bedrock.json`: `global.openai.gpt-5.6-luna`, `global.openai.gpt-5.6-sol`, and `global.openai.gpt-5.6-terra` carry `compat.supportsStrictMode: true` again (plus the matching `.manifest.json` hash). A catalog regeneration had dropped the field, so `bedrock-converse-stream.ts` read `model.compat?.supportsStrictMode ?? false` and rejected `constrainedSampling.strict: "require"` as unsupported while silently downgrading `"prefer"` to an unconstrained schema.
+- `packages/ai/scripts/generate-models.ts`: `applyStrictToolCompatMetadata()` now re-stamps `supportsStrictMode` on those three Bedrock global inference profiles, so the capability survives future regenerations instead of depending on models.dev reporting `structured_output` (it reports it only for the regional `openai.gpt-5.6-*` IDs).
+- `packages/ai/test/bedrock-strict-tool-compat.test.ts`: asserts the shipped catalog data and re-runs the generator offline against an upstream payload with no `structured_output` to prove the override survives regeneration.
+
+### Why
+
+- Strict JSON-schema tool sampling is a wire-visible provider capability. Losing it turned working `strict: "require"` requests into unsupported-capability failures on the global Bedrock GPT-5.6 profiles.
+
+### Why an extension could not handle it
+
+- The capability is read from the generated model catalog inside the Bedrock adapter; there is no extension-visible hook between the catalog and `convertToolConfig()`.
+
+### Expected merge conflict zones
+
+- LOW: three generated entries in `amazon-bedrock.json` plus its manifest hash line during catalog regeneration syncs.
+- LOW: one `else if` branch in `applyStrictToolCompatMetadata()`.
+
+## 2026-08-27 - Default retry policy phase-2 close-out (docs)
+
+### What changed
+
+- `packages/ai/src/utils/retry-profile/profiles.ts`: the senpi-default turn stage ships an 8s `perAttemptCapMs` and +0..25% additive jitter on locally computed exponential backoffs (provider-derived `Retry-After` hints stay exact). `classifyErrorMessage` remains tri-state (non-retryable / retryable / unknown) with non-retryable outranking retryable.
+- The default same-model turn retry budget stays at 3 retries. This is an intentional non-change: the budget was reviewed during phase-2 close and kept at its existing value for all providers that don't declare their own profile.
+- No new kimi-code observability or telemetry surface was adopted. The `provider_retry_failure` diagnostic added in phase 1 is the only retry-specific emission, and no additional counters, traces, or structured events were introduced.
+- Regression coverage: `packages/coding-agent/test/suite/regressions/retry-default-no-kimi-leak.test.ts` guards senpi-default against kimi semantics leaking in (no-hint 429 first-failure fallback, 1258000ms hint tier routing, billing 429 pinned fallback, abort during backoff single `auto_retry_end`).
+- Tracked in `packages/ai/src/changes.md` and `packages/coding-agent/src/core/changes.md`.
+
+### Why
+
+- Phase-2 close needs an explicit record that the 3-retry budget and the absence of new telemetry were deliberate decisions, not oversights. The profile defaults recap documents the shipped values in one place for reviewers who don't read `profiles.ts`.
+
+### Why an extension could not handle it
+
+- The profile constants and classifier live inside this package's retry-profile tree, below any extension-visible hook.
+
+### Expected merge conflict zones
+
+- NONE: doc-only section append; no code files touched.
+
+## 2026-08-27 - Storage docs describe pooled entries
+
+### What changed
+
+- `packages/ai/src/auth/types.ts`, `packages/ai/src/auth/credential-store.ts`: the "one credential per provider" doc comments now say one ENTRY per provider, where an entry may pool sibling slots under `accounts` while its flat fields remain a valid credential (matching `auth/AGENTS.md`).
+
+### Why
+
+- The old sentence contradicted the shipped pooled-entry contract; stale invariants misdirect future changes into destroying sibling slots.
+
+### Why an extension could not handle it
+
+- Doc comments live in the module source.
+
+### Expected merge conflict zones
+
+- LOW: comment-only hunks.
+
+## 2026-08-27 - Export the canonical provider API-key env-var mapping
+
+### What changed
+
+- `packages/ai/src/env-api-keys.ts`: `getApiKeyEnvVars` is now exported (previously module-private and reachable only through `findEnvKeys`/`getEnvApiKey`).
+
+### Why
+
+- Numbered environment credential slots (`OPENAI_API_KEY_2`, ...) must generalize over the same provider-id-to-env-var mapping the resolver already uses. Re-deriving that table in `packages/coding-agent` would let the two drift, and a drifted table silently discovers the wrong variable for a provider.
+
+### Why an extension could not handle it
+
+- The mapping is data owned by this module and reachable only from inside it; an extension can neither read it nor keep a copy in step with upstream catalog changes.
+
+### Expected merge conflict zones
+
+- LOW: one `export` keyword on an existing function declaration.
+
+## 2026-08-27 - Credential pool engine: HRW selection, failure taxonomy, slot failover, slot-scoped resolution
+
+### What changed
+
+- `packages/ai/src/auth/pool/select.ts` (new): browser-safe HRW slot selection over an injected `SlotHasher` - `rendezvousOrder` hashes `key\0slot.name` exactly like the claude-sdk-oauth affinity oracle, `selectSlot` honors a pinned slot, skips blocked slots (auth blocks persist, elapsed rate blocks clear), and throws `AllSlotsBlockedError` with the soonest unblock time.
+- `packages/ai/src/auth/pool/classify.ts` (new): three-way in-lane failure taxonomy (`rotate`/`retry`/`fail`) with `retryAfterMs` extraction; unknown errors default-deny to `fail` so the model fallback chain keeps owning them.
+- `packages/ai/src/auth/pool/failover.ts` (new): `runSlotFailover` runs at most one attempt per slot, blocks failed slots (exponential rate-limit windows capped at 48h, expiry-free auth blocks), and reuses the `senpi:no-turn-retry:` suppression marker; `isCommittedOutput` is default-DENY, so absent an explicit bookkeeping filter any yielded event makes rotation non-transparent.
+- `packages/ai/src/auth/pool/slots.ts`: added `projectSlot` (named-slot flat projection with pool fields stripped) and `mergeRefreshedSlot` (named-slot refresh merge that rotates the flat downgrade projection only when it mirrored that slot).
+- `packages/ai/src/auth/resolve.ts`: `AuthResolutionOverrides.slotName` resolves one named slot of a pooled credential; a missing entry or slot resolves to undefined instead of falling back to another account or ambient env, and the locked OAuth refresh path refreshes exactly the named slot via `mergeRefreshedSlot`.
+
+### Why
+
+- Generic multi-credential rotation needs a provider-neutral engine: session-affine slot choice that provably never remaps existing claude-sdk-oauth sessions (golden-oracle test), failover that can rotate accounts mid-lane without replaying committed output, and an auth resolution path that can address a specific slot without disturbing siblings or the flat projection older binaries read.
+
+### Why an extension could not handle it
+
+- Slot-scoped resolution must run inside `resolveProviderAuth`'s locked OAuth refresh path, which is the cross-provider choke point in `packages/ai`; extensions cannot enter that lock or the credential-store modify transaction.
+
+### Expected merge conflict zones
+
+- LOW: `resolve.ts` stored-credential branch and the refresh modify callback; new pool files have no upstream counterpart.
+
+## 2026-08-27 - Duplicate cursor exec tool-call ids no longer brick Anthropic resumes
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts` uniquifies exec-frame tool-call ids before synthesizing blocks (`ensureUniqueCursorExecToolCallId`): Cursor reuses one parent id across the exec sub-frames of a compound tool (observed: `StrReplace` → `read` + `write` both carrying `StrReplace_0_<hash>-<n>`), so the persisted assistant message carried duplicate `toolCall` ids.
+- `packages/ai/src/api/anthropic-tool-pairs.ts` now also repairs duplicate `tool_use` ids payload-wide at the final pre-submit pass: later duplicates are renamed (`<id>__dedup<n>`) and the following user message's `tool_result` blocks are remapped in call order, so transcripts already corrupted by the cursor bug (or any other source) resume instead of failing every request with `tool_use ids must be unique` (invalid_request_error), which permanently bricked sessions.
+
+### Why
+
+- Field incident 2026-08-27: two omo-desktop threads could never resume — every turn errored with `messages.1.content.27: tool_use ids must be unique`. Forensics showed cursor/kimi StrReplace frames sharing one id for their read+write pair; 2 of 59 session transcripts on the host carried such duplicates (6 pairs total). The sanitizer heals existing transcripts; the cursor-agent guard stops new corruption at the source.
+
+## 2026-08-25 - Preserve same-model redacted thinking during message transforms
+
+### What changed
+
+- `packages/ai/src/api/transform-messages.ts` preserves opaque redacted thinking blocks whenever the source and target model are the same, independent of `preserveProviderState`.
+
+### Why
+
+- Bedrock redacted reasoning is provider replay state that must survive same-model transformation; gating it on `preserveProviderState` dropped the block and changed the replayed request.
+
+### Why an extension could not handle it
+
+- Message transformation and provider-state preservation run inside the AI adapter boundary before extension code receives the outbound request.
+
+### Expected merge conflict zones
+
+- LOW: redacted-thinking handling in `transformMessages()` when upstream changes message replay policy.
+
+## Provider wire layer re-diverges from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/ai/src/providers/cloudflare-ai-gateway.ts` keeps the fork's Cloudflare AI Gateway provider registration and Workers AI model mapping.
+- `packages/ai/src/index.ts` keeps the fork barrel export for `estimateContextTokens`.
+- `packages/ai/src/api/anthropic-messages.ts` keeps refusal fallback, provider-native content,
+  prompt-cache TTL compat, 429 retry-after hints, and combined abort signals.
+- `packages/ai/src/api/azure-openai-responses.ts` keeps `supportsMax`-aware effort mapping and
+  `thinkingLevelMap` resolution.
+- `packages/ai/src/api/bedrock-converse-stream.ts` keeps prompt-cache TTL gating, tool-call id
+  normalization, `applyExtraBody` with reserved keys, and the trimmed smithy type imports.
+- `packages/ai/src/api/google-generative-ai.ts` and `packages/ai/src/api/google-vertex.ts` keep the
+  thinking-level maps, `applyExtraBody` with `GOOGLE_RESERVED_BODY_KEYS`, provider-header records,
+  and grounding/url-context metadata emission.
+- `packages/ai/src/api/mistral-conversations.ts` keeps `preserveThinking` message transformation and
+  `MISTRAL_RESERVED_BODY_KEYS` extra-body support.
+- `packages/ai/src/api/transform-messages.ts` keeps same-model redacted-thinking replay: opaque
+  redacted blocks are preserved for the same model regardless of `preserveProviderState` (upstream
+  additionally gates on it), so Bedrock redacted reasoning replays instead of being dropped.
+- `packages/ai/src/api/openai-completions.ts` keeps moonshot/compat tool-schema normalization,
+  forced-tool-choice fallback, stream-aware retries, and `supportsMax`/`supportsXhigh` effort.
+- `packages/ai/src/api/openai-responses.ts` keeps the responses-websockets beta header, Cloudflare
+  base-url routing, client-auth resolution, reserved body keys, and `clampMaxForOpenAI`.
+- `packages/ai/src/index.ts` keeps fork re-exports (cursor pi-args helpers,
+  `sanitizeAnthropicToolPairs`, cursor exec types).
+- `packages/ai/src/types.ts` keeps the `cursor-agent` API id, the extended `OpenAIResponsesCompat`
+  (`supportsAdditionalTools`), session-affinity formats, and `Model` re-exports.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- Import blocks and option-mapping functions of every listed `packages/ai/src/api/*.ts` file, and the
+  export list of `packages/ai/src/index.ts` — upstream touches these on nearly every provider change.
+
+## 2026-08-26 - Detect Kiro payload-limit/context-limit rejections as context overflow
+
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: kiro-lb local byte/token payload-guard rejections (`Request payload is <n> bytes/tokens, over the <n> byte/token limit Kiro accepts.`) and kiro-lb's enhanced upstream context-limit response classify as context overflow.
+
+### Why
+
+- The local `KIRO_MAX_PAYLOAD_BYTES` guard is a gateway limit distinct from Kiro's upstream `CONTENT_LENGTH_EXCEEDS_THRESHOLD` token rejection. Both are client-visible HTTP 400 overflow paths, with route-specific wrappers (Anthropic `invalid_request_error`, OpenAI `detail`, and upstream `kiro_api_error`), so matching the emitted message lets input-shrinking recovery handle each instead of terminating the session.
+
+### Why an extension could not handle it
+
+- Overflow classification is a provider-neutral AI utility below extension-visible session behavior; retry policy reads the verdict before any extension sees the error.
+
+### Expected merge conflict zones
+
+- LOW: the tail of `OVERFLOW_PATTERNS` and the provider inventory comment in `packages/ai/src/utils/overflow.ts`.
+
+## 2026-08-25 - Distinguish Cursor usage-pool exhaustion from context overflow
+
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: token-bearing Cursor `resource_exhausted` errors are context overflow only at or above half the supplied context window; added `isCursorQuotaResourceExhausted` for below-half usage-pool failures while preserving zero-token and no-window behavior.
+
+### Why
+
+- Cursor uses the same bare `resource_exhausted` status for quota exhaustion and context overflow. Proximity to the model window is the verified discriminator.
+
+### Why an extension could not handle it
+
+- Overflow classification is a provider-neutral AI utility below extension-visible session behavior.
+
+### Expected merge conflict zones
+
+- LOW: Cursor `resource_exhausted` handling in `packages/ai/src/utils/overflow.ts`.
+
+## Unreleased
+
+## 2026-08-25 - Harden bounded retry jitter and provider abort metadata
+
+### What changed
+
+- `packages/ai/src/providers/faux.ts`: preserves `abortSource` in faux assistant messages.
+- `packages/ai/src/types.ts`: adds optional provider abort provenance to assistant messages.
+- `packages/ai/src/utils/retry.ts`: adds injectable Codex-style +/-10% jitter to bounded retry delays; provider hints remain lower bounds.
+
+### Why
+
+- Retry watchdog ownership and deterministic jitter must survive shared AI message and retry utility boundaries. Jitter prevents synchronized retries without shortening provider-directed waits.
+
+### Why an extension could not handle it
+
+- These browser-safe shared types and utilities execute below extension-visible provider/session boundaries.
+
+### Expected merge conflict zones
+
+- LOW: `packages/ai/src/providers/faux.ts`, `packages/ai/src/types.ts`, and `packages/ai/src/utils/retry.ts`.
+- Pin a Cursor Composer operating prefix as its own leading system blob so Composer models arrive with this client's native tool vocabulary and completion rules instead of the Cursor-harness habits they were trained on.
+- Match the official Cursor CLI's stream recovery: every inbound frame, including heartbeats and checkpoints, refreshes the 30s health timer; pre-`turnEnded` stalls and transport deaths retry with bounded backoff, and checkpointed attempts resume with the original pinned model request.
+- Treat Cursor `turnEnded` as definitive completion after a bounded exec-dispatch drain.
+- Skip ANTML invoke recovery when `model.api === "cursor-agent"` so native Cursor tool starts are not rejected as invalid event order.
+- Keep usable Cursor task tool arguments when the complete frame parses as empty.
+- Remint a Cursor conversation wire id after the 3-rotation skip instead of blocking the whole session.
+- Persist Cursor conversation-id rotation under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`), not `$HOME/cursor-conversation-ids.json`.
+- Surface the first 0-token `resource_exhausted` of a `stream()` call so session-layer compaction runs before rotation.
+
+## 2026-08-23 - Provider-declared retry policy profiles
+
+### What changed
+
+- `packages/ai/src/utils/retry-profile/` (new tree): pure retry-profile value types (`types.ts`), backoff calculator (`backoff.ts`), failure normalizer (`failure.ts`), classifiers (`classifiers.ts`), delay planner (`planner.ts`), and shipped profile constants (`profiles.ts`). Two stages per profile (`providerRequest`, `turn`), each carrying enabled/maxRetries/backoff(exponential with factor, per-attempt cap, jitter mode)/serverHint(override with ceiling or tiered)/classify.
+- `packages/ai/src/models.ts`: added optional `retryPolicy?: RetryPolicyProfile` to `Provider` and `CreateProviderOptions`, forwarded through `createProvider`. Omitting it means the shipped senpi-default profile applies.
+- `packages/ai/src/providers/kimi-coding.ts`: declares `KIMI_CODE_RETRY_PROFILE` (10 total attempts, 500ms base, x2 factor, 32s per-attempt cap, +0-25% additive jitter, uncapped server Retry-After, status-whitelist classifier) because kimi-code's managed base (api.kimi.com/coding/v1) and wire protocol (anthropic) match this provider's target exactly.
+- `packages/ai/src/api/anthropic-messages.ts`: the catch boundary emits exactly one `provider_retry_failure` diagnostic via `normalizeAnthropicRetryFailure` before the raw error is reduced to a string, carrying a whitelist of facts (kind, statusCode, providerCodes, retryAfterMs, shouldRetry). `output.errorMessage` remains character-identical including the existing `(retry-after-ms: N)` marker.
+- `packages/ai/src/utils/diagnostics.ts`: the `provider_retry_failure` diagnostic type sits alongside existing diagnostics, never retaining a `Headers` object or authorization value.
+- `packages/ai/src/utils/retry.ts`: `isRetryableErrorMessage` delegates to the new tri-state `classifyErrorMessage` (non-retryable / retryable / unknown). Verdicts are unchanged for every message the regexes match; "unknown" lets profile classifiers consult structured status facts only when the regexes say nothing, with non-retryable still outranking retryable.
+- `packages/ai/src/utils/retry-profile/profiles.ts` (phase 2 defaults): the senpi-default turn backoff gained an 8s per-attempt cap and +0..25% additive jitter for locally computed exponentials; provider-derived hints stay exact. The kimi-code profile keeps its documented +0..25% additive jitter on both stages.
+
+### Why
+
+- senpi's `kimi-coding` provider talks to the same upstream service as the kimi-code CLI, so its own retry policy (10 attempts, shorter first waits, uncapped server hints) applies verbatim. Every other provider keeps senpi's existing default behavior byte-identical because the senpi-default profile delegates to the same functions that already drive it.
+
+### Why an extension could not handle it
+
+- The retry decision lives inside this package's streaming adapters and the failure-catch boundary, before any extension hook observes the error. The profile must be resolved at the provider level to affect classification, delay, and fallback routing together.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/ai/src/models.ts` Provider/CreateProviderOptions field lists and the `createProvider` forwarding block.
+- MEDIUM: `packages/ai/src/api/anthropic-messages.ts` catch boundary (diagnostic emission before errorMessage assignment).
+- LOW: `packages/ai/src/utils/diagnostics.ts` diagnostic union (append-only).
+- LOW: `packages/ai/src/utils/retry-profile/` (new tree, no upstream owner).
+
+## 2026-08-23 - Browser-safe credential pool slot algebra
+
+### What changed
+
+- `packages/ai/src/auth/pool/slots.ts` (new): pure slot algebra over the stored `Credential` - `listSlots`, `findSlot`, `upsertSlot`, `removeSlot`, `pinSlot`, `assertValidSlotName`, plus `CredentialSlot` / `PooledCredential` types. A credential with no `accounts` array is read as a one-slot pool named `default` derived from its flat fields without any write-back; `upsertSlot` replaces or appends one slot while every sibling, the pin, and the flat top-level credential survive untouched. Exported as the new subpath `@earendil-works/pi-ai/auth/pool/slots`.
+- `packages/ai/package.json`: added the `./auth/pool/slots` export mapping.
+- `packages/ai/src/models.ts`: `login()` now appends the fresh credential to a pool as a generated `login-N` slot instead of replacing the provider entry (flat/absent entries keep today's whole-write shape); `logout()` accepts `slotId` to remove exactly one slot (no-slot keeps remove-everything); `resolveRefreshCredential()` merges the rotated token back via `mergeRefreshed` so sibling slots and the pin survive a refresh.
+- `packages/ai/src/auth/resolve.ts`: the request-path OAuth refresh applies the same `mergeRefreshed` before persisting.
+
+### Why
+
+- Multi-account credential pools need one shared, provider-neutral definition of slot shape and slot-preserving mutation. The module is pure data transformation with zero I/O so the auth root stays browser-safe, and consumers (coding-agent storage, later affinity/failover) import it rather than redefining it.
+
+### Why an extension could not handle it
+
+- The slot shape extends the stored `Credential` contract defined in this package's `src/auth/types.ts`; extensions cannot author new credential-envelope types or their canonical mutation semantics.
+
+### Expected merge conflict zones
+
+- LOW: new file with no upstream counterpart; the `package.json` export insertion sits beside `./oauth`.
+
+## 2026-08-20 - Google FinishReason exhaustiveness after the @google/genai 2.18.0 bump
+
+### What changed
+
+- `packages/ai/src/api/google-shared.ts`: `mapStopReason` handles the new `FinishReason.TOO_MANY_TOOL_CALLS` member alongside `UNEXPECTED_TOOL_CALL`, mapping it to the `"error"` stop reason.
+
+### Why
+
+- `@google/genai` 2.18.0 adds that enum member, and the switch closes with a `const _exhaustive: never = reason` guard, so `tsc --noEmit` failed until the new case was handled. Grouping it with the other tool-calling aborts keeps the existing semantics: a run that was stopped by the provider rather than completing is surfaced as an error.
+
+### Why an extension could not handle it
+
+- The mapping runs inside this package's Google streaming adapter, on the provider response path that produces the stop reason an extension would only observe after the fact.
+
+### Expected merge conflict zones
+
+- LOW: the `mapStopReason` case list, which grows only when the upstream SDK adds finish reasons.
+
+## 2026-08-20 - Cursor 0-token RE overflow without estimate gate
+
+### What changed
+
+- `packages/ai/src/utils/overflow.ts`: 0-token Cursor `resource_exhausted` is overflow even when the local estimate is 0; same-model remint helpers skip provider fallback; Cursor overflow compaction settings force `keepRecentTokens: 0` and disable restoration.
+
+### Why
+
+- The 50k estimate gate missed sessions whose last billed usage was zeroed after an earlier compact, so Cursor still rejected the payload while senpi treated it as a 429 and jumped providers.
+
+### Why an extension could not handle it
+
+- Overflow classification and retry fallback run in core before extension hooks.
+
+### Expected merge conflict zones
+
+- `packages/ai/src/utils/overflow.ts` after `getOverflowPatterns()`.
+
 # AI Source Changes
+
+## 2026-08-22 - Cursor heartbeat liveness and checkpoint resume retries
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts`: uses one 30s deadline since the last inbound frame of any kind, waits for local exec dispatches before retrying pre-completion stalls or transport termination, and rebuilds checkpointed attempts as `resumeAction` requests without re-resolving the selected model.
+- `packages/ai/src/api/cursor-agent/stream-retry.ts` (new): contains the retry classification, 10-retry default policy, and official-style exponential backoff capped at 60s plus 0-20% jitter. Deterministic delay and budget options support transport harness tests.
+
+### Why
+
+- Cursor heartbeats and conversation checkpoints prove the server stream is alive, especially while a local exec handler is running. Killing heartbeat-only streams after 90s interrupted valid long-running tools. The official CLI instead retries a stream only after 30s with no inbound frame at all, resuming from the latest checkpoint when available.
+
+### Why an extension could not handle it
+
+- HTTP/2 termination, checkpoint caching, request action selection, and exec-dispatch draining all happen inside the native provider below extension-visible events.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/ai/src/api/cursor-agent.ts` `stream()` HTTP/2 lifecycle and retry loop.
+- LOW: `packages/ai/src/api/cursor-agent/types.ts` test-tuning options.
+
+## 2026-08-21 - Cursor turn completion and stream health bounds
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts`: treats a decoded `turnEnded` frame as definitive application completion, drains tracked exec dispatches for at most `CURSOR_TURN_END_DRAIN_TIMEOUT_MS` (5000ms), then closes the client HTTP/2 stream instead of waiting for the server. Before `turnEnded`, `CURSOR_STREAM_HEALTH_FAIL_THRESHOLD_MS` (30000ms) bounds complete inbound silence and `CURSOR_STREAM_HEALTH_HEARTBEAT_ONLY_THRESHOLD_MS` (90000ms) bounds streams carrying only heartbeats or conversation checkpoints.
+
+### Why
+
+- Cursor can leave the HTTP/2 response open after all assistant content, exec results, usage, and `turnEnded` have arrived. The adapter previously waited exclusively for transport end, leaving the user-facing turn frozen until the generic 300000ms agent idle timeout. A server that stalls before `turnEnded` had the same five-minute escape path despite the official Cursor CLI bounding transport silence much sooner.
+
+### Why an extension could not handle it
+
+- Frame decoding, HTTP/2 stream ownership, exec-dispatch tracking, and the conversation-rotation retry loop all live inside the Cursor provider adapter below extension-visible events. Only this transport layer can distinguish heartbeat/checkpoint liveness from meaningful frames and close the active request after the authoritative completion signal.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/ai/src/api/cursor-agent.ts` `stream()` HTTP/2 lifecycle, frame decode loop, and final exec drain; upstream and fork Cursor protocol changes commonly touch the same block.
+
+## 2026-08-20 - Cursor conversation rotation composes with compact-before-rotate
+
+### What changed
+
+- `packages/ai/src/api/cursor-conversation-rotation.ts` (new): persists the base-id to wire-id mapping under the agent dir (`CODING_AGENT_DIR` / `~/.senpi/agent`, overridable with `CURSOR_CONVERSATION_ID_STORE`), caps rotation at `MAX_CURSOR_CONVERSATION_ROTATIONS` (3), and remints a fresh wire id after the skip so a session is never permanently blocked.
+- `packages/ai/src/api/cursor-agent.ts` `stream()`: the FIRST 0-token `resource_exhausted` of a `stream()` call surfaces as an error with no rotation, so the session layer gets first refusal and can compact. Rotation, cache/blob migration, and same-stream retry apply only to attempts after the first within one `stream()` call. Once the base conversation has burned its 3 rotations, `shouldSkip()` surfaces `CURSOR_CONVERSATION_POISONED_MESSAGE` instead of rotating again.
+
+### Why
+
+- Rotating on the first failure swallowed the error inside `stream()`, so the compact-before-rotate policy added by #1015 (which fires in `agent-session` on a SURFACED 0-token RE via `isCursorPayloadResourceExhausted`) never ran. A large-payload rejection then burned all three rotations replaying the same oversized payload and still failed. Surfacing attempt 1 lets compaction shrink the payload first; rotation remains the fallback for a genuinely poisoned conversation id, which compaction cannot fix.
+
+### Why an extension could not handle it
+
+- The rotation map, the persisted wire id, and the h2 retry loop live inside `cursor-agent` `stream()`, below every extension hook; the retry must reuse the same in-flight event stream so `start` is emitted once.
+
+### Expected merge conflict zones
+
+- `packages/ai/src/api/cursor-agent.ts` `stream()` retry loop and its `catch` block.
+- `packages/ai/src/api/cursor-conversation-rotation.ts` (whole file).
+
+## 2026-08-20 - Cursor explicit levels prefer catalog suffix variant ids
+
+### What changed
+
+- `packages/ai/src/cursor/selection-descriptor.ts`: `resolveCursorSelectionDescriptor` now resolves an
+  explicit thinking level to the catalog-guaranteed legacy suffix alias (`kimi-k3-high`,
+  `claude-fable-5-thinking-low`, `gpt-5.3-codex-xhigh`) whenever one exists, via a new
+  `suffixAliasId` that tries the level's wire value then the level token, with thinking-infixed
+  candidates for thinking Claude identities. Bare base id + ordered parameters remains only as the
+  fallback for levels without any alias; `legacySuffixId` is subsumed.
+
+### Why
+
+- Cursor's Run RPC now rejects bare capability ids with Connect `not_found` for every family
+  (issue #1008; live probes 2026-08-20 in
+  `local-ignore/qa-evidence/20260820-cursor-bare-id-notfound/`: bare `kimi-k3`+parameters and bare
+  `claude-fable-5`+parameters both `not_found`, while `kimi-k3-high` and
+  `claude-fable-5-thinking-low` complete), so every explicit level rendered as base+parameters died
+  at turn start.
+
+### Why an extension could not handle it
+
+- The selection descriptor is core provider data consumed by both Cursor transports (protobuf
+  `RequestedModel` and the CLI model string); no extension hook sits between them.
+
+### Expected merge conflict zones
+
+- `selection-descriptor.ts` resolver body and helper block (fork-only file; upstream has no cursor
+  provider).
+
+## 2026-08-19 - Ignore Cursor billed cacheRead that dwarfs usedTokens
+
+### What changed
+
+- `applyCheckpointTokenDetails` records `UsageState.liveUsedTokens`.
+- `applyBilledTurnEndedUsage` ignores `cache_read_tokens` when it is more than 3× that live window and keeps `totalTokens` at `usedTokens`.
+
+### Why
+
+- Session 01a01879 jumped 148k → 4.09M because field 3 was dashboard-cumulative cache read, not conversation size. `max(usage, estimate)` then forced a useless compact and a 0-token `resource_exhausted`.
+
+### Conflict zone
+
+- `packages/ai/src/api/cursor-agent.ts` `applyBilledTurnEndedUsage` / `UsageState`.
+
+## 2026-08-19 - OpenAI-family adapters re-diverge from the 59a71b23 pin
+
+### What changed
+
+- `packages/ai/src/api/openai-responses.ts`: keeps the fork's Responses request surface on top of the new
+  pin — `serviceTier` forwarded as `service_tier` with `-fast`/Priority-tier cost correction
+  (`getServiceTierCostMultiplier` / `applyServiceTierPricing`, flex 0.5x, priority 2x and 2.5x for
+  `gpt-5.5`), the `max` ladder resolved through `supportsMax` / `supportsXhigh` / `clampMaxForOpenAI`
+  instead of a flat clamp, the `web_search_preview` compat guard that strips the unsupported
+  `web_search_call.action.sources` include, per-session WebSocket connection reuse with idle expiry, the
+  three-way `sessionAffinityFormat` split (`openai` / `openai-nosession` / `openrouter`),
+  `extraBody` merging, and null-aware `thinkingLevelMap` resolution where a mapped `null` means
+  "reasoning unavailable" rather than "reasoning off".
+- `packages/ai/src/api/openai-completions.ts`: compat resolution now lives in the shared browser-safe
+  `utils/prompt-cache-ttl.ts` (`getOpenAICompletionsCompat`) and is re-exported from here, replacing the
+  pin's file-local `detectCompat`/`getCompat` pair; the params type is a real
+  `OpenAICompletionsRequestParams` (fork fields `tool_stream`, `chat_template_kwargs`,
+  `reasoning_effort` typed instead of `as any` casts); Kimi K3 detection supplies
+  `KIMI_K3_THINKING_LEVEL_MAP`; usage parsing reads cache-read tokens from
+  `prompt_tokens_details.cached_tokens`, then DeepSeek's `prompt_cache_hit_tokens`, then Kimi's
+  documented **top-level** `usage.cached_tokens` on the final usage chunk, and never subtracts writes;
+  per-choice usage is typed via `ChatCompletionChoiceWithUsage`; `applyExtraBody` merges caller fields
+  under `OPENAI_COMPLETIONS_RESERVED_BODY_KEYS`. The `thinkingTokenBudgetField` /
+  `supportsThinkingTokenBudget` budget field upstream generalized is retained through the shared
+  resolver rather than the pin's inline compat table.
+- `packages/ai/src/api/openai-codex-responses.ts`: the fork splits WebSocket fallback/debug state into
+  `openai-codex-responses/fallback-state.ts` and re-exports `OpenAICodexWebSocketDebugStats` from there;
+  ChatGPT account identity resolves through `extractOpenAiCodexAccountId` with an `accountId ?? apiKey`
+  affinity fallback, cache-affinity headers come from `applyOpenAICodexCacheAffinityHeaders`, the same
+  `supportsMax`/`supportsXhigh`/`clampMaxForOpenAI` ladder applies, and `extraBody` merges under
+  `OPENAI_RESPONSES_RESERVED_BODY_KEYS`.
+- `packages/ai/src/api/azure-openai-responses.ts`: accepts upstream's `tool_choice` forwarding while
+  keeping the fork's additions — the `supportsMax` effort ladder in `streamSimple`, `prompt_cache_key`
+  suppressed when the effective `cacheRetention` (option or `model.cacheRetention`) is `"none"`, the
+  null-aware `thinkingLevelMap` resolution with `reasoningRequested` / `reasoningUnavailable`, and
+  `reasoningSummary: null` omitting the summary field entirely.
+- `packages/ai/src/api/simple-options.ts`: fork-owned shared option layer — `applyExtraBody` plus the
+  six per-provider reserved-key sets (OpenAI Completions/Responses, Google, Anthropic, Mistral,
+  Bedrock), `clampMaxForOpenAI`, `cacheRetention` defaulting to `model.cacheRetention`,
+  `abortServerSideFallback` and `extraBody` carried onto base options, integer/finite clamping in
+  `clampMaxTokensToContext`, and `adjustMaxTokensForThinking` treating an unresolvable level as
+  "no thinking" (budget 0) instead of producing a NaN budget.
+
+### Why
+
+- These are the fork's paid-tier accounting, provider-affinity, and wire-compat contracts. Upstream
+  `59a71b235d` has no service-tier pricing, no `-fast` Priority variants, no Kimi top-level cached-token
+  form, no `extraBody` seam, and no shared compat resolver, so each re-diverges on merge. The Kimi read
+  in particular is a correctness fix: Kimi reports cache reads only at `usage.cached_tokens`, so without
+  the top-level branch every Kimi turn bills cache reads as fresh input.
+
+### Why an extension could not handle it
+
+- Request-body construction, usage/cost parsing, WebSocket session reuse, and affinity headers all run
+  inside the provider adapters, below every extension-visible surface. An extension cannot rewrite a
+  streamed usage chunk into corrected cost, nor inject a header on a socket it never sees.
+
+### Expected merge conflict zones
+
+- HIGH: `openai-responses.ts` `buildParams` / request construction and the usage-and-cost block;
+  `openai-completions.ts` compat import and params typing (upstream owns the same `detectCompat` hunk —
+  keep the shared resolver when resolving).
+- MEDIUM: `openai-codex-responses.ts` fallback-state extraction and affinity header application;
+  `azure-openai-responses.ts` `buildParams` reasoning block.
+- LOW: `simple-options.ts` reserved-key sets and clamp helpers.
+
+## 2026-08-19 - Google, Anthropic, Bedrock, and Mistral adapters re-diverge from the 59a71b23 pin
+
+### What changed
+
+- `packages/ai/src/api/google-shared.ts`: tool-call ids normalize through the shared collision-safe
+  `utils/tool-call-id.ts` instead of the pin's local `replace(...).slice(0, 64)` truncation;
+  `convertMessages` takes `preserveThinking` so a non-reasoning turn drops thinking state;
+  `sanitizeForOpenApi` recurses into arrays; the position-aware `stripOptional` removes the non-standard
+  `optional` keyword from schema-keyword position only, preserving it as a property name under
+  `properties`/`patternProperties`/`$defs`/`definitions` and never traversing the value keywords
+  `const`/`default`/`examples`/`enum`; `toProviderNativeContent` maps unrecognized Gemini parts
+  (`executableCode`, `codeExecutionResult`, or the dominant part key) onto the fork's
+  `providerNative` content block.
+- `packages/ai/src/api/google-generative-ai.ts` and `packages/ai/src/api/google-vertex.ts`: both take
+  upstream's thinking-level direction but keep the fork's thinking-off routing — a runtime `"off"`
+  handed through the `ThinkingLevel`-typed `reasoning` option, and a post-clamp `"off"`, both take the
+  disabled wire form rather than an enabled one, which a post-clamp check alone cannot see because
+  Gemini 3 maps `off` to `null`. Both also emit `providerNative` blocks for unhandled parts and for
+  once-per-response `groundingMetadata` / `urlContextMetadata`, merge `extraBody` into the inner
+  `config` under `GOOGLE_RESERVED_BODY_KEYS`, and pass `preserveThinking` into `convertMessages`.
+  `google-generative-ai.ts` additionally replaces the pin's `as any` thinking-level casts with a typed
+  `THINKING_LEVEL_MAP` onto the SDK's `ThinkingLevel` enum; `google-vertex.ts` drops the
+  `Model<"google-generative-ai">` casts in favor of `Pick<Model<Api>, "id">` predicates and takes plain
+  header records so `providerHeadersToRecord` is applied once at the client boundary.
+- `packages/ai/src/api/anthropic-messages.ts`: keeps the fork's adaptive-thinking surface — the
+  `ADAPTIVE_THINKING_MODEL_MARKERS` and `NATIVE_XHIGH_EFFORT_MODEL_MARKERS` families, the
+  `forceAdaptiveThinking` compat override, `sanitizeAdaptiveThinkingPayload` /
+  `sanitizeAdaptiveThinkingHeaders` (which rewrite `thinking` to `{type: "adaptive"}` with an
+  `output_config.effort`, and strip the interleaved-thinking beta an adaptive family rejects), the
+  computer-use beta stripper for families that reject it, effort pinned low on a degraded/disabled turn,
+  the shared `getAnthropicCompat` / `isAnthropicApiBaseUrl` prompt-cache-TTL resolver behind the `1h`
+  retention decision, and server-side-fallback receipt handling.
+- `packages/ai/src/api/bedrock-converse-stream.ts`: keeps `cacheRetention` falling back to
+  `model.cacheRetention`, `preserveThinking` on message conversion, shared `normalizeToolCallId`,
+  `applyExtraBody` with `BEDROCK_RESERVED_BODY_KEYS`, the Mythos 5 adaptive-family marker, and the
+  custom-header build-step middleware — now guarded so no middleware is registered for an empty header
+  map and narrowed through a `hasHeaders` type guard rather than an inline cast. Upstream's response
+  smithy-header deserialize middleware is accepted in the same inline-registration form.
+- `packages/ai/src/api/mistral-conversations.ts`: keeps `preserveThinking` (derived from
+  `promptMode === "reasoning"` or an explicit `reasoningEffort`) on message transformation and
+  `applyExtraBody` with `MISTRAL_RESERVED_BODY_KEYS`, plus the block-type narrowing in `toChatMessages`
+  that skips non-`toolCall` blocks instead of coercing them.
+
+### Why
+
+- Every item here is a wire contract the fork resolved against live provider behavior: truncating tool
+  ids can collapse two distinct calls into one id, replaying thinking state into a non-reasoning turn is
+  rejected, an adaptive Anthropic family 400s on `thinking: {type: "disabled"}` and on the interleaved
+  beta, Gemini 3 cannot express thinking-off through a budget, and `optional` is not a JSON Schema
+  keyword Gemini accepts. Upstream's new thinking-level maps do not encode any of these, so the fork's
+  routing must survive the merge.
+
+### Why an extension could not handle it
+
+- Message conversion, tool-schema emission, beta-header negotiation, and Smithy middleware registration
+  happen inside the adapters while constructing the outbound request; there is no hook between the
+  adapter and the provider SDK where an extension could observe or repair them.
+
+### Expected merge conflict zones
+
+- HIGH: `anthropic-messages.ts` `buildParams` and the beta-header/payload sanitizers.
+- MEDIUM: `google-shared.ts` `convertMessages` and `convertTools`; the `streamSimple` thinking branches
+  in `google-generative-ai.ts` and `google-vertex.ts`; `bedrock-converse-stream.ts` middleware
+  registration and command-input construction.
+- LOW: `mistral-conversations.ts` payload build and stream-block narrowing.
+
+## 2026-08-19 - Public type and export surface re-diverges from the 59a71b23 pin
+
+### What changed
+
+- `packages/ai/src/types.ts`: carries the fork's request and content contracts — the compaction
+  affinity/request-identity split (`affinitySessionId`, the stable originating-session identity that
+  survives auxiliary calls which replace `sessionId`, plus `streamKind: "main" | "auxiliary"` where an
+  absent value must be read as auxiliary), `abortServerSideFallback`, `extraBody`, the three-argument
+  `onPayload` with `ProviderRequestMetadata` (effective model plus fully transformed headers),
+  `ThinkingSelection` provenance, `thinkingBudgets.max`, thinking-block `startedAt`/`endedAt`, the
+  `incomplete`/`errorMessage` tool-call carriers used by text tool-call recovery, `isVideoMimeType` and
+  video payloads riding `ImageContent`, the `providerNative` block, the local `OpenAIResponsesCompat`
+  extension adding `supportsAdditionalTools`, and the fork-only `cursor-agent` API plus
+  `alibaba-token-plan` / `cursor` / `ollama` / `opengateway` provider ids and the `openai-images` images
+  API.
+- `packages/ai/src/index.ts`: publishes the fork's core export surface that upstream has no counterpart
+  for — the cursor capability/grouping/selection API and cursor pi-args helpers, `getApiProvider`,
+  `convertResponsesMessages`, `warmPromptCache`, `sanitizeAnthropicToolPairs`, the tool-call middleware
+  entry points (`wrapStreamWithToolCallMiddleware`, `shouldRecoverTextToolCalls`,
+  `hasKimiTextToolCallRecovery`, the XTML recovery stream parser), context provenance,
+  `env-api-keys`, `auth/headers`, prompt-cache TTL constants, server-fallback receipts, stop details,
+  tool-pair repair, visible text, block symbols (`kCursorExecResolved`), wire identity
+  (`getWireIdentity` / `setWireIdentity`, the senpi branding seam), and `extractOpenAiCodexAccountId`.
+
+### Why
+
+- These two files are the seam through which `packages/agent` and `packages/coding-agent` reach every
+  fork behavior recorded elsewhere in this tracker. If the merge took the pin's version, the affinity
+  split, provenance-bearing thinking selection, provider-native blocks, and the entire cursor and
+  tool-call-middleware surface would stop being reachable and the dependent packages would not compile.
+
+### Why an extension could not handle it
+
+- An extension consumes these types and exports; it cannot add a field to a core request interface or
+  publish a package entry point that other workspace packages import.
+
+### Expected merge conflict zones
+
+- HIGH: `index.ts` export ordering — upstream appends to the same alphabetized lists, so nearly every
+  sync conflicts here; resolve by keeping both sides' exports.
+- MEDIUM: `types.ts` `ProviderRequestOptions` / `StreamOptions` / `SimpleStreamOptions` members and the
+  `KnownProvider` / `KnownApi` unions.
+
+## 2026-08-18 - Cursor context windows tracked to the models.dev first-party SSOT
+
+### What changed
+
+- `packages/ai/src/cursor/model-capabilities.ts`: window values now derive from the models.dev
+  first-party catalog capped by the `context` options Cursor actually offers each family, and the
+  capability gains `requestContext` — the context token matching the advertised window.
+- `packages/ai/src/cursor/selection-descriptor.ts`: the wire mapper emits
+  `requestContext ?? defaultContext`, so a family advertising 1M also asks Cursor for `context=1m`.
+
+### Why
+
+- Claude families were encoded at 300000, copied from the cursor-agent CLI listing's stale
+  "(300K context)" display labels; models.dev, Cursor's `1m` context option, and the models' own "1M"
+  display names all agree they are 1000000. Advertising a window larger than the context the request
+  asks for would let compaction overrun what Cursor was told to allocate, so the two values are one
+  contract and are now verified together.
+
+### Why an extension could not handle it
+
+- The capability table and the protobuf/CLI wire mapper are core provider data consumed by both
+  Cursor transports; no extension hook sits between them.
+
+### Expected merge conflict zones
+
+- `model-capabilities.ts` family table and helper signatures, `selection-descriptor.ts` parameter switch.
+
+## 2026-08-18 - Sanitize JSON-Schema composition keywords from advertised Cursor tool schemas
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts`: new exported `sanitizeCursorToolSchema` helper plus
+  `CURSOR_UNSUPPORTED_SCHEMA_KEYS`; `buildMcpToolDefinitions` now recursively strips `oneOf`,
+  `anyOf`, and `allOf` from every advertised tool's inputSchema before proto encoding. `not` and
+  all other keywords pass through untouched. Returns new structures (input never mutated).
+
+### Why
+
+- An advertised tool whose inputSchema carries a composition keyword makes Cursor's gateway
+  reject the ENTIRE request upstream with a wrapped provider 400 (`ERROR_PROVIDER_ERROR`, zero
+  tokens, `resource_exhausted` end-stream) — proven by live A/B on 2026-08-18 with a minimal
+  single-tool `oneOf`/`anyOf`/`allOf` repro against `claude-fable-5-thinking-xhigh`. External MCP
+  servers ship such schemas routinely (ast-grep's `scan` uses a top-level `oneOf`), so every
+  session registering one failed on the cursor provider from turn 1.
+
+### Why an extension could not handle it
+
+- `buildMcpToolDefinitions` runs inside the cursor-agent Run-request construction path; the
+  advertised schema bytes are serialized before any extension-visible surface exists.
+
+### Expected merge-conflict zones
+
+- `packages/ai/src/api/cursor-agent.ts` (`buildMcpToolDefinitions` / schema helpers) — same zone
+  as the reasoning-levels entry; test file
+  `packages/ai/test/cursor-tool-schema-sanitize.test.ts` is new.
+
+## 2026-08-18 - Cursor reasoning levels end to end
+
+### What changed
+
+- `src/cursor/model-capabilities.ts`, `src/cursor/cursor-variant-aliases.json`: committed static capability table
+  (windows, parameter orders, exact level encodings incl. GPT 5.5/Codex 5.3 `extra-high` and off=`none` families)
+  plus the 204-id alias index, both derived from the live aiserver.v1 AvailableModels capture of 2026-08-18.
+- `src/cursor/catalog-grouping.ts`: lossless variant parser + grouping (Claude `base`/`base-thinking` boolean axis,
+  fast variants retained raw) with total seven-key thinkingLevelMaps; golden 204->113/32 pinned by fixture test.
+- `src/cursor/selection-descriptor.ts`: transport-neutral selection resolver (parameters vs suffix-id encodings)
+  shared by the native protobuf lane and the `cursor-cli-oauth` extension.
+- `src/cursor/store-migration.ts`: idempotent stored-catalog regrouping.
+- `providers/cursor.ts`: discovery now publishes grouped identities with `compat.cursorReasoning` and correct
+  windows; `api/cursor-agent.ts` renders `options.thinkingSelection` into `RequestedModel.parameters`; absent
+  selections keep the representative-variant request shape byte-exactly.
+- `packages/ai/src/index.ts`: re-exports the shared cursor capability, grouping, and selection API.
+- `packages/ai/src/models.ts`: new `restoreModels` provider hook (try/catch — stored catalog survives a throwing transform).
+- `packages/ai/src/types.ts` / `packages/ai/src/model.ts`: `ThinkingSelection` type + `CursorAgentCompat.cursorReasoning` capability gate.
+
+### Why
+
+- The Cursor catalog exposed 204 expanded variant ids with reasoning disabled, so senpi thinking
+  levels could not reach the wire and context windows came from stale name heuristics.
+
+### Why an extension couldn't do it
+
+- Provider discovery normalization, protobuf Run-request construction, agent-loop option propagation, and the
+  models-store restore path are core runtime seams an extension cannot reach.
+
+### Expected merge-conflict zones
+
+- `api/cursor-agent.ts` (Run-request builder + streamSimple), `providers/cursor.ts`, `models.ts` restore path,
+  `types.ts` SimpleStreamOptions, `packages/agent/src/agent-loop.ts` prepareNextTurn merge.
 
 ## 2026-08-17 - Cursor exec result closure + per-exec heartbeats
 
@@ -2353,3 +3043,21 @@ Detection has to happen inside the Anthropic SSE loop while the stream is still 
 
 - MEDIUM: `api/anthropic-messages.ts` streaming event loop and request-option construction.
 - LOW: `types.ts` `StreamOptions`, `api/simple-options.ts` `buildBaseOptions` field list, `index.ts` export list.
+
+## 2026-08-25 - Preserve upstream provider adapter behavior
+
+### What changed
+
+- `packages/ai/src/api/openai-completions.ts` and `packages/ai/src/providers/cloudflare-ai-gateway.ts` retain fork provider behavior while adopting upstream reasoning and typing fixes.
+
+### Why
+
+- Provider wire behavior is a runtime contract.
+
+### Why this lives in the fork
+
+- Adapter serialization and provider registration run below extension hooks.
+
+### Expected merge conflict zones
+
+- OpenAI Completions reasoning conversion and Cloudflare provider generic declarations.

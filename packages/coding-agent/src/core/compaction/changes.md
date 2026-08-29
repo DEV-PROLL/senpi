@@ -1,5 +1,88 @@
 # changes.md — compaction
 
+## Compaction re-diverges from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/coding-agent/src/core/compaction/compaction.ts` keeps the fork compaction pipeline:
+  image/text content handling in summaries, the retry surface (policies plus callbacks), and the
+  fork's transport-aware message conversion, re-asserted after this sync's resolution regressed it.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- The summarization request assembly and retry wiring inside
+  `packages/coding-agent/src/core/compaction/compaction.ts`.
+
+## 2026-08-20 - Ignore implausible billed usage for compaction threshold
+
+### What changed
+
+- `packages/coding-agent/src/core/compaction/compaction.ts`: adds `resolveThresholdContextTokens`. If the local estimate is at least 50k and billed usage is more than 8× that estimate, compact against the estimate; otherwise use `max(usage, estimate)`.
+
+### Why
+
+- Cursor dashboard-cumulative cacheRead can be millions while the live window is ~150k. Folding that into the threshold forced a useless compact and a 0-token `resource_exhausted`.
+
+### Why an extension could not handle it
+
+- Compaction threshold math runs in core before any extension compaction hook is consulted.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/compaction/compaction.ts` `resolveThresholdContextTokens`
+
+## Summarization request identity, watchdog, and summary-safe filtering after the 59a71b23 pin (2026-08-19)
+
+### What changed
+
+- `packages/coding-agent/src/core/compaction/compaction.ts`: `completeSummarization()` keeps the fork's
+  affinity/request-identity split instead of upstream's single routing id. Upstream (pin
+  `59a71b235dadb4ad0d67557a8abb0aaa093e68b4`) sets `sessionId: options.sessionId ?? uuidv7()`; the fork sets
+  `affinitySessionId: options.affinitySessionId ?? options.sessionId` and always mints a fresh `sessionId` per
+  request, so provider affinity follows the caller's session while each summary request stays its own identity.
+  The same function keeps the fork's request-local `AbortController` plus `consumeStreamWithIdleTimeout()`
+  (`DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS` / `DEFAULT_SUMMARIZATION_MAX_DURATION_MS`) over `streamSimple`, so a
+  stalled summarization is torn down without aborting the caller's signal.
+- `compaction.ts` also keeps: `extraBody`/`sessionId`/`transformContext` parameters through `generateSummary()`,
+  `generateSummaryWithUsage()`, `compact()`, and `generateTurnPrefixSummary()`; `contentTextForSummary()` in place
+  of `contentText()`; context-excluded custom-message filtering (`contextMessagesForCompactionEntry()`,
+  `filterContextExcludedMessages()`) across cut-point scanning and token estimation; base64-run weighting in
+  `estimateTokens()`; `prepareCompaction(forceProgress, allowSummaryOnly)`; and the fork compaction settings
+  (speculative, restoration, idle) on `CompactionSettings`/`DEFAULT_COMPACTION_SETTINGS`.
+- `packages/coding-agent/src/core/compaction/branch-summarization.ts`: keeps the `session_before_compact`
+  emission for branch summaries (`reason: "branch"`, fresh `requestId`, synthesized `CompactionPreparation` via
+  `createBranchCompactionPreparation()`, cancel and precomputed-summary handling), `extraBody` on
+  `GenerateBranchSummaryOptions` with the env-carrying `BranchSummaryStreamOptions`, context-excluded custom
+  entries skipped in `getMessageFromEntry()`, and `contentTextForSummary()` for the produced summary text.
+
+### Why
+
+- Upstream's centralized summary-request path reuses the caller's session id as the routing id; the fork's
+  providers key prompt-cache affinity and per-request identity separately, so collapsing them would either move a
+  summary onto the main turn's cache identity or lose affinity entirely. The watchdog, summary-safe content
+  extraction, and context-exclusion filters exist because fork sessions carry provider-native replay blocks and
+  fork-only custom messages that must never enter or stall a summarization request.
+
+### Why an extension could not handle it
+
+- These are the core fallback summarization paths: they run exactly when no extension returned a compaction
+  result, and the branch-summary hook is emitted from inside `generateBranchSummary()` itself.
+
+### Expected merge conflict zones
+
+- MEDIUM: `completeSummarization()` request-option construction and the produce/watchdog body — upstream edits
+  this function whenever it changes caching or routing; keep `affinitySessionId` plus the fresh `sessionId`.
+- LOW-MEDIUM: the trailing parameter lists on the four public summary functions; the
+  `session_before_compact` block in `branch-summarization.ts`.
+
 ## Repository audit baseline for the compaction tracker (2026-08-17)
 
 ### What changed

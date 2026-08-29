@@ -5,6 +5,7 @@ import {
 	candidatesAfter,
 	canonicalizeFallbackChains,
 	formatSelector,
+	hasExplicitFallbackOptOut,
 	parseFallbackSelector,
 	resolveChainKey,
 } from "../../src/core/retry-fallback/chains.ts";
@@ -95,6 +96,79 @@ describe("fallback chain selectors", () => {
 				models,
 			),
 		).toEqual({ "openai/gpt-5.4:high": ["anthropic/claude-sonnet-4-5:max"] });
+	});
+
+	it("resolves the wildcard key when no exact or base chain matches", () => {
+		// A model without its own chain must still have an escape lane: thread
+		// 487d7c29 wedged terminal on nine consecutive upstream 500s because
+		// resolveChainKey returned undefined for the manually selected model.
+		const model = getModel("openai", "gpt-5.4");
+		const chains = { "*": ["anthropic/claude-sonnet-4-5:high"] };
+		expect(resolveChainKey(model, "high", chains, { allowWildcard: true })).toBe("*");
+		expect(resolveChainKey(model, undefined, chains, { allowWildcard: true })).toBe("*");
+	});
+
+	it("treats a tombstoned chain as an explicit opt-out from the wildcard", () => {
+		// The `[]` tombstone is the documented way to switch fallback off. The
+		// shipped wildcard lane must not resurrect it against that instruction.
+		const model = getModel("anthropic", "claude-fable-5");
+		const namespacedModel = { ...model, id: "global.anthropic.claude-fable-5" };
+		expect(hasExplicitFallbackOptOut({ "claude-fable-5": [] }, namespacedModel, "max")).toBe(true);
+		expect(hasExplicitFallbackOptOut({ "gpt-5.4": [] }, getModel("openai", "gpt-5.4"), undefined)).toBe(true);
+		expect(hasExplicitFallbackOptOut({ "claude-fable-5": [] }, model, "max")).toBe(true);
+		expect(hasExplicitFallbackOptOut({ "anthropic/claude-fable-5": [] }, model, undefined)).toBe(true);
+		expect(hasExplicitFallbackOptOut({ "openai/gpt-5.4": [] }, model, "max")).toBe(false);
+		// A tombstoned wildcard is not itself a per-model opt-out.
+		expect(hasExplicitFallbackOptOut({ "*": [] }, model, "max")).toBe(false);
+	});
+
+	it("withholds the wildcard unless the caller opts in", () => {
+		// An active fallback episode must keep walking its own chain; the wildcard
+		// is only offered to a session that resolved no chain at all.
+		const model = getModel("openai", "gpt-5.4");
+		expect(resolveChainKey(model, "high", { "*": ["anthropic/claude-sonnet-4-5"] })).toBeUndefined();
+	});
+
+	it("prefers exact and base keys over the wildcard", () => {
+		const model = getModel("openai", "gpt-5.4");
+		expect(
+			resolveChainKey(
+				model,
+				"high",
+				{
+					"openai/gpt-5.4:high": ["anthropic/claude-sonnet-4-5"],
+					"*": ["anthropic/claude-sonnet-4-5"],
+				},
+				{ allowWildcard: true },
+			),
+		).toBe("openai/gpt-5.4:high");
+		expect(
+			resolveChainKey(
+				model,
+				"max",
+				{
+					"openai/gpt-5.4": ["anthropic/claude-sonnet-4-5"],
+					"*": ["anthropic/claude-sonnet-4-5"],
+				},
+				{ allowWildcard: true },
+			),
+		).toBe("openai/gpt-5.4");
+	});
+
+	it("preserves the wildcard chain through canonicalization", () => {
+		expect(canonicalizeFallbackChains({ "*": ["ANTHROPIC/claude-sonnet-4-5:MAX"] }, models)).toEqual({
+			"*": ["anthropic/claude-sonnet-4-5:max"],
+		});
+	});
+
+	it("drops a tombstoned wildcard chain", () => {
+		expect(canonicalizeFallbackChains({ "*": [] }, models)).toEqual({});
+	});
+
+	it("ships a default wildcard lane that user config can tombstone", () => {
+		expect(DEFAULT_FALLBACK_CHAINS["*"]?.length ?? 0).toBeGreaterThan(0);
+		const resolved = resolveRetryFallbackSettings({ fallbackChains: { "*": [] } });
+		expect(resolved.chains["*"]).toEqual([]);
 	});
 
 	it("prefers an exact thinking key, then the base key", () => {

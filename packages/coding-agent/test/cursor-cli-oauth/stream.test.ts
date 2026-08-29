@@ -60,6 +60,7 @@ async function makeStore(accounts: readonly CursorCliAccountSlot[]): Promise<InM
 function enabledSettings(overrides: Partial<CursorCliOauthProviderSettings> = {}): CursorCliOauthProviderSettings {
 	return {
 		enabled: true,
+		explicitlyDisabled: false,
 		executablePath: undefined,
 		forceExecution: true,
 		noApprovalAcknowledgedAt: "2026-08-17T00:00:00.000Z",
@@ -465,7 +466,7 @@ describe("cursor-cli-oauth stream mapping", () => {
 			cwd: directory,
 			agentDir: join(directory, "agent"),
 			store: await makeStore([account("alpha")]),
-			settings: enabledSettings({ enabled: false }),
+			settings: enabledSettings({ enabled: false, explicitlyDisabled: true }),
 			now: () => NOW,
 		};
 		process.env.SENPI_CURSOR_CLI_OAUTH_EXECUTABLE = fixture.executable;

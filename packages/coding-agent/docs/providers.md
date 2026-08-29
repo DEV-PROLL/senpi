@@ -44,10 +44,11 @@ The `claude-sdk-oauth` provider routes LLM calls through the official [Claude Ag
 - Multiple accounts: each `/login claude-sdk-oauth` adds another named account. `CLAUDE_CODE_OAUTH_TOKEN` (and `_2`..`_N`) are honored as read-only env accounts. `/claude-account` lists, adds, removes, and pins accounts; `--claude-account <name>` pins one for the session; `claudeSdkOauthProvider.pinnedAccount` pins one in settings.
 - Session affinity: one senpi session sticks to one account (rendezvous hashing), which keeps Anthropic's prompt cache warm - accounts never rotate mid-session except on automatic failover. Rate limits and auth errors block the account (with cooldown) and retry on the next account, before any visible output; once output has started, the error surfaces instead of replaying.
 - Default lane: **ambient** - with no `tokenInjection` setting the provider inherits the environment like the upstream extension (Claude Code CLI login or `ANTHROPIC_API_KEY`). Managed lanes (`oauth-slots`, `config-dir`) are opt-in via one settings line until the live subscription spike proves a managed default.
+- Ambient lane is explicit opt-in: a Claude Code CLI login on the host is not consent to spend that subscription, so the ambient lane is gated by `claudeSdkOauthProvider.enabled` (default `false`, env override `SENPI_CLAUDE_SDK_OAUTH_ENABLED`). Before this gate existed, a logged-in Claude Code CLI made the provider available with no senpi-side action. An explicit senpi-side login is itself an opt-in: stored OAuth accounts in `auth.json` and `CLAUDE_CODE_OAUTH_TOKEN` / `CLAUDE_CODE_OAUTH_TOKEN_<n>` env accounts keep the provider available with the flag unset. Only the host-CLI-derived ambient lane requires the flag.
 - Settings (`claudeSdkOauthProvider`):
   - `systemPromptMode` — controls how the system prompt is delivered. **`full`** (default) sends senpi's composed system prompt verbatim; the lane no longer rebuilds from the SDK `claude_code` preset, so all prompt regions (project rules, response-language instructions, etc.) reach the model. **`preset-append`** is the previous behaviour (deprecated, kept for one release; emits a one-time warning). **`override`** loads the system prompt from a file (`systemPromptFile`). The legacy `appendSystemPrompt` key still works: `false` → `preset-append`, `true`/unset → `full`; setting both keys makes `systemPromptMode` win and warns.
   - In `full` and `override` modes, `settingSources` defaults to `[]` on every lane because senpi's prompt already carries project context — loading the SDK's own CLAUDE.md would double-inject it. The CLI always prepends its own `"You are a Claude agent, built on Anthropic's Claude Agent SDK."` block, which senpi cannot suppress; `full` means the prompt is delivered intact, not that it is the only system-prompt text.
-  - `settingSources` (filesystem settings load only in the ambient lane, so they cannot override your selected account), `strictMcpConfig`, `pinnedAccount`, `tokenInjection` (`oauth-slots` | `config-dir` | `ambient`), `resumeMode` (`auto` default | `off` restores per-turn sessions), `systemPromptFile`.
+  - `settingSources` (filesystem settings load only in the ambient lane, so they cannot override your selected account), `strictMcpConfig`, `pinnedAccount`, `tokenInjection` (`oauth-slots` | `config-dir` | `ambient`), `resumeMode` (`auto` default | `off` restores per-turn sessions), `systemPromptFile`, `enabled` (default `false`; gates the ambient lane only).
 - **Environment overrides** (precedence: `env > project settings > global settings > default`; no new CLI flags):
 
   | Variable | Purpose |
@@ -55,6 +56,7 @@ The `claude-sdk-oauth` provider routes LLM calls through the official [Claude Ag
   | `SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_MODE` | `full` \| `preset-append` \| `override` |
   | `SENPI_CLAUDE_SDK_OAUTH_SYSTEM_PROMPT_FILE` | Path to the system prompt file (used with `override` mode) |
   | `SENPI_CLAUDE_SDK_OAUTH_RESUME` | `auto` (default) \| `off` — disables session reuse, restoring per-turn SDK queries |
+  | `SENPI_CLAUDE_SDK_OAUTH_ENABLED` | Overrides `enabled`; gates the ambient (host-CLI-derived) lane |
   | `SENPI_CLAUDE_SDK_OAUTH_TOKEN_INJECTION` | `oauth-slots` \| `config-dir` \| `ambient` |
   | `SENPI_CLAUDE_SDK_OAUTH_SETTING_SOURCES` | Overrides `settingSources` |
   | `SENPI_CLAUDE_SDK_OAUTH_PINNED_ACCOUNT` | Overrides `pinnedAccount` |
@@ -146,7 +148,7 @@ Radius is a dynamic `pi-messages` gateway. `/login radius` stores OAuth tokens i
 
 Use the native `cursor` provider above by default - it is the first-party, primary path.
 
-`cursor-cli-oauth` is a default-available fallback (never a replacement) that drives the locally installed `cursor-agent` CLI instead of Cursor's network protocol. It becomes usable automatically when `cursor-agent` is installed and Senpi has a native `cursor` OAuth credential. Fall back to this lane when:
+`cursor-cli-oauth` is an opt-in fallback (never a replacement) that drives the locally installed `cursor-agent` CLI instead of Cursor's network protocol. It becomes usable when `cursor-agent` is installed, Senpi has a native `cursor` OAuth credential, and the lane has been explicitly enabled. Fall back to this lane when:
 
 - the native transport misbehaves on your setup - protocol drift after a Cursor update, Connect-RPC/HTTP2 failures the native provider cannot route around, or
 - you explicitly want Cursor's own agent harness - the model running inside the Cursor CLI with its built-in tools - rather than senpi executing the tools.
@@ -177,7 +179,7 @@ curl https://cursor.com/install -fsS | bash
 /cursor-account [list | add | remove <name> | pin <name> | unpin | import [local | native] | acknowledge | status]
 ```
 
-- The lane is enabled by default. Set `cursorCliOauthProvider.enabled: false` (or `SENPI_CURSOR_CLI_OAUTH_ENABLED=0`) to disable it and prevent automatic native credential bootstrap.
+- The lane is disabled by default. A `cursor-agent` CLI being logged in on the machine is not consent to spend that subscription, so set `cursorCliOauthProvider.enabled: true` (or `SENPI_CURSOR_CLI_OAUTH_ENABLED=1`) to enable it and allow automatic native credential bootstrap. Before this gate existed, an installed and logged-in `cursor-agent` made the lane available with no senpi-side action.
 - `add`, `import local`, and `import native` explicitly persist enabled state and refresh model availability.
 - `import local` copies the locally logged-in Cursor desktop credential into a new slot: the source is read once, on this explicit request only, and copied - never referenced live.
 - `import native` copies the primary Senpi `cursor` provider's OAuth credential into a separate managed slot without moving, deleting, or refreshing the primary entry.
@@ -299,6 +301,54 @@ provider keeps its broader catalog for backward compatibility. When using `auth.
 credential under the provider you select; an environment variable is shared by both international providers.
 
 The file is created with `0600` permissions (user read/write only). Auth file credentials take priority over environment variables.
+
+#### Multiple accounts per provider
+
+Any provider can hold more than one credential. The quickest way is numbered environment variables
+over the provider's primary key variable - a gap in the numbering is fine:
+
+```bash
+export OPENAI_API_KEY="sk-first"
+export OPENAI_API_KEY_2="sk-second"   # any provider: ANTHROPIC_API_KEY_2, GEMINI_API_KEY_2, ...
+```
+
+Stored credentials pool through an `accounts` array. The flat top-level fields always stay a valid
+credential (older binaries keep authenticating with them), and each slot's `name` is its stable
+identity:
+
+```json
+{
+  "openai": {
+    "type": "api_key",
+    "key": "sk-first",
+    "accounts": [
+      { "name": "default", "key": "sk-first", "source": "login" },
+      { "name": "work", "key": "sk-second", "source": "login" }
+    ],
+    "pinned": "work"
+  }
+}
+```
+
+With more than one account, requests rotate automatically: a session sticks to one account
+(session-affine selection), and a rate-limited or auth-failed account fails over to a healthy
+sibling **within the same provider and model** before the model fallback chain is consulted -
+credential rotation changes which account serves the request, never which model answers it.
+Rotation never happens after a response has started streaming. Cooldowns persist in
+`~/.senpi/agent/credential-pool-state.json` (health only - never key material).
+
+Manage accounts with `/account <provider> [list | pin <name> | unpin | remove <name>]`, and tune
+behavior per provider in `models.json`:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "credentials": { "rotation": true, "affinity": true, "cooldownBaseMs": 60000 }
+    }
+  }
+}
+```
 
 API key credentials can also include provider-scoped environment values. These values are used before process environment variables when resolving the credential key, provider/model headers, and provider configuration such as Cloudflare account IDs, Azure OpenAI settings, Vertex project/location, Bedrock settings, `PI_CACHE_RETENTION`, and `HTTP_PROXY`/`HTTPS_PROXY`.
 

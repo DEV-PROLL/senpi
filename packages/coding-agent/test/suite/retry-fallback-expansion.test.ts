@@ -51,6 +51,8 @@ describe("bare model-id family expansion", () => {
 	it("ships a provider-agnostic default chain with bare model ids", () => {
 		expect(DEFAULT_FALLBACK_CHAINS).toEqual({
 			[FABLE]: ["k3:max", "kimi-k3:max", `${OPUS5}:xhigh`, `${OPUS48}:xhigh`],
+			// Last-resort lane for models with no chain of their own.
+			"*": ["k3:max", "kimi-k3:max", `${OPUS5}:xhigh`, `${OPUS48}:xhigh`],
 		});
 	});
 
@@ -66,7 +68,7 @@ describe("bare model-id family expansion", () => {
 	it("expands a bare key into one canonical key per serving provider", () => {
 		const chains = canonicalizeFallbackChains(DEFAULT_FALLBACK_CHAINS, lookup(sdkAndAnthropic));
 
-		expect(Object.keys(chains).sort()).toEqual([`anthropic/${FABLE}`, `claude-sdk-oauth/${FABLE}`]);
+		expect(Object.keys(chains).sort()).toEqual(["*", `anthropic/${FABLE}`, `claude-sdk-oauth/${FABLE}`]);
 	});
 
 	it("ranks OAuth-credential providers ahead of API-key providers for bare candidates", () => {
@@ -117,7 +119,7 @@ describe("bare model-id family expansion", () => {
 		];
 		const chains = canonicalizeFallbackChains(DEFAULT_FALLBACK_CHAINS, lookup(models));
 
-		expect(Object.keys(chains)).toEqual([`amazon-bedrock/global.anthropic.${FABLE}`]);
+		expect(Object.keys(chains).sort()).toEqual(["*", `amazon-bedrock/global.anthropic.${FABLE}`]);
 		expect(chains[`amazon-bedrock/global.anthropic.${FABLE}`]).toEqual([
 			`amazon-bedrock/global.anthropic.${OPUS5}:xhigh`,
 		]);
@@ -132,7 +134,7 @@ describe("bare model-id family expansion", () => {
 		];
 		const chains = canonicalizeFallbackChains(DEFAULT_FALLBACK_CHAINS, lookup(models));
 
-		expect(Object.keys(chains)).toEqual([`anthropic/${FABLE}`]);
+		expect(Object.keys(chains).sort()).toEqual(["*", `anthropic/${FABLE}`]);
 		expect(chains[`anthropic/${FABLE}`]).toEqual([`anthropic/${OPUS5}:xhigh`]);
 	});
 
@@ -165,14 +167,17 @@ describe("bare-key opt-out tombstones", () => {
 	it("removes the shipped default when the user empties the bare key", () => {
 		const resolved = resolveRetryFallbackSettings({ fallbackChains: { [FABLE]: [] } });
 
-		expect(canonicalizeFallbackChains(resolved.chains, lookup(sdkAndAnthropic))).toEqual({});
+		// The per-model chain is gone; the wildcard lane survives as its own key.
+		// hasExplicitFallbackOptOut keeps that lane from resurrecting fallback for
+		// the tombstoned model itself (see retry-fallback-chains.test.ts).
+		expect(Object.keys(canonicalizeFallbackChains(resolved.chains, lookup(sdkAndAnthropic)))).toEqual(["*"]);
 	});
 
 	it("removes only one provider variant when the user empties a canonical key", () => {
 		const resolved = resolveRetryFallbackSettings({ fallbackChains: { [`anthropic/${FABLE}`]: [] } });
 		const chains = canonicalizeFallbackChains(resolved.chains, lookup(sdkAndAnthropic));
 
-		expect(Object.keys(chains)).toEqual([`claude-sdk-oauth/${FABLE}`]);
+		expect(Object.keys(chains).sort()).toEqual(["*", `claude-sdk-oauth/${FABLE}`]);
 	});
 
 	it("lets an explicit canonical chain override the expanded default for that provider only", () => {

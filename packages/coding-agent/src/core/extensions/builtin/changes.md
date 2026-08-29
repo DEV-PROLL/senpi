@@ -1,5 +1,38 @@
 # Builtin extensions changes
 
+## service-tier: clear the fast indicator when the session leaves the Codex family (2026-08-28)
+
+### What changed
+
+- `service-tier.ts` `model_select`: when session fast mode is on and the incoming model's `api` is not
+  `openai-codex-responses`, the extension now drops its session flag and calls `pi.setSessionFastMode(false)`.
+  Codex -> Codex switches are untouched, and the per-model `liveMemoryTier`/`liveMemoryKey` re-derivation that already
+  ran on every switch is unchanged.
+
+### Why
+
+- `service_tier` is an OpenAI-family request field, so `before_provider_request` already refused to emit it after a hop
+  to (for example) `anthropic/claude-opus-5`. The session flag, however, still fed `AgentSession.isFastModeActive()`,
+  and through it the RPC `get_state.fastMode`, `effectiveServiceTier`, the `service_tier_changed` event, and the TUI
+  lightning indicator - so the UI kept claiming fast for a model whose requests can never carry the tier. Fast mode
+  stays a session intent across Codex models, and an incoming Codex model's remembered `"auto"` is still honored on the
+  wire by `liveMemoryTier` rather than by clearing the display flag (clearing it there would also clear the session's
+  inherited catalog `priority`, which `fast-mode-persistence.test.ts` pins as observable state).
+- Coverage: `test/suite/regressions/stale-fast-mode-after-model-switch.test.ts` (Codex `/fast on` -> Anthropic
+  `claude-opus-5` on a faux provider clears model/provider identity, `isFastModeActive()`, RPC `fastMode`,
+  `effectiveServiceTier`, the last `service_tier_changed.fastMode`, and leaves the payload untouched; plus a control
+  that a Codex sibling with no remembered preference keeps the indicator on).
+
+### Why an extension could not handle it
+
+- `service-tier` IS the builtin extension that owns the `/fast` session flag; the stale indicator originates in its own
+  `model_select` handler, and only it knows whether the flag came from a session intent.
+
+### Expected merge conflict zones
+
+- LOW in `service-tier.ts` at the end of the `model_select` handler (one guard appended after the live-memory
+  re-derivation); no other production file changes.
+
 ## Repository audit baseline for the builtin extensions tracker (2026-08-17)
 
 ### What changed
@@ -28,6 +61,32 @@
 
 - NONE: this tracker is fork-only (upstream has no counterpart file); the inventory names pin-relative paths so it
   stays valid as entries below change.
+
+## /loop builtin extension registered (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/index.ts`: one registration entry adds the fork-only `/loop`
+  builtin extension (recurring and self-paced scheduled prompts, ported from Claude Code) to the builtin factory
+  list. The extension itself lives entirely under `builtin/loop/**`; its design is documented in
+  `builtin/loop/AGENTS.md`. Both paths are fork-only at pin `914cf1472e715297caa30db4b9535d534a9eb718` (upstream has
+  no `builtin/` registry file or loop tree), so the audit exempts them; this entry records the registration
+  divergence as feature history.
+
+### Why
+
+- The loop extension must be registered for every session like the other builtins (goal, todo, terminal), and the
+  registration list in `builtin/index.ts` is the only file outside `builtin/loop/**` this feature touches.
+
+### Why an extension could not handle it
+
+- It is an extension; builtin registration is the one hook the extension cannot provide for itself, and
+  `builtin/index.ts` is the only place builtins are wired into the loader.
+
+### Expected merge conflict zones
+
+- NONE: `builtin/index.ts` is fork-only (upstream has no counterpart file); the change is one import and one
+  factory-list entry on adjacent lines.
 
 ## /tui redraw diagnostic relocated in-tree (2026-08-17)
 

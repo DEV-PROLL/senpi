@@ -40,14 +40,18 @@ function isValidProviderSignature(sig: unknown): boolean {
 	return base64SignaturePattern.test(sig);
 }
 
-function hasSafeAssistantContent(content: unknown): boolean {
+function hasSafeAssistantContent(content: unknown, providerIsGoogle: boolean): boolean {
 	if (!Array.isArray(content)) return false;
 	for (const block of content) {
 		if (!isRecord(block) || typeof block.type !== "string") return false;
 		switch (block.type) {
 			case "text":
 				if (typeof block.text !== "string") return false;
-				if (block.textSignature !== undefined && !isValidProviderSignature(block.textSignature)) {
+				if (
+					block.textSignature !== undefined &&
+					providerIsGoogle &&
+					!isValidProviderSignature(block.textSignature)
+				) {
 					return false;
 				}
 				break;
@@ -61,7 +65,11 @@ function hasSafeAssistantContent(content: unknown): boolean {
 					return false;
 				}
 				// Redacted thinking or thinking with a signature
-				if (block.thinkingSignature !== undefined && !isValidProviderSignature(block.thinkingSignature)) {
+				if (
+					block.thinkingSignature !== undefined &&
+					providerIsGoogle &&
+					!isValidProviderSignature(block.thinkingSignature)
+				) {
 					return false;
 				}
 				break;
@@ -75,7 +83,11 @@ function hasSafeAssistantContent(content: unknown): boolean {
 				) {
 					return false;
 				}
-				if (block.thoughtSignature !== undefined && !isValidProviderSignature(block.thoughtSignature)) {
+				if (
+					block.thoughtSignature !== undefined &&
+					providerIsGoogle &&
+					!isValidProviderSignature(block.thoughtSignature)
+				) {
 					return false;
 				}
 				break;
@@ -87,6 +99,8 @@ function hasSafeAssistantContent(content: unknown): boolean {
 }
 
 function hasSafeAssistantEnvelope(message: Record<string, unknown>): boolean {
+	const provider = typeof message.provider === "string" ? message.provider : "";
+	const providerIsGoogle = provider === "google" || provider === "google-vertex";
 	const stopReason = message.stopReason;
 	const stopDetails = message.stopDetails;
 	const safeStopDetails =
@@ -113,7 +127,7 @@ function hasSafeAssistantEnvelope(message: Record<string, unknown>): boolean {
 		(message.diagnostics === undefined || Array.isArray(message.diagnostics)) &&
 		(message.errorMessage === undefined || typeof message.errorMessage === "string") &&
 		(message.rawStopReason === undefined || typeof message.rawStopReason === "string") &&
-		hasSafeAssistantContent(message.content)
+		hasSafeAssistantContent(message.content, providerIsGoogle)
 	);
 }
 

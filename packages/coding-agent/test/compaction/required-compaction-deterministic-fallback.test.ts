@@ -1,6 +1,7 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
+import { convertMessages as convertGoogleMessages } from "../../../ai/src/api/google-shared.ts";
 import { transformMessages } from "../../../ai/src/api/transform-messages.ts";
 import { prepareCompaction } from "../../src/core/compaction/index.ts";
 import { StreamDurationBudgetError } from "../../src/core/compaction/stream-watchdog.ts";
@@ -11,6 +12,8 @@ import {
 import { SummaryRequestError } from "../../src/core/extensions/builtin/compaction/speculative.ts";
 import type { CompactionReason } from "../../src/core/extensions/types.ts";
 import { createBlockingContext, createCompactionHandlers } from "../helpers/blocking-compaction-harness.ts";
+
+const validSig = "c2lnbmF0dXJlMTIzNA==";
 
 function createGeminiAssistantMessage(
 	content: AssistantMessage["content"],
@@ -438,6 +441,103 @@ describe("required compaction deterministic fallback", () => {
 		expect(below).toBeUndefined();
 	});
 
+	it("retains non-Gemini opaque provider signatures through required fallback", () => {
+		for (const provider of ["openai", "anthropic"] as const) {
+			const harness = createBlockingContext({ usageTokens: 9_900 });
+			const assistantId = harness.sessionManager.appendMessage({
+				...fauxAssistantMessage("", { timestamp: 4, stopReason: "stop" }),
+				provider,
+				model: provider === "openai" ? "gpt-5" : "claude-sonnet-4",
+				content: [
+					{
+						type: "text",
+						text: "retained",
+						textSignature: provider === "openai" ? "legacy-id" : "opaque-anthropic",
+					},
+				],
+			});
+			const branchEntries = harness.sessionManager.getBranch();
+			const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+			const result = createRequiredCompactionFallback(
+				{ ...preparation, firstKeptEntryId: assistantId },
+				100_000,
+				"summarization-timeout",
+				{},
+				branchEntries,
+			);
+			expect(result?.firstKeptEntryId).toBe(assistantId);
+		}
+	});
+
+	it("finds a declaring assistant beyond five entries for a long tool chain", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const assistantId = harness.sessionManager.appendMessage({
+			...fauxAssistantMessage("", { timestamp: 4, stopReason: "toolUse" }),
+			provider: "google",
+			model: "gemini-3-flash",
+			content: Array.from({ length: 6 }, (_, index) => ({
+				type: "toolCall" as const,
+				id: `call-${index}`,
+				name: "read",
+				arguments: { path: `${index}.ts` },
+				thoughtSignature: validSig,
+			})),
+		});
+		for (let index = 0; index < 6; index++) {
+			harness.sessionManager.appendMessage({
+				role: "toolResult",
+				toolCallId: `call-${index}`,
+				toolName: "read",
+				content: [{ type: "text", text: `result-${index}` }],
+				isError: false,
+				timestamp: 5 + index,
+			});
+		}
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+		const sixthResultId = branchEntries[branchEntries.length - 1].id;
+		const result = createRequiredCompactionFallback(
+			{ ...preparation, firstKeptEntryId: sixthResultId },
+			100_000,
+			"summarization-timeout",
+			{},
+			branchEntries,
+		);
+		expect(result?.firstKeptEntryId).toBe(assistantId);
+		expect(result?.details).toMatchObject({ retainedSuffix: "earlier-safe-boundary" });
+	});
+
+	it("rejects duplicate tool results instead of replaying them", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const assistantId = harness.sessionManager.appendMessage({
+			...fauxAssistantMessage("", { timestamp: 4, stopReason: "toolUse" }),
+			provider: "google",
+			model: "gemini-3-flash",
+			content: [{ type: "toolCall", id: "duplicate", name: "read", arguments: {}, thoughtSignature: validSig }],
+		});
+		for (let index = 0; index < 2; index++) {
+			harness.sessionManager.appendMessage({
+				role: "toolResult",
+				toolCallId: "duplicate",
+				toolName: "read",
+				content: [{ type: "text", text: `result-${index}` }],
+				isError: false,
+				timestamp: 5 + index,
+			});
+		}
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+		expect(
+			createRequiredCompactionFallback(
+				{ ...preparation, firstKeptEntryId: assistantId },
+				100_000,
+				"summarization-timeout",
+				{},
+				branchEntries,
+			),
+		).toBeUndefined();
+	});
+
 	it("rejects accessor-bearing retained tool-call arguments without executing them", () => {
 		const harness = createBlockingContext({ usageTokens: 9_900 });
 		const branchEntries = harness.sessionManager.getBranch();
@@ -475,10 +575,12 @@ describe("required compaction deterministic fallback", () => {
 });
 
 describe("deterministic compaction fallback Gemini signed state and recovery cases", () => {
-	const validSig = "c2lnbmF0dXJlMTIzNA=="; // valid base64 multiple of 4
-
-	it("Case A: retains Gemini tool-call-only turn with thoughtSignature and empty visible text without dropping state", () => {
+	it("Case A: required fallback replays Gemini signed state through the handler and Google converter", async () => {
+		const handlers = createCompactionHandlers();
 		const harness = createBlockingContext({ usageTokens: 9_900 });
+		harness.registration.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "upstream_stream_truncated: stream ended" }),
+		]);
 		const preparedBoundaryId = harness.sessionManager.appendMessage(
 			createGeminiAssistantMessage([
 				{
@@ -503,28 +605,53 @@ describe("deterministic compaction fallback Gemini signed state and recovery cas
 		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true);
 		expect(preparation).toBeDefined();
 
-		const result = createRequiredCompactionFallback(
-			{ ...preparation!, firstKeptEntryId: preparedBoundaryId },
-			100_000,
-			"summarization-timeout",
-			{},
-			branchEntries,
+		const result = await handlers.sessionBeforeCompact(
+			{
+				type: "session_before_compact",
+				reason: "threshold",
+				willRetry: false,
+				requestId: "gemini-signed-fallback",
+				preparation: { ...preparation!, firstKeptEntryId: preparedBoundaryId },
+				branchEntries,
+				signal: new AbortController().signal,
+			},
+			harness.ctx,
 		);
-
-		expect(result).toBeDefined();
-		if (!result?.details) throw new Error("Expected fallback result with details");
-		expect(result.firstKeptEntryId).toBe(preparedBoundaryId);
-		expect(result.details.retainedSuffix).toBe("prepared");
+		const compaction = result?.compaction;
+		expect(compaction).toBeDefined();
+		if (!compaction) throw new Error("Expected fallback compaction");
+		expect(compaction).toMatchObject({
+			firstKeptEntryId: preparedBoundaryId,
+			details: { retainedSuffix: "prepared" },
+		});
 
 		harness.sessionManager.appendCompaction(
-			result.summary,
-			result.firstKeptEntryId,
-			result.tokensBefore,
-			result.details,
+			compaction.summary,
+			compaction.firstKeptEntryId,
+			compaction.tokensBefore,
+			compaction.details,
 			true,
 		);
 
 		const messages = harness.sessionManager.buildSessionContext().messages;
+		const googleModel: Model<"google-generative-ai"> = {
+			id: "gemini-3-flash",
+			name: "Gemini 3 Flash",
+			provider: "google",
+			api: "google-generative-ai",
+			baseUrl: "https://generativelanguage.googleapis.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 16_000,
+		};
+		const replayMessages = messages.filter(
+			(message): message is Message =>
+				message.role === "user" || message.role === "assistant" || message.role === "toolResult",
+		);
+		const contents = convertGoogleMessages(googleModel, { messages: replayMessages });
+		expect(contents.some((content) => content.parts?.some((part) => "functionCall" in part))).toBe(true);
 		const assistantMsg = messages.find((m) => m.role === "assistant") as AssistantMessage | undefined;
 		expect(assistantMsg).toBeDefined();
 		const firstBlock = assistantMsg?.content[0];
@@ -785,14 +912,20 @@ describe("deterministic compaction fallback Gemini signed state and recovery cas
 		};
 
 		// Transforming to Anthropic target model
-		const targetModel = {
+		const targetModel: Model<"anthropic-messages"> = {
 			id: "claude-sonnet-4",
+			name: "Claude Sonnet 4",
 			provider: "anthropic",
-			api: "anthropic-messages" as const,
-			input: ["text" as const],
+			api: "anthropic-messages",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 16_000,
 		};
 
-		const transformed = transformMessages([geminiAssistant, toolRes], targetModel as never);
+		const transformed = transformMessages([geminiAssistant, toolRes], targetModel);
 		const transformedAssistant = transformed.find((m) => m.role === "assistant") as AssistantMessage | undefined;
 		expect(transformedAssistant).toBeDefined();
 		const block = transformedAssistant?.content[0];

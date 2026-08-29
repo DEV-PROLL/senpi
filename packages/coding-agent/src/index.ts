@@ -28,6 +28,7 @@ export { type OAuthCredential, readStoredCredential } from "./core/auth-storage.
 export {
 	type BranchPreparation,
 	type BranchSummaryResult,
+	type CacheFriendlySummaryOptions,
 	type CollectEntriesResult,
 	type CompactionResult,
 	type CutPointResult,
@@ -115,6 +116,7 @@ export type {
 	MessageRenderOptions,
 	MessageStartEvent,
 	MessageUpdateEvent,
+	PowerShellToolCallEvent,
 	ProjectTrustContext,
 	ProjectTrustEvent,
 	ProjectTrustEventDecision,
@@ -167,12 +169,22 @@ export {
 	isFindToolResult,
 	isGrepToolResult,
 	isLsToolResult,
+	isPowerShellToolResult,
 	isReadToolResult,
 	isToolCallEventType,
 	isWriteToolResult,
 	wrapRegisteredTool,
 	wrapRegisteredTools,
 } from "./core/extensions/index.ts";
+// Notice primitives
+export {
+	buildNoticeBox,
+	type NoticeLine,
+	type NoticeSpec,
+	type NoticeTone,
+	noticeEntryRenderer,
+	noticeMessageRenderer,
+} from "./core/extensions/notice/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
 export { convertToLlm } from "./core/messages.ts";
@@ -226,6 +238,7 @@ export {
 	createFindTool,
 	createGrepTool,
 	createLsTool,
+	createPowerShellTool,
 	createReadOnlyTools,
 	createReadTool,
 	createWriteTool,
@@ -341,10 +354,16 @@ export {
 export { type MainOptions, main } from "./main.ts";
 // Run modes for programmatic SDK usage
 export {
+	createHostDaemonPaths,
+	type EnsuredHost,
+	type EnsureHostOptions,
+	ensureHost,
+	type HostDaemonPaths,
 	InteractiveMode,
 	type InteractiveModeOptions,
 	type JsonAgentSessionEvent,
 	type ModelInfo,
+	PINNED_HOST_CLIENT_CAPABILITIES,
 	type PrintModeOptions,
 	RpcClient,
 	type RpcClientEvent,
@@ -414,5 +433,6 @@ export { copyToClipboard } from "./utils/clipboard.ts";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
 export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
+export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.ts";
 // Shell utilities
-export { getShellConfig } from "./utils/shell.ts";
+export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
