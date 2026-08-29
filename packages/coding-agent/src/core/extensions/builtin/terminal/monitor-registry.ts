@@ -1,6 +1,6 @@
-import { type FSWatcher, watch } from "node:fs";
 import { createHash } from "node:crypto";
-import { access, open, stat } from "node:fs/promises";
+import { type FSWatcher, watch } from "node:fs";
+import { access, open, realpath, stat } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import { describeExit } from "./tools/spawn.ts";
@@ -70,6 +70,8 @@ interface FileMonitorRecord {
 	digest: string;
 	pendingChange: boolean;
 	dirty: boolean;
+	dirtyPasses: number;
+	dirtyWindowStartedAt: number;
 	checking: Promise<void> | undefined;
 	readonly deadline: ReturnType<typeof setTimeout>;
 }
@@ -129,8 +131,10 @@ export class MonitorRegistry {
 		}
 		const path = resolve(options.cwd, options.path);
 		const parent = dirname(path);
+		let approvedParent: string;
 		try {
 			await access(parent);
+			approvedParent = await realpath(parent);
 			if (this.#disposed) throw new Error("Cannot create file monitor: monitor registry is disposed.");
 		} catch (error) {
 			release?.();
@@ -162,7 +166,11 @@ export class MonitorRegistry {
 		const id = `watch_${this.#nextFileId++}`;
 		let watcher: FSWatcher;
 		try {
-			watcher = watch(parent, (_kind, name) => {
+			const activationParent = await realpath(parent);
+			if (activationParent !== approvedParent) {
+				throw new Error(`Cannot watch file: parent directory changed during registration: ${parent}`);
+			}
+			watcher = watch(activationParent, (_kind, name) => {
 				if (!name || basename(String(name)) === basename(path)) void this.#checkFile(id);
 			});
 		} catch (error) {
@@ -180,13 +188,13 @@ export class MonitorRegistry {
 		const finishRegistration = () => {
 			if (registrationCleaned) return;
 			registrationCleaned = true;
-			release?.();
 			this.#pendingRegistrations -= 1;
 		};
 		const cleanupRegistration = () => {
 			if (registrationCleaned) return;
 			watcher.close();
 			finishRegistration();
+			release?.();
 		};
 		if (this.#disposed || lifecycle !== this.#lifecycle) {
 			cleanupRegistration();
@@ -197,10 +205,15 @@ export class MonitorRegistry {
 			digest = initial ? await this.#digest(path) : "";
 		} catch (error) {
 			cleanupRegistration();
+			if (registrationError) {
+				this.#emit({ type: "summary", id, description: options.description, summary: registrationError });
+				throw new Error(registrationError);
+			}
 			throw error;
 		}
 		if (registrationError) {
 			cleanupRegistration();
+			this.#emit({ type: "summary", id, description: options.description, summary: registrationError });
 			throw new Error(registrationError);
 		}
 		if (this.#disposed || lifecycle !== this.#lifecycle) {
@@ -224,6 +237,8 @@ export class MonitorRegistry {
 			digest,
 			pendingChange: false,
 			dirty: false,
+			dirtyPasses: 0,
+			dirtyWindowStartedAt: 0,
 			checking: undefined,
 			deadline: setTimeout(() => {
 				const current = this.#files.get(id);
@@ -280,9 +295,17 @@ export class MonitorRegistry {
 			})
 			.finally(() => {
 				record.checking = undefined;
-				if (record.dirty && !record.settled) {
+				const now = Date.now();
+				if (now - record.dirtyWindowStartedAt >= 1_000) {
+					record.dirtyWindowStartedAt = now;
+					record.dirtyPasses = 0;
+				}
+				if (record.dirty && !record.settled && record.dirtyPasses < 1) {
 					record.dirty = false;
+					record.dirtyPasses += 1;
 					void this.#checkFile(id);
+				} else {
+					record.dirty = false;
 				}
 			});
 		return record.checking;
@@ -392,6 +415,9 @@ export class MonitorRegistry {
 					hash.update(first);
 				}
 				if (metadata.size > SAMPLE_SIZE) {
+					const middle = Buffer.alloc(SAMPLE_SIZE);
+					await handle.read(middle, 0, middle.length, Math.floor((metadata.size - middle.length) / 2));
+					hash.update(middle);
 					const last = Buffer.alloc(SAMPLE_SIZE);
 					await handle.read(last, 0, last.length, metadata.size - last.length);
 					hash.update(last);

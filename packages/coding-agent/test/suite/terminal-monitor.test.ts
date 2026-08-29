@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, open, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBuiltinParserRegistry } from "../../src/core/extensions/builtin/permission-system/parsers.ts";
@@ -278,6 +278,30 @@ describe("terminal monitor tool", () => {
 		}
 	}, 15_000);
 
+	it("holds native-watch capacity until the watch settles", async () => {
+		const limited = new TerminalManager({ maxSessions: 1 });
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const registry = new MonitorRegistry((event) => sink.push(event), { reserve: () => limited.reserve() });
+		try {
+			await registry.registerFile({
+				description: "live",
+				path: join(root, "artifact"),
+				event: "create",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			expect(limited.reserve()).toBeNull();
+			await registry.stopAllFiles();
+			const released = limited.reserve();
+			expect(released).not.toBeNull();
+			released?.();
+		} finally {
+			registry.dispose();
+			await limited.teardown();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
+
 	it("shares capacity with terminal sessions", async () => {
 		const limited = new TerminalManager({ maxSessions: 1 });
 		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
@@ -331,7 +355,7 @@ describe("terminal monitor tool", () => {
 			registry.dispose();
 			await rm(root, { recursive: true, force: true });
 		}
-	});
+	}, 15_000);
 
 	it("adds external-directory approval for native paths", () => {
 		const requests = createBuiltinParserRegistry().parse("monitor", { path: "/tmp/secret/file" }, process.cwd());
@@ -344,11 +368,7 @@ describe("terminal monitor tool", () => {
 		try {
 			const link = join(root, "link");
 			await symlink(outside, link, "dir");
-			const requests = createBuiltinParserRegistry().parse(
-				"monitor",
-				{ path: join(link, "not-yet-created") },
-				root,
-			);
+			const requests = createBuiltinParserRegistry().parse("monitor", { path: join(link, "not-yet-created") }, root);
 			expect(requests.map((request) => request.permission)).toEqual(["read", "external_directory"]);
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -363,12 +383,48 @@ describe("terminal monitor tool", () => {
 		try {
 			await writeFile(file, "before");
 			const original = await stat(file);
-			await registry.registerFile({ description: "artifact", path: file, event: "modify", timeoutMs: 5000, cwd: root });
+			await registry.registerFile({
+				description: "artifact",
+				path: file,
+				event: "modify",
+				timeoutMs: 5000,
+				cwd: root,
+			});
 			const line = sink.waitFor((event) => event.type === "line", "timestamp-preserving modify");
 			await writeFile(file, "after");
 			await utimes(file, original.atime, original.mtime);
 			await line;
 			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(1);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("detects a timestamp-preserving rewrite in the middle sample", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const file = join(root, "middle");
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			await writeFile(file, Buffer.alloc(256 * 1024, 0x61));
+			const original = await stat(file);
+			await registry.registerFile({
+				description: "middle",
+				path: file,
+				event: "modify",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			const line = sink.waitFor((event) => event.type === "line", "middle-sample modify");
+			const changed = Buffer.alloc(2, 0x62);
+			const handle = await open(file, "r+");
+			try {
+				await handle.write(changed, 0, changed.length, 128 * 1024);
+			} finally {
+				await handle.close();
+			}
+			await utimes(file, original.atime, original.mtime);
+			await line;
 		} finally {
 			registry.dispose();
 			await rm(root, { recursive: true, force: true });
