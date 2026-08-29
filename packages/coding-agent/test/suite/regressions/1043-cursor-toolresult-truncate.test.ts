@@ -245,6 +245,39 @@ describe("1043 cursor toolResult truncate", () => {
 		).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
 	});
 
+	it("uses the full history when admission ends in a resumed tool result", () => {
+		const messages = cursorPairedMessages(["ok"]);
+		messages.pop();
+		const call = messages.find((message) => message.role === "assistant");
+		if (call?.role !== "assistant") throw new Error("expected assistant message");
+		const toolCall = call.content.find((part) => part.type === "toolCall");
+		if (toolCall?.type !== "toolCall") throw new Error("expected tool call");
+		toolCall.name = "n".repeat(15_000);
+		const result = messages.find((message) => message.role === "toolResult");
+		if (result?.role !== "toolResult") throw new Error("expected tool result");
+		result.toolName = toolCall.name;
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		expect(next).toBeDefined();
+	});
+
+	it("measures converted custom messages in Cursor admission", () => {
+		const messages = [
+			{ role: "custom", customType: "note", content: "x".repeat(60_000), timestamp: 0 },
+			...cursorPairedMessages(["ok"]),
+		] as AgentMessage[];
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		expect(next).toBeDefined();
+	});
+
+	it("keeps 200-turn Cursor admission bounded", () => {
+		const messages = cursorPairedMessages(Array.from({ length: 200 }, () => "x".repeat(2000)));
+		const started = performance.now();
+		truncateToolResultBodies(messages);
+		expect(performance.now() - started).toBeLessThan(1000);
+	});
+
 	it("accounts for adversarial tool-call arguments in Cursor wire history", () => {
 		const messages = cursorPairedMessages(["ok"]);
 		const call = messages.find((message) => message.role === "assistant");

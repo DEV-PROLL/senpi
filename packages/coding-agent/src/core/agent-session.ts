@@ -147,7 +147,12 @@ import type {
 } from "./extensions/types.ts";
 import { normalizeToolExposure, RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
 import { shouldWarnHighReasoning } from "./high-reasoning-warning.ts";
-import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
+import {
+	type BashExecutionMessage,
+	type CustomMessage,
+	convertToLlm,
+	filterContextExcludedMessages,
+} from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -861,15 +866,18 @@ export function truncateToolResultBodies(
 		}
 	}
 
-	const fits = () => measureCursorHistorySerializedBytes(result as never) <= maxBytes;
+	const measure = (candidate: AgentMessage[]): number => {
+		const converted = convertToLlm(candidate);
+		const activeUserMessageIndex = converted.at(-1)?.role === "user" ? converted.length - 1 : -1;
+		return measureCursorHistorySerializedBytes(converted, activeUserMessageIndex);
+	};
+	const fits = (candidate = result) => measure(candidate) <= maxBytes;
 	if (fits()) return { messages: changed ? result : messages, changed };
 
-	// Remove oldest result bodies until the actual Cursor history fits. Measuring the
-	// complete representation accounts for names, ids, MIME types, arguments, and
-	// protobuf/JSON framing without a heuristic envelope charge.
-	for (let messageIndex = 0; messageIndex < result.length && !fits(); messageIndex++) {
-		const message = result[messageIndex];
-		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
+	// Empty the oldest result bodies. Search the monotonic prefix of candidates
+	// rather than serializing once for every result (admission must stay bounded).
+	const emptyToolResult = (message: AgentMessage): AgentMessage => {
+		if (message.role !== "toolResult" || !Array.isArray(message.content)) return message;
 		const emptiedContent = message.content.map((part) =>
 			part.type === "text" ? { ...part, text: "" } : part.type === "image" ? { ...part, data: "" } : part,
 		);
@@ -881,18 +889,57 @@ export function truncateToolResultBodies(
 				previous.type === "text" ? previous.text === "" : previous.type === "image" && previous.data === "";
 			return !empty || !previousEmpty;
 		});
-		result[messageIndex] = { ...message, content };
+		return { ...message, content };
+	};
+	const toolResultIndexes = result.flatMap((message, index) =>
+		message.role === "toolResult" && Array.isArray(message.content) ? [index] : [],
+	);
+	const withEmptyPrefix = (count: number): AgentMessage[] => {
+		const candidate = result.slice();
+		for (let i = 0; i < count; i++)
+			candidate[toolResultIndexes[i]] = emptyToolResult(candidate[toolResultIndexes[i]]);
+		return candidate;
+	};
+	let low = 0;
+	let high = toolResultIndexes.length;
+	while (low < high) {
+		const middle = Math.floor((low + high) / 2);
+		if (fits(withEmptyPrefix(middle + 1))) high = middle;
+		else low = middle + 1;
+	}
+	const emptyCount = Math.min(low + 1, toolResultIndexes.length);
+	if (emptyCount > 0) {
+		result.splice(0, result.length, ...withEmptyPrefix(emptyCount));
 		changed = true;
 	}
+	if (fits()) return { messages: changed ? result : messages, changed };
 
-	// If metadata alone exceeds the cap, discard the oldest complete turn. Keeping
-	// an over-limit tool call would violate the wire bound even with an empty result.
-	while (!fits()) {
-		const firstUser = result.findIndex((message) => message.role === "user");
-		if (firstUser < 0) break;
-		const nextUser = result.findIndex((message, index) => index > firstUser && message.role === "user");
-		const end = nextUser < 0 ? result.length : nextUser;
-		result.splice(firstUser, end - firstUser);
+	// If metadata alone exceeds the cap, discard the oldest complete turns. This
+	// search is also monotonic and avoids quadratic whole-history reserialization.
+	const turnRanges: Array<[number, number]> = [];
+	const isConvertedUser = (message: AgentMessage): boolean => convertToLlm([message])[0]?.role === "user";
+	for (let index = 0; index < result.length; index++) {
+		if (!isConvertedUser(result[index])) continue;
+		const nextUser = result.findIndex((message, nextIndex) => nextIndex > index && isConvertedUser(message));
+		turnRanges.push([index, nextUser < 0 ? result.length : nextUser]);
+	}
+	const withoutTurns = (count: number): AgentMessage[] => {
+		if (count === 0) return result;
+		const start = turnRanges[0]?.[0] ?? 0;
+		const end = turnRanges[count - 1]?.[1] ?? start;
+		return [...result.slice(0, start), ...result.slice(end)];
+	};
+	low = 0;
+	high = turnRanges.length;
+	while (low < high) {
+		const middle = Math.floor((low + high) / 2);
+		if (fits(withoutTurns(middle + 1))) high = middle;
+		else low = middle + 1;
+	}
+	const turnCount = Math.min(low + 1, turnRanges.length);
+	if (turnCount > 0) {
+		const next = withoutTurns(turnCount);
+		result.splice(0, result.length, ...next);
 		changed = true;
 	}
 	return { messages: changed ? result : messages, changed };
