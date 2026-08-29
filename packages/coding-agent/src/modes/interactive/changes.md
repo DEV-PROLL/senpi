@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-29 - Propagate shared-host bash callback failures
+
+### What changed
+
+- `interactive-host-runtime.ts` now observes asynchronous remote bash output callbacks, aborts the host command on rejection, and rethrows the original callback failure at the client execution boundary.
+
+### Why
+
+- Shared-host bash output callbacks could reject after a successful RPC response, leaving host spill files behind and emitting an unhandled rejection.
+
+### Why an extension could not handle it
+
+- The callback crosses the RPC event boundary inside the built-in interactive host runtime proxy.
+
+### Expected merge conflict zones
+
+- LOW: shared-host bash wire-event handling and the remote executeBash proxy.
+
 ## 2026-08-29 - Render external-owner compaction delegation once, as state (#1174 UX half)
 
 ### What changed

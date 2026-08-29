@@ -461,6 +461,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
 			let settled = false;
 			let timedOut = false;
 			let callbackError: ExecutionError | undefined;
+			const callbackPromises = new Set<Promise<void>>();
 			let child: ReturnType<typeof spawn> | undefined;
 			let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -523,29 +524,38 @@ export class NodeExecutionEnv implements ExecutionEnv {
 
 			child.stdout?.setEncoding("utf8");
 			child.stderr?.setEncoding("utf8");
-			child.stdout?.on("data", (chunk: string) => {
-				stdout += chunk;
-				try {
-					options?.onStdout?.(chunk);
-				} catch (error) {
-					const cause = toError(error);
-					callbackError = new ExecutionError("callback_error", cause.message, cause);
-					onAbort();
-				}
-			});
-			child.stderr?.on("data", (chunk: string) => {
-				stderr += chunk;
-				try {
-					options?.onStderr?.(chunk);
-				} catch (error) {
-					const cause = toError(error);
-					callbackError = new ExecutionError("callback_error", cause.message, cause);
-					onAbort();
-				}
-			});
+			const handleChunk = (
+				chunk: string,
+				callback: ((chunk: string) => void | PromiseLike<void>) | undefined,
+				append: (chunk: string) => void,
+			) => {
+				append(chunk);
+				if (callback === undefined) return;
+				const callbackPromise = Promise.resolve()
+					.then(() => callback(chunk))
+					.catch((error) => {
+						if (!callbackError) {
+							const cause = toError(error);
+							callbackError = new ExecutionError("callback_error", cause.message, error);
+							onAbort();
+						}
+					});
+				callbackPromises.add(callbackPromise);
+				void callbackPromise.then(
+					() => callbackPromises.delete(callbackPromise),
+					() => callbackPromises.delete(callbackPromise),
+				);
+			};
+			child.stdout?.on("data", (chunk: string) =>
+				handleChunk(chunk, options?.onStdout, (value) => (stdout += value)),
+			);
+			child.stderr?.on("data", (chunk: string) =>
+				handleChunk(chunk, options?.onStderr, (value) => (stderr += value)),
+			);
 
 			void waitForChildProcess(child).then(
-				(code) => {
+				async (code) => {
+					await Promise.all([...callbackPromises]);
 					if (callbackError) {
 						settle(err(callbackError));
 						return;

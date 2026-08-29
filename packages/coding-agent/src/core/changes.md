@@ -1,9 +1,47 @@
 # changes
 
+## 2026-08-29 - Final shared-host bash callback coverage
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`
+
+### Why
+
+- Preserve callback rejection through shared-host cleanup.
+
+### Why an extension could not handle it
+
+- Core callback dispatch owns this boundary.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`
+
+## 2026-08-29 - Complete shared-host shell callback propagation
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` now observes asynchronous bash output callbacks and preserves the original callback failure through cleanup.
+- `packages/coding-agent/src/modes/interactive/interactive-host-runtime.ts` aborts shared-host commands when those callbacks reject and rethrows the original value at the client boundary.
+
+### Why
+
+- The shared-host execution path could otherwise resolve successfully after an asynchronous callback rejection and leave its large-output spill file behind.
+
+### Why an extension could not handle it
+
+- The callback is dispatched by the core session and RPC host boundary before extension code can finalize execution cleanup.
+
+### Expected merge conflict zones
+
+- LOW: bash callback dispatch in `agent-session.ts` and shared-host execution routing.
+
 ## 2026-08-29 - Observe async local shell callback failures
 
 ### What changed
 
+- `packages/coding-agent/src/core/agent-session.ts`: shared-host bash callback failures are observed through cleanup.
 - `packages/coding-agent/src/core/bash-executor.ts`: async `onChunk` rejections are now observed,
   abort the active command, and preserve the original rejection reason through spill cleanup.
 - Extended `test/suite/regressions/bash-spill-local-on-chunk.test.ts` with stdout and stderr

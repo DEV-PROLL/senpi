@@ -9,7 +9,7 @@ export interface ShellCaptureProgress {
 }
 
 export interface ShellCaptureOptions extends Omit<ShellExecOptions, "onStdout" | "onStderr"> {
-	onChunk?: (chunk: string, getProgress: () => ShellCaptureProgress) => void;
+	onChunk?: (chunk: string, getProgress: () => ShellCaptureProgress) => void | PromiseLike<void>;
 	/** Return shell execution failures with captured output instead of as a failed Result. */
 	returnExecutionErrors?: boolean;
 }
@@ -24,7 +24,7 @@ export interface ShellCaptureResult extends ShellCaptureProgress {
 function toExecutionError(error: unknown): ExecutionError {
 	if (error instanceof ExecutionError) return error;
 	const cause = toError(error);
-	return new ExecutionError("unknown", cause.message, cause);
+	return new ExecutionError("unknown", cause.message, error);
 }
 
 export function sanitizeBinaryOutput(str: string): string {
@@ -90,6 +90,10 @@ export async function executeShellWithCapture(
 		});
 	};
 
+	const cleanupFullOutput = async (): Promise<void> => {
+		if (fullOutputPath) await env.remove(fullOutputPath, { force: true });
+	};
+
 	const createProgress = (): ShellCaptureProgress => {
 		const tailTruncation = truncateTail(tailOutput);
 		const totalLines = completedLines + (hasOpenLine ? 1 : 0);
@@ -111,7 +115,7 @@ export async function executeShellWithCapture(
 		};
 	};
 
-	const onChunk = (chunk: string): void => {
+	const onChunk = async (chunk: string): Promise<void> => {
 		if (!acceptingOutput) return;
 		try {
 			const text = sanitizeBinaryOutput(chunk).replace(/\r/g, "");
@@ -137,9 +141,9 @@ export async function executeShellWithCapture(
 				appendFullOutput(text);
 			}
 			tailOutput = trimToLastUtf8Bytes(tailOutput, maxOutputBytes, encoder);
-			options?.onChunk?.(text, createProgress);
+			await options?.onChunk?.(text, createProgress);
 		} catch (error) {
-			captureError = toExecutionError(error);
+			captureError = new ExecutionError("callback_error", toError(error).message, error);
 		}
 	};
 
@@ -157,8 +161,14 @@ export async function executeShellWithCapture(
 		let progress = createProgress();
 		if (progress.truncation.truncated && !fullOutputRequested) ensureFullOutputFile(tailOutput);
 		const writeResult = await writeChain;
-		if (!writeResult.ok) return err(writeResult.error);
-		if (captureError) return err(captureError);
+		if (!writeResult.ok) {
+			await cleanupFullOutput();
+			return err(writeResult.error);
+		}
+		if (captureError) {
+			await cleanupFullOutput();
+			return err(captureError);
+		}
 		progress = createProgress();
 
 		if (!result.ok) {
@@ -190,6 +200,7 @@ export async function executeShellWithCapture(
 		});
 	} catch (error) {
 		acceptingOutput = false;
+		await cleanupFullOutput();
 		return err(toExecutionError(error));
 	}
 }

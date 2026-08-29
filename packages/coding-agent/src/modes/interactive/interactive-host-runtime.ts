@@ -227,7 +227,9 @@ function createRemoteSessionProxy(
 		});
 	};
 	let state = { ...initialState };
-	let bashChunk: ((chunk: string) => void) | undefined;
+	let bashChunk: ((chunk: string) => void | PromiseLike<void>) | undefined;
+	let bashCallbackPromises: Promise<void>[] | undefined;
+	let bashCallbackError: unknown;
 	let localBashAbortController: AbortController | undefined;
 	let localBashRunning = false;
 	let hostBashRunning = initialState.isBashRunning;
@@ -262,7 +264,24 @@ function createRemoteSessionProxy(
 			hostBashRunning = false;
 			updateBashState();
 		}
-		if (wireEvent.type === "bash_execution_update") bashChunk?.(wireEvent.delta);
+		if (wireEvent.type === "bash_execution_update" && bashChunk) {
+			try {
+				const callbackPromise = Promise.resolve(bashChunk(wireEvent.delta)).catch((error) => {
+					if (bashCallbackError === undefined) {
+						bashCallbackError = error;
+						void client.abortBash().catch(() => {});
+					}
+					throw error;
+				});
+				bashCallbackPromises?.push(callbackPromise);
+				void callbackPromise.catch(() => {});
+			} catch (error) {
+				if (bashCallbackError === undefined) {
+					bashCallbackError = error;
+					void client.abortBash().catch(() => {});
+				}
+			}
+		}
 		if (wireEvent.type === "agent_start") state = { ...state, isStreaming: true };
 		if (wireEvent.type === "compaction_start") state = { ...state, isCompacting: true };
 		if (wireEvent.type === "compaction_end") state = { ...state, isCompacting: false };
@@ -423,7 +442,7 @@ function createRemoteSessionProxy(
 			if (property === "executeBash")
 				return async (
 					command: string,
-					onChunk?: (chunk: string) => void,
+					onChunk?: (chunk: string) => void | PromiseLike<void>,
 					options?: { excludeFromContext?: boolean; operations?: BashOperations | Record<string, unknown> },
 				) => {
 					if (options?.operations && typeof options.operations.exec === "function") {
@@ -452,13 +471,20 @@ function createRemoteSessionProxy(
 						}
 					}
 					bashChunk = onChunk;
+					bashCallbackPromises = [];
+					bashCallbackError = undefined;
 					try {
-						return await client.bash(command, {
+						const result = await client.bash(command, {
 							excludeFromContext: options?.excludeFromContext,
 							operations: options?.operations as Record<string, unknown> | undefined,
 						});
+						await Promise.all(bashCallbackPromises);
+						if (bashCallbackError !== undefined) throw bashCallbackError;
+						return result;
 					} finally {
 						bashChunk = undefined;
+						bashCallbackPromises = undefined;
+						bashCallbackError = undefined;
 					}
 				};
 			if (property === "abortBash")
