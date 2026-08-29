@@ -225,7 +225,7 @@ export function createRequiredCompactionFallback(
 		}
 		const callIndex = call.indexes[0];
 		const resultIndex = results[0];
-		if (call.incomplete) markInvalidRange(0, resultIndex + 1);
+		if (call.incomplete) markInvalidRange(0, Math.max(callIndex, resultIndex) + 1);
 		else if (callIndex < resultIndex) markInvalidRange(callIndex + 1, resultIndex + 1);
 		else markInvalidRange(0, Math.max(callIndex, resultIndex) + 1);
 	}

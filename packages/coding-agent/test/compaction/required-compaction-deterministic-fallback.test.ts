@@ -629,6 +629,42 @@ describe("required compaction deterministic fallback", () => {
 		).toBeUndefined();
 	});
 
+	it("rejects reversed-order incomplete tool calls instead of retaining them", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "reversed-incomplete",
+			toolName: "read",
+			content: [{ type: "text", text: "stale result" }],
+			isError: false,
+			timestamp: 4,
+		});
+		const assistantId = harness.sessionManager.appendMessage(
+			createGeminiAssistantMessage([
+				{
+					type: "toolCall",
+					id: "reversed-incomplete",
+					name: "read",
+					arguments: {},
+					thoughtSignature: validSig,
+					incomplete: true,
+				},
+			]),
+		);
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+
+		expect(
+			createRequiredCompactionFallback(
+				{ ...preparation, firstKeptEntryId: assistantId },
+				100_000,
+				"summarization-timeout",
+				{},
+				branchEntries,
+			),
+		).toBeUndefined();
+	});
+
 	it("rejects duplicate tool results instead of replaying them", () => {
 		const harness = createBlockingContext({ usageTokens: 9_900 });
 		const assistantId = harness.sessionManager.appendMessage({
