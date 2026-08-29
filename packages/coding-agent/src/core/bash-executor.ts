@@ -55,6 +55,13 @@ export async function executeBashWithOperations(
 	options?: BashExecutorOptions,
 ): Promise<BashResult> {
 	const outputChunks: string[] = [];
+	const callbackAbortController = new AbortController();
+	const executionSignal = options?.signal
+		? AbortSignal.any([options.signal, callbackAbortController.signal])
+		: callbackAbortController.signal;
+	let callbackError: unknown;
+	let hasCallbackError = false;
+	const callbackPromises: Promise<void>[] = [];
 	let outputChunkStart = 0;
 	let outputBytes = 0;
 	const maxOutputBytes = DEFAULT_MAX_BYTES * 2;
@@ -176,6 +183,7 @@ export async function executeBashWithOperations(
 	const decoder = new TextDecoder();
 
 	const onData = (data: Buffer) => {
+		if (callbackAbortController.signal.aborted) return;
 		totalBytes += data.length;
 
 		// Sanitize: strip ANSI, replace binary garbage, normalize newlines
@@ -204,7 +212,28 @@ export async function executeBashWithOperations(
 
 		// Stream to callback
 		if (options?.onChunk) {
-			options.onChunk(text);
+			try {
+				const callbackResult = (options.onChunk as (chunk: string) => unknown)(text);
+				if (callbackResult && typeof (callbackResult as { then?: unknown }).then === "function") {
+					const callbackPromise = Promise.resolve(callbackResult).then(
+						() => undefined,
+						(error) => {
+							if (!hasCallbackError) {
+								callbackError = error;
+								hasCallbackError = true;
+							}
+							callbackAbortController.abort();
+							throw error;
+						},
+					);
+					callbackPromises.push(callbackPromise);
+					void callbackPromise.catch(() => {});
+					return callbackPromise;
+				}
+			} catch (error) {
+				callbackAbortController.abort();
+				throw error;
+			}
 		}
 	};
 
@@ -233,10 +262,14 @@ export async function executeBashWithOperations(
 	try {
 		result = await operations.exec(command, cwd, {
 			onData,
-			signal: options?.signal,
+			signal: executionSignal,
 		});
 	} catch (err) {
+		await Promise.allSettled(callbackPromises);
 		// Check if it was an abort
+		if (hasCallbackError) {
+			return await closeTempFileAndCleanup(callbackError);
+		}
 		if (options?.signal?.aborted) {
 			const { fullOutput, truncationResult } = await prepareFinalOutput();
 			try {
@@ -256,6 +289,10 @@ export async function executeBashWithOperations(
 		return await closeTempFileAndCleanup(err);
 	}
 
+	await Promise.allSettled(callbackPromises);
+	if (hasCallbackError) {
+		return await closeTempFileAndCleanup(callbackError);
+	}
 	const { fullOutput, truncationResult } = await prepareFinalOutput();
 	try {
 		await closeTempFileStream();

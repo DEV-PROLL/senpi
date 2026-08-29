@@ -1,5 +1,29 @@
 # changes
 
+## 2026-08-29 - Observe async local shell callback failures
+
+### What changed
+
+- `packages/coding-agent/src/core/bash-executor.ts`: async `onChunk` rejections are now observed,
+  abort the active command, and preserve the original rejection reason through spill cleanup.
+- Extended `test/suite/regressions/bash-spill-local-on-chunk.test.ts` with stdout and stderr
+  regressions for rejected strings, objects, and Errors, including unhandled-rejection coverage.
+
+### Why
+
+- An async callback assigned to the synchronous callback type previously left rejected promises
+  unhandled, allowed execution to resolve successfully, and left large-output spill files behind.
+
+### Why an extension could not handle it
+
+- Callback invocation and process cancellation are owned by the core executor and local shell
+  operations, before extension code can observe or finalize the spill lifecycle.
+
+### Expected merge conflict zones
+
+- `bash-executor.ts`: callback invocation and command cleanup settlement.
+- `bash-spill-local-on-chunk.test.ts`: local stream callback regression coverage.
+
 ## 2026-08-29 - Route local shell callback failures through spill cleanup
 
 ### What changed

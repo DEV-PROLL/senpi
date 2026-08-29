@@ -126,7 +126,16 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 				const handleData = (data: Buffer) => {
 					if (hasStreamCallbackError) return;
 					try {
-						onData(data);
+						const callbackResult = (onData as (data: Buffer) => unknown)(data);
+						if (callbackResult && typeof (callbackResult as { then?: unknown }).then === "function") {
+							void Promise.resolve(callbackResult).catch((error) => {
+								if (!hasStreamCallbackError) {
+									streamCallbackError = error;
+									hasStreamCallbackError = true;
+								}
+								onAbort();
+							});
+						}
 					} catch (error) {
 						streamCallbackError = error;
 						hasStreamCallbackError = true;
