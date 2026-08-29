@@ -433,6 +433,136 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("mirrors host session settings in direct proxy getters", async () => {
+		const qa = scratch("settings-sync");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		const observer = new RpcClient({ socketPath: qa.socket });
+		await observer.start();
+		try {
+			await observer.openSession({ sessionPath: runtime.session.sessionFile!, cwd: qa.cwd });
+			let settingsEvents = 0;
+			const settingsChanged = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "session_settings_changed") return;
+					settingsEvents++;
+					if (settingsEvents >= 3) {
+						unsubscribe();
+						resolve();
+					}
+				});
+			});
+			await observer.setSteeringMode("one-at-a-time");
+			await observer.setFollowUpMode("one-at-a-time");
+			await observer.setAutoCompaction(false);
+			await settingsChanged;
+			expect(runtime.session.steeringMode).toBe("one-at-a-time");
+			expect(runtime.session.followUpMode).toBe("one-at-a-time");
+			expect(runtime.session.autoCompactionEnabled).toBe(false);
+		} finally {
+			await observer.stop();
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("reports host work through isIdle while streaming", async () => {
+		const qa = scratch("idle-sync");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			const started = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "agent_start") return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			const settled = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "agent_settled") return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			void runtime.session.prompt("hold-open-500 idle-probe");
+			await started;
+			expect(runtime.session.isStreaming).toBe(true);
+			expect(runtime.session.isIdle).toBe(false);
+			await settled;
+			expect(runtime.session.isIdle).toBe(true);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
+	it("refreshes the session manager after host entries are appended", async () => {
+		const qa = scratch("entry-sync");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const localManager = SessionManager.create(qa.cwd, qa.sessionDir);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: localManager,
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			const settled = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "agent_settled") return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			await runtime.session.prompt("entry-sync-probe");
+			await settled;
+			const entries = runtime.session.sessionManager.getEntries();
+			expect(entries).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						type: "message",
+						message: expect.objectContaining({
+							role: "user",
+							content: [{ type: "text", text: "entry-sync-probe" }],
+						}),
+					}),
+				]),
+			);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("reflects remote thinking-level cycles in session.state for footer rendering", async () => {
 		const qa = scratch("state-sync");
 		const fake = await startFakeModelServer();

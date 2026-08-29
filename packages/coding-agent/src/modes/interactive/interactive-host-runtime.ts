@@ -317,6 +317,22 @@ function createRemoteSessionProxy(
 		if (wireEvent.type === "service_tier_changed") {
 			state = { ...state, serviceTier: wireEvent.tier, fastMode: wireEvent.fastMode };
 		}
+		if (wireEvent.type === "session_settings_changed") {
+			state = {
+				...state,
+				steeringMode: wireEvent.steeringMode,
+				followUpMode: wireEvent.followUpMode,
+				autoCompactionEnabled: wireEvent.autoCompactionEnabled,
+			};
+		}
+		if (wireEvent.type === "entry_appended") {
+			try {
+				sessionManager.appendEntry(wireEvent.entry);
+				local.agent.state.messages = sessionManager.buildSessionContext().messages;
+			} catch {
+				// Non-fatal if the local snapshot cannot accept a concurrent entry.
+			}
+		}
 		if (wireEvent.type === "session_info_changed") state = { ...state, sessionName: wireEvent.name };
 		if (wireEvent.type === "message_start") {
 			if (wireEvent.message.role === "assistant") {
@@ -528,8 +544,8 @@ function createRemoteSessionProxy(
 					};
 				};
 			if (property === "isStreaming") return state.isStreaming;
+			if (property === "isIdle") return !state.isStreaming;
 			if (property === "isCompacting") return state.isCompacting;
-			if (property === "isFastModeActive") return () => state.fastMode;
 			if (property === "pendingMessageCount") return state.pendingMessageCount;
 			if (property === "getSteeringMessages") return () => state.steering;
 			if (property === "getFollowUpMessages") return () => state.followUp;
@@ -578,6 +594,10 @@ function createRemoteSessionProxy(
 			if (property === "sessionId") return state.sessionId;
 			if (property === "sessionName") return state.sessionName;
 			if (property === "serviceTier") return state.serviceTier;
+			if (property === "steeringMode") return state.steeringMode;
+			if (property === "followUpMode") return state.followUpMode;
+			if (property === "autoCompactionEnabled") return state.autoCompactionEnabled;
+			if (property === "isFastModeActive") return () => state.fastMode;
 			if (property === "sessionManager") return remoteSessionManager;
 			if (property === "settingsManager") return settingsManager;
 			if (property === "messages") return target.messages;
@@ -677,6 +697,9 @@ function stateFromRpc(state: {
 	projectTrusted: boolean;
 	serviceTier?: AgentSession["serviceTier"];
 	fastMode: boolean;
+	steeringMode: AgentSession["steeringMode"];
+	followUpMode: AgentSession["followUpMode"];
+	autoCompactionEnabled: boolean;
 	entries?: import("../../core/session-manager.ts").SessionEntry[];
 	steering: string[];
 	followUp: string[];
