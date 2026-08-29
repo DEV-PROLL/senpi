@@ -145,6 +145,8 @@ describe("interactive host runtime", () => {
 			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
 		});
 		const getState = vi.spyOn(RpcClient.prototype, "getState");
+		let messageUpdates = 0;
+		let assistantUpdatesWithUsage = 0;
 		const runtime = await createInteractiveHostRuntime(local, {
 			socket: qa.socket,
 			ensureHost: async () => undefined,
@@ -153,6 +155,10 @@ describe("interactive host runtime", () => {
 		try {
 			const settled = new Promise<void>((resolve) => {
 				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type === "message_update") {
+						messageUpdates++;
+						if (event.message.role === "assistant" && event.message.usage) assistantUpdatesWithUsage++;
+					}
 					if (event.type !== "agent_settled") return;
 					unsubscribe();
 					resolve();
@@ -161,7 +167,18 @@ describe("interactive host runtime", () => {
 			await runtime.session.prompt("multi-delta-usage");
 			await settled;
 			expect(getState).toHaveBeenCalledTimes(0);
-			expect(runtime.session.sessionManager.getUsageTotals().output).toBe(1);
+			expect(messageUpdates).toBeGreaterThan(1);
+			expect(assistantUpdatesWithUsage).toBeGreaterThan(1);
+			expect(messageUpdates).toBe(3);
+			expect(assistantUpdatesWithUsage).toBe(3);
+			expect(runtime.session.sessionManager.getUsageTotals()).toEqual({
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: 0.00003,
+				latestCacheHitRate: 0,
+			});
 		} finally {
 			await runtime.dispose();
 			await fake.close();

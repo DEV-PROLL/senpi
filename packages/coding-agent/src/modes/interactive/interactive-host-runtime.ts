@@ -250,6 +250,7 @@ function createRemoteSessionProxy(
 		},
 	});
 	let streamingAssistant: Extract<AgentSession["messages"][number], { role: "assistant" }> | undefined;
+	let mirroredCurrentAssistantUsage = false;
 	const listeners = new Set<AgentSessionEventListener>();
 	client.onEvent((wireEvent) => {
 		if (wireEvent.type === "agent_settled") state = { ...state, isStreaming: false, retryAttempt: 0 };
@@ -282,14 +283,18 @@ function createRemoteSessionProxy(
 		if (wireEvent.type === "thinking_level_changed") state = { ...state, thinkingLevel: wireEvent.level };
 		if (wireEvent.type === "session_info_changed") state = { ...state, sessionName: wireEvent.name };
 		if (wireEvent.type === "message_start") {
-			if (wireEvent.message.role === "assistant") streamingAssistant = structuredClone(wireEvent.message);
+			if (wireEvent.message.role === "assistant") {
+				streamingAssistant = structuredClone(wireEvent.message);
+				mirroredCurrentAssistantUsage = false;
+			}
 			local.agent.state.messages.push(structuredClone(wireEvent.message));
 		}
 		if (wireEvent.type === "message_end") {
 			if (wireEvent.message.role === "assistant") {
 				streamingAssistant = structuredClone(wireEvent.message);
 				const usage = wireEvent.message.usage;
-				if (usage) {
+				if (usage && !mirroredCurrentAssistantUsage) {
+					mirroredCurrentAssistantUsage = true;
 					const latestPromptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
 					state = {
 						...state,
