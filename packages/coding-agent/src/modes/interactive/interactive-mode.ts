@@ -2605,7 +2605,7 @@ export class InteractiveMode {
 		InteractiveMode.restoreCompactionEscapeOverride(this);
 		// A session switch/reset ends any external-owner delegation episode.
 		this.externalOwnerCompactionNoticeShown = false;
-		this.footer.setCompactionDelegated?.(false);
+		this.footer?.setCompactionDelegated?.(false);
 		const session = this.session;
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -4682,7 +4682,7 @@ export class InteractiveMode {
 					this.footer.invalidate();
 					// A real compaction landed: the delegation episode (if any) is over.
 					this.externalOwnerCompactionNoticeShown = false;
-					this.footer.setCompactionDelegated?.(false);
+					this.footer?.setCompactionDelegated?.(false);
 				} else if (event.rejectionCause === "external-owner" && event.reason !== "manual") {
 					// Auto compaction is delegated to an external owner (Claude Agent SDK).
 					// This is expected state, not an error: surface it at most once per
@@ -4699,7 +4699,7 @@ export class InteractiveMode {
 							),
 						);
 					}
-					this.footer.setCompactionDelegated?.(true);
+					this.footer?.setCompactionDelegated?.(true);
 				} else if (event.errorMessage) {
 					const errorMessage = sanitizeTerminalLabel(event.errorMessage);
 					if (event.reason === "manual") {
@@ -6695,7 +6695,7 @@ export class InteractiveMode {
 			this.footer.invalidate();
 			// A model switch ends any external-owner delegation episode.
 			this.externalOwnerCompactionNoticeShown = false;
-			this.footer.setCompactionDelegated?.(false);
+			this.footer?.setCompactionDelegated?.(false);
 			this.updateEditorBorderColor();
 			const systemPromptStr = systemPromptChange?.systemPromptName
 				? ` (optimized system prompt applied: ${systemPromptChange.systemPromptName})`

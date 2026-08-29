@@ -156,4 +156,26 @@ describe("external-owner compaction rejection rendering", () => {
 		await handleEvent.call(fakeThis, externalOwnerEvent());
 		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(2);
 	});
+
+	test("rebindCurrentSession tolerates harness contexts without a footer", async () => {
+		// Mirrors the minimal RebindContext used by
+		// test/suite/regressions/5943-session-start-notify.test.ts: no footer, no
+		// chrome. The delegation reset must not dereference the absent receiver.
+		const context = {
+			applyRuntimeSettings: vi.fn(),
+			renderCurrentSessionState: vi.fn(),
+			bindCurrentSessionExtensions: vi.fn().mockResolvedValue(undefined),
+			subscribeToAgent: vi.fn(),
+			updateAvailableProviderCount: vi.fn().mockResolvedValue(undefined),
+			updateEditorBorderColor: vi.fn(),
+			updateTerminalTitle: vi.fn(),
+		};
+		const rebindCurrentSession = Reflect.get(InteractiveMode.prototype, "rebindCurrentSession") as (
+			this: typeof context,
+			options?: { renderBeforeBind?: boolean },
+		) => Promise<void>;
+
+		await expect(rebindCurrentSession.call(context)).resolves.toBeUndefined();
+		expect(context.bindCurrentSessionExtensions).toHaveBeenCalled();
+	});
 });
