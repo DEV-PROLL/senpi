@@ -20,6 +20,12 @@
 - The withheld set has to be applied where the session materializes its tool surface; an extension
   cannot remove a builtin from the prompt-bearing definitions or the active tool names.
 
+### Expected merge conflict zones
+
+- `index.ts`: the `temporarilyDisabledToolNames` export sits directly below `allToolNames`, so an
+  upstream change that adds or removes a builtin tool name will conflict there. Resolve by keeping
+  both the upstream tool-name edit and this set; the set is intended to be emptied, not carried.
+
 ## Output spill streams capture early storage failures (2026-08-26)
 
 ### What changed

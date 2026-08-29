@@ -17,6 +17,19 @@
   `Tool "grep" is not available in this session`. Withholding now happens only where the
   model-facing surface is derived, leaving programmatic name-based resolution working.
 
+### Why an extension could not handle it
+
+- `_toolDefinitions`, `_toolRegistry`, and the active tool names are private session state built in
+  one pass inside `AgentSession`; no extension hook runs between their construction and first use,
+  so the split between the advertised surface and the resolvable registry can only be made here.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: the `definitionRegistry` construction and the `nextActiveToolNames` filter
+  both gained a `temporarilyDisabledToolNames` guard alongside the existing `isAllowedTool` call.
+  Upstream edits to either filter will conflict; keep the upstream predicate change and re-apply
+  the withheld-name guard next to it.
+
 - Model runtime credential admission counts the combined canonical environment and policy slot lane, admitting rotation for more than one live slot without acquiring leases during preflight.
 
 ## 2026-08-28 - Credential pool parity follow-ups
