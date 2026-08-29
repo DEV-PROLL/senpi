@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
 import { access, open, realpath, stat } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import { describeExit } from "./tools/spawn.ts";
 
@@ -53,11 +53,20 @@ export interface RegisterMonitorOptions {
 	readonly filter?: RegExp;
 }
 
+interface PendingFileRegistration {
+	release: (() => void) | undefined;
+	readonly abort: AbortController;
+	readonly deadline: ReturnType<typeof setTimeout>;
+	settled: boolean;
+}
+
 interface FileMonitorRecord {
 	readonly id: string;
 	readonly description: string;
 	readonly startedAtMs: number;
 	readonly path: string;
+	readonly canonicalPath: string;
+	readonly canonicalParent: string;
 	readonly event: "create" | "modify";
 	readonly watcher: FSWatcher;
 	readonly release: () => void;
@@ -103,6 +112,7 @@ export class MonitorRegistry {
 	#nextFileId = 1;
 	#disposed = false;
 	#pendingRegistrations = 0;
+	readonly #pending = new Set<PendingFileRegistration>();
 	#lifecycle = 0;
 
 	constructor(emit: (event: MonitorEvent) => void, options?: MonitorRegistryOptions) {
@@ -129,15 +139,22 @@ export class MonitorRegistry {
 			this.#pendingRegistrations -= 1;
 			throw new Error("Cannot create file monitor: terminal capacity is already in use.");
 		}
+		const pending: PendingFileRegistration = {
+			release: release ?? undefined,
+			abort: new AbortController(),
+			deadline: setTimeout(() => pending.abort.abort(), options.timeoutMs),
+			settled: false,
+		};
+		this.#pending.add(pending);
 		const path = resolve(options.cwd, options.path);
 		const parent = dirname(path);
 		let approvedParent: string;
 		try {
-			await access(parent);
-			approvedParent = await realpath(parent);
+			await this.#registrationAwait(pending, access(parent));
+			approvedParent = await this.#registrationAwait(pending, realpath(parent));
 			if (this.#disposed) throw new Error("Cannot create file monitor: monitor registry is disposed.");
 		} catch (error) {
-			release?.();
+			this.#finishPending(pending);
 			this.#pendingRegistrations -= 1;
 			if (error instanceof Error && error.message.includes("disposed")) throw error;
 			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
@@ -149,24 +166,24 @@ export class MonitorRegistry {
 		}
 		let initial: Awaited<ReturnType<typeof stat>> | null = null;
 		try {
-			initial = await stat(path);
+			initial = await this.#registrationAwait(pending, stat(path));
 			if (!initial.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${path}`);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-				release?.();
+				this.#finishPending(pending);
 				this.#pendingRegistrations -= 1;
 				throw error;
 			}
 		}
 		if (this.#disposed || lifecycle !== this.#lifecycle || this.#pendingRegistrations < 1) {
-			release?.();
+			this.#finishPending(pending);
 			this.#pendingRegistrations -= 1;
 			throw new Error("Cannot create file monitor: monitor registry is disposed.");
 		}
 		const id = `watch_${this.#nextFileId++}`;
 		let watcher: FSWatcher;
 		try {
-			const activationParent = await realpath(parent);
+			const activationParent = await this.#registrationAwait(pending, realpath(parent));
 			if (activationParent !== approvedParent) {
 				throw new Error(`Cannot watch file: parent directory changed during registration: ${parent}`);
 			}
@@ -174,7 +191,7 @@ export class MonitorRegistry {
 				if (!name || basename(String(name)) === basename(path)) void this.#checkFile(id);
 			});
 		} catch (error) {
-			release?.();
+			this.#finishPending(pending);
 			this.#pendingRegistrations -= 1;
 			throw new Error(`Cannot watch file ${path}: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -194,15 +211,22 @@ export class MonitorRegistry {
 			if (registrationCleaned) return;
 			watcher.close();
 			finishRegistration();
-			release?.();
+			this.#finishPending(pending);
 		};
 		if (this.#disposed || lifecycle !== this.#lifecycle) {
 			cleanupRegistration();
 			throw new Error("Cannot create file monitor: monitor registry is disposed.");
 		}
+		let canonicalPath: string;
+		try {
+			canonicalPath = initial ? await this.#registrationAwait(pending, realpath(path)) : join(approvedParent, basename(path));
+		} catch (error) {
+			cleanupRegistration();
+			throw error;
+		}
 		let digest: string;
 		try {
-			digest = initial ? await this.#digest(path) : "";
+			digest = initial ? await this.#registrationAwait(pending, this.#digest(canonicalPath, pending.abort.signal)) : "";
 		} catch (error) {
 			cleanupRegistration();
 			if (registrationError) {
@@ -225,6 +249,8 @@ export class MonitorRegistry {
 			description: options.description,
 			startedAtMs: Date.now(),
 			path,
+			canonicalPath,
+			canonicalParent: approvedParent,
 			event: options.event,
 			watcher,
 			release: release ?? (() => {}),
@@ -247,6 +273,7 @@ export class MonitorRegistry {
 		};
 		this.#files.set(id, record);
 		finishRegistration();
+		this.#finishPending(pending, true);
 		if (registrationError || this.#disposed || lifecycle !== this.#lifecycle) {
 			this.#settleFile(record, registrationError ?? "watcher killed");
 			throw new Error(registrationError ?? "Cannot create file monitor: monitor registry is disposed.");
@@ -315,7 +342,12 @@ export class MonitorRegistry {
 		if (record.settled) return;
 		let current: Awaited<ReturnType<typeof stat>> | null = null;
 		try {
-			current = await stat(record.path);
+			const currentParent = await realpath(dirname(record.path));
+			if (currentParent !== record.canonicalParent) {
+				this.#settleFile(record, `watcher error: monitored parent changed: ${dirname(record.path)}`);
+				return;
+			}
+			current = await stat(record.canonicalPath);
 			if (!current.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${record.path}`);
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
@@ -324,7 +356,7 @@ export class MonitorRegistry {
 			}
 		}
 		const present = current !== null;
-		const digest = present ? await this.#digest(record.path) : "";
+		const digest = present ? await this.#digest(record.canonicalPath) : "";
 		const changed =
 			record.event === "create"
 				? !record.present && present
@@ -398,15 +430,35 @@ export class MonitorRegistry {
 		this.#lifecycle += 1;
 		for (const record of this.#records.values()) this.#disposeRecord(record);
 		for (const record of this.#files.values()) this.#settleFile(record, "watcher disposed");
+		for (const pending of this.#pending) this.#finishPending(pending);
 		this.#records.clear();
 		this.#notifyChange();
 	}
 
-	async #digest(path: string): Promise<string> {
+	#finishPending(pending: PendingFileRegistration, transfer = false): void {
+		if (pending.settled) return;
+		pending.settled = true;
+		clearTimeout(pending.deadline);
+		this.#pending.delete(pending);
+		if (transfer) pending.release = undefined;
+		else pending.release?.();
+	}
+
+	async #registrationAwait<T>(pending: PendingFileRegistration, operation: Promise<T>): Promise<T> {
+		if (pending.abort.signal.aborted) throw new Error("Cannot create file monitor: registration timed out or was disposed.");
+		return Promise.race([
+			operation,
+			new Promise<never>((_, reject) => pending.abort.signal.addEventListener("abort", () => reject(new Error("Cannot create file monitor: registration timed out or was disposed.")), { once: true })),
+		]);
+	}
+
+	async #digest(path: string, signal?: AbortSignal): Promise<string> {
 		const SAMPLE_SIZE = 64 * 1024;
 		try {
+			if (signal?.aborted) throw new Error("file monitor registration cancelled");
 			const handle = await open(path, "r");
 			try {
+				if (signal?.aborted) throw new Error("file monitor registration cancelled");
 				const metadata = await handle.stat();
 				const hash = createHash("sha256");
 				const first = Buffer.alloc(Math.min(SAMPLE_SIZE, metadata.size));

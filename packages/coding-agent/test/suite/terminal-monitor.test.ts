@@ -261,6 +261,30 @@ describe("terminal monitor tool", () => {
 		}
 	}, 15_000);
 
+	it("fails closed when an approved symlink parent is retargeted after activation", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const internal = await mkdtemp(join(process.cwd(), ".native-internal-"));
+		const external = await mkdtemp(join(process.cwd(), ".native-external-"));
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			const link = join(root, "parent");
+			const requested = join(link, "artifact");
+			await symlink(internal, link, "dir");
+			await registry.registerFile({ description: "drift", path: requested, event: "create", timeoutMs: 5000, cwd: root });
+			const summary = sink.waitFor((event) => event.type === "summary" && event.description === "drift", "drift summary");
+			await rm(link);
+			await symlink(external, link, "dir");
+			await writeFile(join(external, "artifact"), "external");
+			expect(summaryEvent(await summary).summary).toContain("monitored parent changed");
+			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(0);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+			await rm(internal, { recursive: true, force: true });
+			await rm(external, { recursive: true, force: true });
+		}
+	}, 15_000);
+
 	it("fires one native modify watch event", async () => {
 		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
 		const file = join(root, "artifact");
