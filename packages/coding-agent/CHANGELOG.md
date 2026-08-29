@@ -6,6 +6,12 @@
 
 ### Added
 
+- New experimental setting `experimental.bashEvalOnly` (default `false`). When enabled, the `bash` and
+  `powershell` tools are withheld from the model-facing tool surface and run only inside eval cells via
+  `tool.bash({ command: "..." })`, with system-prompt guidance and a redirect hint if the model calls them
+  directly. Hooks and permission checks still apply to those commands. The policy is inert whenever the
+  `eval` tool is unavailable, so shell access is never lost, and it follows the flag across a reload.
+
 ### Changed
 
 - `grep` is temporarily withheld from the model-facing tool surface. It no longer appears in the
