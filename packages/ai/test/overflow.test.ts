@@ -94,6 +94,43 @@ describe("isContextOverflow", () => {
 		expect(isContextOverflow(rfcStyle, 200000)).toBe(true);
 	});
 
+	it("detects kiro-lb local payload guards across both route wrappers and units", () => {
+		const anthropicBytes = createErrorMessage(
+			'400 {"type":"error","error":{"type":"invalid_request_error","message":"Request payload is 1095225 bytes, over the 1085435 byte limit Kiro accepts. Shorten the conversation or send fewer tools."}}',
+		);
+		const openAiTokens = createErrorMessage(
+			'400 {"detail":"Request payload is 800001 tokens, over the 800000 token limit Kiro accepts."}',
+		);
+		expect(isContextOverflow(anthropicBytes, 666667)).toBe(true);
+		expect(isContextOverflow(openAiTokens, 666667)).toBe(true);
+	});
+
+	it("detects Kiro upstream context overflow enhanced by kiro-lb", () => {
+		const upstream = createErrorMessage(
+			'400 {"error":{"type":"kiro_api_error","message":"Model context limit reached. Conversation size exceeds model capacity."}}',
+		);
+		expect(isContextOverflow(upstream, 666667)).toBe(true);
+	});
+
+	it("rejects malformed or unrelated Kiro-like payload-size prose", () => {
+		expect(
+			isContextOverflow(
+				createErrorMessage("Request payload is 1,,225 bytes, over the 1,085 byte limit Kiro accepts."),
+			),
+		).toBe(false);
+		expect(
+			isContextOverflow(
+				createErrorMessage("Request payload is 1,225 bytes, over the 1,085 byte limit Kiro accepts."),
+			),
+		).toBe(false);
+		expect(
+			isContextOverflow(
+				createErrorMessage("Payload 1095225 bytes exceeds the 1085435 byte limit; AUTO_TRIM_PAYLOAD is disabled"),
+			),
+		).toBe(false);
+		expect(isContextOverflow(createErrorMessage("Another provider reports payload size exceeded."))).toBe(false);
+	});
+
 	it("does not treat tiny token-bearing resource_exhausted usage as context overflow", () => {
 		const message = createErrorMessage("Connect error resource_exhausted");
 		message.usage.output = 12;

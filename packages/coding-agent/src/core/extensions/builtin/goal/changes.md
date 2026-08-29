@@ -1,5 +1,125 @@
 # goal Extension Changes
 
+## 2026-08-28 - RPC session resume does not deadlock on stopped-goal prompts
+
+### What changed
+
+- `index.ts` leaves paused or blocked Goals stopped during RPC `switch_session` rebinding instead of awaiting the
+  interactive restart prompt inside the in-flight RPC request. It emits an informational notification telling the
+  user to resume explicitly after the session finishes loading.
+- TUI resume behavior is unchanged: interactive sessions still offer `Resume goal` and `Leave stopped`.
+- Coverage in `test/suite/goal-extension.test.ts` pins that RPC resume does not call `ctx.ui.select`, reactivate the
+  Goal, or queue a continuation.
+
+### Why
+
+- The RPC client waits for the `switch_session` response before it can service the Goal extension's nested
+  `ctx.ui.select` request. The host awaited that selection before returning the switch response, so both sides waited
+  until the client timed out and exited without rendering the hidden error.
+
+### Why an extension couldn't do it
+
+- The stopped-goal restart prompt and its persisted status transition are private to the builtin Goal extension. An
+  external extension cannot bypass or reorder that handler during RPC session rebinding.
+
+### Expected merge conflict zones
+
+- LOW in `index.ts` around `maybePromptResumeStoppedGoal` and its mode-specific UI policy.
+
+## 2026-08-27 - TUI widget rendering for goal tool results
+
+### What changed
+
+- `renderers.ts` (new): `renderGoalToolCall` / `renderGoalToolResult` render the goal tools as
+  a widget instead of the raw `JSON.stringify({goal:...})` dump — status-colored header
+  (glyph + status + compact tokens + elapsed), objective preview (collapsed: first two
+  non-empty lines, 120-col shorten, `… +N more lines`) or the full objective plus
+  `created/updated` ISO timestamps (expanded), a `⚠ <blockedReason>` line, and the
+  objective-truncation notice. Falls back to parsing the legacy JSON text when `details`
+  are absent (old sessions), and to the raw text when nothing parses.
+- `format.ts`: adds `GoalToolRenderDetails` + `goalToolRenderDetails()` so tool results
+  carry the snapshot in `details` for the renderer.
+- `tool-registration.ts`: `create_goal` / `update_goal` / `get_goal` register
+  `renderCall`/`renderResult` and attach the render details. The model-facing JSON text
+  result is unchanged.
+- Tests: `test/goal-renderers.test.ts`.
+
+## 2026-08-27 - unattended continuation backstop (#1139)
+
+### What changed
+
+- `types.ts` adds the persisted `Goal.unattendedContinuations` counter;
+  `persistence.ts` sanitizes it like the other continuation state.
+- `store.ts` increments it on every counted `recordContinuationDelivered`
+  (new `countUnattended` option, default on), zeroes it on any status
+  transition alongside `consecutiveContinuations`, and
+  `resetContinuationStreak(ref, { unattended: true })` clears it on accepted
+  direct user input (`direct-input-lifecycle.ts`, both branches).
+- `continuation.ts` adds `GOAL_UNATTENDED_CONTINUATION_LIMIT = 150` and a new
+  `"unattended"` deny reason: any counted path
+  (immediate/userGrace/sessionStart/systemRecovery/providerRecovery) is denied
+  once the budget is exhausted; `monitorDelayed` is exempt because armed-wake
+  waiting is by-design and rate-limited by the cache-aware timer.
+- `continuation-recovery.ts` / `lifecycle-helpers.ts` map the deny to a new
+  mechanical block reason `unattended continuation limit reached`, so the
+  existing "Send any message to resume" recovery applies.
+  `goal_continuation_guard_tripped` now also carries `unattendedContinuations`.
+
+### Why
+
+- #539/#567 progress semantics reset the persisted streak on any tool use or
+  changed narration, so a stalled agent that varies its status text
+  self-authorizes continuations forever (observed: 289 continuations without
+  direct input, 122 consecutive zero-tool turns, 45.7M tokens). The limit sits
+  above the #447 distinct-progress pin (50) and an 8-hour monitor-backstop
+  cadence (~120 deliveries at 240s), below the observed incident run.
+
+### Why an extension could not handle it
+
+- Delivery accounting, the persisted goal store, and continuation admission are
+  private state inside the builtin Goal extension; no external hook can veto an
+  admission or observe per-delivery accounting.
+
+### Expected merge conflict zones
+
+- LOW in `continuation.ts` (constants + verdict union), `store.ts`
+  (continuation mutators), and `lifecycle-helpers.ts` (guard mapping).
+
+## 2026-08-26 - continuation timer survives a retired extension context
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/goal/monitor-continuation.ts`
+  routes every `hasUI` read through a new private `#ctxHasUI(ctx)` helper that
+  treats the stale-ctx error (`stale-context.ts`) as "no UI" and rethrows
+  anything else. The three affected reads are `#armTimer`'s pre-arm wait-ticker
+  sync, the `setTimeout` callback's own `catch` handler, and the toolless stall
+  notice in `#buildContinuationContent`. The timer callback additionally drops a
+  rejection that is itself a stale-ctx error, since that is the expected outcome
+  after a session replacement. Covered by
+  `test/suite/goal-ticker-stale-context.test.ts`.
+
+### Why
+
+- `ctx.hasUI` is an `assertActive()`-guarded getter, so a context retired by
+  session replacement or reload THROWS rather than returning false. The existing
+  `this.#ctx?.hasUI` optional chaining only guarded the `undefined` that
+  `dispose()` leaves behind, not the stale object left when a session is replaced
+  without disposing this monitor. Because the read happened inside a bare
+  `setTimeout` callback, the throw escaped as an uncaughtException and killed the
+  session (reported in the wild from `runner.js` `assertActive` via `hasUI`).
+
+### Why an extension could not handle it
+
+- The armed continuation timer, the retained `#ctx`, and the continuation
+  admission path are all private state inside the builtin Goal extension; no
+  external hook observes or wraps that callback.
+
+### Expected merge conflict zones
+
+- LOW in `monitor-continuation.ts` around `#armTimer` and
+  `#buildContinuationContent` where the `hasUI` reads are now helper calls.
+
 ## 2026-08-24 - provider retry exhaustion uses guarded recovery
 
 ### What changed

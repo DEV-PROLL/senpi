@@ -70,21 +70,21 @@ type EvalPromptExample = {
 const REUSE_CHAIN_EXAMPLES = [
 	{
 		caption: "First call — set up once",
-		language: "py",
+		language: "js",
 		summary: "Count all TypeScript source files under src/ excluding tests",
-		code: "from pathlib import Path\nfrom collections import Counter\nfiles = [p for p in Path('src').rglob('*.ts') if 'test' not in p.parts]\nprint(len(files))",
+		code: "import { readdir } from 'node:fs/promises'\nimport { extname } from 'node:path'\nconst files = (await readdir('src', { recursive: true })).filter(f => extname(f) === '.ts' && !f.includes('test'))\nprint(files.length)",
 	},
 	{
-		caption: "Second call — reuse `files`, batch-read in one cell",
-		language: "py",
-		summary: "Find which files reference legacyClient so we know what to migrate",
-		code: "hits = Counter()\nfor p in files:\n    hits[p.name] = read(p).count('legacyClient')\ndisplay({k: v for k, v in hits.items() if v})",
+		caption: "Second call — reuse `files`, fan out session tools in parallel",
+		language: "js",
+		summary: "Grep legacyClient per directory in one cell",
+		code: "const dirs = [...new Set(files.map(f => f.split('/')[0]))]\nconst hits = await Promise.all(dirs.map(d => tool.grep({ pattern: 'legacyClient', path: d })))\ndisplay(hits.map(h => h.matches?.length ?? 0))",
 	},
 	{
-		caption: "Third call — reuse results, fan out session tools in parallel",
+		caption: "JS kernel is busy with a detached cell — continue in py",
 		language: "py",
-		summary: "Confirm exact callsite lines in each directory to plan the refactor",
-		code: "dirs = ['src/core', 'src/tools']\ndisplay(parallel([lambda d=d: tool.grep({'pattern': 'legacyClient', 'path': d}) for d in dirs]))",
+		summary: "Aggregate legacyClient hits while JS is busy",
+		code: "from pathlib import Path\nprint(sum('legacyClient' in read(p) for p in Path('src').rglob('*.ts')))",
 	},
 ] as const satisfies readonly EvalPromptExample[];
 
@@ -129,7 +129,7 @@ Fields:
 - \`reset\` (optional) — wipe this language's kernel first.{{#ifAll py js}} Per-language: a \`py\` reset never touches the JS VM.{{/ifAll}}
 - \`action\` (optional) — defaults to \`"run"\`. A detached cell returns its id: use \`eval({ action: "peek", cell_id })\` for buffered output/state or \`eval({ action: "stop", cell_id })\` to cancel it.
 
-A detached cell keeps its language kernel busy while it finishes. Do not re-run a detached cell: the same-language busy error names its cell id and output tail; another language can continue. Completion arrives as one notification with the final value/error and buffered output. Stopping a cell interrupts its kernel; the stop result states whether kernel state survived or the kernel was restarted and its variables lost.
+A detached cell keeps its language kernel busy while it finishes; another language can continue. Do not re-run a detached cell: the same-language busy error names its cell id and output tail. Completion arrives as one notification with the final value/error and buffered output. Stopping a cell interrupts its kernel; the stop result states whether kernel state survived or the kernel was restarted and its variables lost.
 
 {{#if py}}Live event loop: use top-level \`await\` directly; \`asyncio.run(…)\` raises "cannot be called from a running event loop".{{/if}}
 {{#if js}}JS runs under Node.js worker: top-level \`await\`/\`return\` work; \`fetch\`/\`Buffer\` available.{{/if}}
@@ -163,7 +163,7 @@ tool_schema(name?) → dict
 completion(prompt, model?="default", system?=None, schema?=None) → str | dict
     Oneshot, stateless (no history/tools). \`model\`: \`"smol"\` fast | \`"default"\` session | \`"slow"\` most capable. \`schema\` (JSON-Schema) → structured output, parsed object.
 {{#if spawns}}agent(prompt, agent?="{{spawnDefaultAgent}}", model?=None, label?=None, schema?=None, handle?=False) → str | dict
-    Run a subagent → final output. \`agent\` picks another discovered agent; omit it to use \`{{spawnDefaultAgent}}\`. \`schema\` as in completion(). Background via \`local://\` files named in the prompt. \`handle\` → DAG node dict { text, output, handle: \`agent://<id>\`, id, agent } (parsed under \`data\` when \`schema\` set).
+    Run a subagent → final output. \`agent\` picks another discovered agent; omit it to use \`{{spawnDefaultAgent}}\`. \`schema\` as in completion(). Background via \`local://\` files named in the prompt. \`handle\` → workflow node dict { text, output, handle: \`agent://<id>\`, id, agent } (parsed under \`data\` when \`schema\` set).
 {{#if js}}    JS: options are ONE trailing object — agent(prompt, { agent, schema, handle }).
 {{/if}}{{/if}}parallel(thunks) → list
     Thunks through a bounded pool (wide as a \`task\` batch — don't pre-shrink), input order kept; returns when all finish, a throwing thunk propagates.
@@ -176,14 +176,14 @@ phase(title) → None
 \`\`\`
 </prelude>
 {{#if spawns}}
-<dag>
-Pipe handles through stage helpers to build a dependency graph — acyclic waves:
+<workflow>
+Define the workflow spec IN CODE: partition the work into logically distinct steps, one node per step, then wire them as acyclic waves — never hand-author the graph as a single opaque call.
 - **Name nodes.** Capture each \`agent(…, {{#if py}}handle=True{{/if}}{{#if js}}{ handle: true }{{/if}}{{#if jl}}handle=true{{/if}})\` result; carries \`handle\` (\`agent://<id>\`) + \`output\`.
 - **Wire edges by reference.** Put an upstream node's \`handle\`/\`output\` in the dependent stage's prompt — large transcript never re-inlined. Bulk: \`write("local://<name>.md", …)\`, pass the URI.
 - **\`pipeline(items, *stages)\` = staged waves**, barrier between stages (every item clears stage N before any enters N+1). **\`parallel(thunks)\` = one wave** of independent nodes.
 - **Isolate failure.** A raising node re-raises the lowest-index error, aborts its wave; wrap risky nodes in try/except so a failure degrades only its dependent subtree, independent branches finish.
 - **Acyclic only.** A node never waits on its own descendant.
-</dag>
+</workflow>
 {{/if}}
 
 <critical>

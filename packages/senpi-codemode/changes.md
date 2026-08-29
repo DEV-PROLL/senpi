@@ -1,5 +1,20 @@
 # senpi-codemode fork changes
 
+## Compiled eval kernels resolve runtime assets from the sidecar (2026-08-27)
+
+### What changed
+
+- JavaScript worker entries and the Python prelude now resolve through the compiled-runtime sidecar, matching the existing Ruby and Julia kernel behavior.
+- Added coverage for all three assets in the compiled runner path tests.
+
+### Why
+
+- Bun-compiled eval kernels received `$bunfs` paths that are not usable by `Worker` or an external `python3` process. The staged sidecar provides real filesystem paths next to the compiled executable.
+
+### Expected merge conflict zones
+
+- LOW in the JavaScript and Python kernel asset resolution paths and compiled runner path tests.
+
 ## Session teardown failures stay out of lifecycle handler rejections (2026-08-25)
 
 ### What changed

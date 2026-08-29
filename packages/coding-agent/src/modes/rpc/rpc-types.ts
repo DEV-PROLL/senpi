@@ -7,11 +7,11 @@
 
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
-import type { SessionStats } from "../../core/agent-session.ts";
+import type { PromptDisposition, SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { ServiceTier } from "../../core/extensions/builtin/service-tier.ts";
-import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
+import type { SessionEntry, SessionTreeNode, UsageTotals } from "../../core/session-manager.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import type { RpcSlashCommand } from "./rpc-command-surface.ts";
 
@@ -31,11 +31,30 @@ type RpcSessionCommand =
 			images?: ImageContent[];
 			streamingBehavior?: "steer" | "followUp";
 			thinkingLevel?: ThinkingLevel;
+			expandPromptTemplates?: boolean;
 	  }
-	| { id?: string; type: "steer"; message: string; images?: ImageContent[] }
-	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[] }
+	| {
+			id?: string;
+			type: "send_custom_message";
+			customType: string;
+			content: unknown;
+			display: boolean;
+			details?: unknown;
+			triggerTurn?: boolean;
+			deliverAs?: "steer" | "followUp" | "nextTurn";
+	  }
+	| { id?: string; type: "append_user_message"; content: unknown }
+	| { id?: string; type: "append_session_entry"; entry: SessionEntry }
+	| { id?: string; type: "steer"; message: string; images?: ImageContent[]; enqueueOrder?: number }
+	| { id?: string; type: "follow_up"; message: string; images?: ImageContent[]; enqueueOrder?: number }
 	| { id?: string; type: "abort" }
-	| { id?: string; type: "clear_queue" }
+	| { id?: string; type: "abort_compaction" }
+	| { id?: string; type: "reload" }
+	| { id?: string; type: "check_reload_veto" }
+	| { id?: string; type: "clear_queue"; abortWillFollow?: boolean }
+	| { id?: string; type: "get_steering_messages" }
+	| { id?: string; type: "get_follow_up_messages" }
+	| { id?: string; type: "abort_branch_summary" }
 	| { id?: string; type: "new_session"; parentSession?: string }
 
 	// State
@@ -68,20 +87,39 @@ type RpcSessionCommand =
 	| { id?: string; type: "abort_retry" }
 
 	// Bash
-	| { id?: string; type: "bash"; command: string; excludeFromContext?: boolean }
+	| {
+			id?: string;
+			type: "bash";
+			command: string;
+			excludeFromContext?: boolean;
+			operations?: Record<string, unknown>;
+	  }
+	| { id?: string; type: "record_bash_result"; command: string; result: BashResult; excludeFromContext?: boolean }
 	| { id?: string; type: "abort_bash" }
+	| { id?: string; type: "set_label"; entryId: string; label?: string }
+	| {
+			id?: string;
+			type: "navigate_tree";
+			targetId: string;
+			summarize?: boolean;
+			customInstructions?: string;
+			replaceInstructions?: boolean;
+			label?: string;
+	  }
 
 	// Session
 	| { id?: string; type: "get_session_stats" }
 	| { id?: string; type: "export_html"; outputPath?: string }
-	| { id?: string; type: "switch_session"; sessionPath: string }
-	| { id?: string; type: "fork"; entryId: string }
+	| { id?: string; type: "export_jsonl"; outputPath?: string }
+	| { id?: string; type: "switch_session"; sessionPath: string; cwdOverride?: string }
+	| { id?: string; type: "fork"; entryId: string; position?: "before" | "at" }
 	| { id?: string; type: "clone" }
 	| { id?: string; type: "get_fork_messages" }
 	| { id?: string; type: "get_entries"; since?: string }
 	| { id?: string; type: "get_tree" }
 	| { id?: string; type: "get_last_assistant_text" }
 	| { id?: string; type: "set_session_name"; name: string }
+	| { id?: string; type: "import_jsonl"; inputPath: string; cwdOverride?: string }
 
 	// Messages
 	| { id?: string; type: "get_messages" }
@@ -231,9 +269,20 @@ export interface RpcSessionState {
 	sessionFile?: string;
 	sessionId: string;
 	sessionName?: string;
+	cwd: string;
+	/** Whether project-scoped settings and resources are trusted by the host. */
+	projectTrusted: boolean;
+	/** Authoritative entries for setup-only sessions whose deferred file does not exist yet. */
+	entries?: SessionEntry[];
+	steering: string[];
+	followUp: string[];
+	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
 	autoCompactionEnabled: boolean;
 	messageCount: number;
 	pendingMessageCount: number;
+	usageTotals: UsageTotals;
+	retryAttempt: number;
+	isBashRunning: boolean;
 }
 
 // ============================================================================
@@ -247,14 +296,19 @@ export type RpcResponse =
 			type: "response";
 			command: "get_protocol_info";
 			success: true;
-			data: { protocolVersion: 1; capabilities: ["multi_session"]; mode: "classic" | "multi" };
+			data: {
+				protocolVersion: 1;
+				serverVersion: string;
+				capabilities: string[];
+				mode: "classic" | "multi";
+			};
 	  }
 	| {
 			id?: string;
 			type: "response";
 			command: "open_session";
 			success: true;
-			data: { sessionId: string; state: RpcSessionState };
+			data: { sessionId: string; state: RpcSessionState; attached?: boolean };
 	  }
 	| { id?: string; type: "response"; command: "close_session"; success: true; data: Record<string, never> }
 	| {
@@ -274,16 +328,35 @@ export type RpcResponse =
 			};
 	  }
 	// Prompting (async - events follow)
-	| { id?: string; type: "response"; command: "prompt"; success: true }
+	// data.disposition reports how the host disposed the prompt (started/queued/handled)
+	// so proxied optimistic-echo contracts resolve exactly like the local path; older
+	// hosts omit it and clients must degrade to canonical-only rendering.
+	| { id?: string; type: "response"; command: "prompt"; success: true; data?: { disposition?: PromptDisposition } }
+	| { id?: string; type: "response"; command: "send_custom_message"; success: true }
+	| { id?: string; type: "response"; command: "append_user_message"; success: true }
+	| { id?: string; type: "response"; command: "append_session_entry"; success: true }
 	| { id?: string; type: "response"; command: "steer"; success: true }
 	| { id?: string; type: "response"; command: "follow_up"; success: true }
 	| { id?: string; type: "response"; command: "abort"; success: true }
+	| { id?: string; type: "response"; command: "abort_compaction"; success: true }
+	| { id?: string; type: "response"; command: "reload"; success: true; data: { cancelled: boolean; reason?: string } }
+	| {
+			id?: string;
+			type: "response";
+			command: "check_reload_veto";
+			success: true;
+			data: { cancelled: boolean; reason?: string };
+	  }
 	| {
 			id?: string;
 			type: "response";
 			command: "clear_queue";
 			success: true;
-			data: { steering: string[]; followUp: string[] };
+			data: {
+				steering: string[];
+				followUp: string[];
+				ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
+			};
 	  }
 	| { id?: string; type: "response"; command: "new_session"; success: true; data: { cancelled: boolean } }
 
@@ -296,7 +369,7 @@ export type RpcResponse =
 			type: "response";
 			command: "set_model";
 			success: true;
-			data: Model<any>;
+			data: Model<any> & { systemPromptName?: string };
 	  }
 	| {
 			id?: string;
@@ -360,11 +433,19 @@ export type RpcResponse =
 
 	// Bash
 	| { id?: string; type: "response"; command: "bash"; success: true; data: BashResult }
+	| {
+			id?: string;
+			type: "response";
+			command: "navigate_tree";
+			success: true;
+			data: { cancelled: boolean; editorText?: string; aborted?: boolean; summaryEntry?: unknown };
+	  }
 	| { id?: string; type: "response"; command: "abort_bash"; success: true }
 
 	// Session
 	| { id?: string; type: "response"; command: "get_session_stats"; success: true; data: SessionStats }
 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
+	| { id?: string; type: "response"; command: "export_jsonl"; success: true; data: { path: string } }
 	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
 	| { id?: string; type: "response"; command: "fork"; success: true; data: { text: string; cancelled: boolean } }
 	| { id?: string; type: "response"; command: "clone"; success: true; data: { cancelled: boolean } }
@@ -397,6 +478,7 @@ export type RpcResponse =
 			data: { text: string | null };
 	  }
 	| { id?: string; type: "response"; command: "set_session_name"; success: true }
+	| { id?: string; type: "response"; command: "import_jsonl"; success: true; data: { cancelled: boolean } }
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
@@ -449,7 +531,15 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "account_remove"; success: true }
 
 	// Error response (any command can fail)
-	| { id?: string; type: "response"; command: string; success: false; error: string };
+	| {
+			id?: string;
+			type: "response";
+			command: string;
+			success: false;
+			error: string;
+			errorCode?: string;
+			errorData?: unknown;
+	  };
 
 // ============================================================================
 // Extension UI Events (stdout)

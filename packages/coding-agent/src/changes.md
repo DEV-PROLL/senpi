@@ -1,5 +1,41 @@
 # changes
 
+## Honor --auto-title-sessions outside interactive mode (2026-08-28)
+
+### What changed
+
+- `packages/coding-agent/src/main.ts` resolves session auto-titling through the exported `resolveAutoTitleSessions(appMode, parsed, hasContextMessages)` helper: interactive launches keep titling by default, any app mode opts in with `--auto-title-sessions`, and sessions resumed with context messages are still never retitled. Because the shared `createRuntime` closure is also what the multi-session RPC host calls through `RpcSessionRegistry.openSession`, both the classic and multi-session RPC paths honor the flag without extra plumbing.
+
+### Why
+
+- RPC clients (the desktop app spawns `--mode rpc --multi-session`) never received generated session titles even though `setSessionName()` already emits `session_info_changed` and the RPC connection handler already forwards it.
+
+### Why an extension could not handle it
+
+- The auto-title decision is made while the entrypoint constructs the first `AgentSession`, before extensions load.
+
+### Expected merge conflict zones
+
+- LOW: the `autoTitleSessions` argument in the `createAgentSessionFromServices` call and the helper beside `toProjectTrustMode`.
+
+## Credential accounts in auth check --json (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/main.ts`: `auth check --json` output gains a non-secret `accounts` array (name/source/blocked/pinned) for the checked provider, sourced from `core/credential-accounts.ts`; enrichment failures never turn a readable auth state into an error, and non-JSON output is unchanged.
+
+### Why
+
+- Scripts consuming `auth check --json` need visibility into a provider's credential pool without parsing auth.json themselves.
+
+### Why an extension could not handle it
+
+- The auth-check CLI output is composed in the entrypoint's command handling, which extensions cannot alter.
+
+### Expected merge conflict zones
+
+- LOW: one enrichment block in the auth-check branch.
+
 ## 2026-08-25 - Keep JSON startup logging off stdout
 
 ### What changed
@@ -36,7 +72,7 @@
 
 ### Why
 
-These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that the new upstream tree does not carry; the sync must re-assert them on top of upstream's tree.
 
 ### Why this lives in the fork
 
@@ -138,6 +174,42 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 ### Expected merge conflict zones
 
 - LOW: `packages/coding-agent/src/main.ts` mode imports and the final interactive dispatch branch.
+## Export client-side RPC socket host ensuring (2026-08-24)
+
+### What changed
+
+- `packages/coding-agent/src/index.ts` and `packages/coding-agent/src/modes/index.ts` export `ensureHost`, its state-path helper, result/options types, and the pinned shared-host capability profile.
+
+### Why
+
+- Desktop and other package consumers need to auto-start or reuse the compatible shared RPC socket host through a supported library API.
+
+### Why an extension could not handle it
+
+- The package entry point owns the supported programmatic API before any session or extension runtime exists.
+
+### Expected merge conflict zones
+
+- LOW: additive RPC exports in the two index modules.
+
+## Route RPC listen addresses into the shared multi-session host (2026-08-23)
+
+### What changed
+
+- `packages/coding-agent/src/main.ts` forwards the parsed RPC `--listen` address to `runMultiSessionHost` while preserving the existing no-default-runtime startup branch.
+
+### Why
+
+- The Unix-socket transport must own one process-global multi-session host rather than constructing the classic single-session runtime before binding.
+
+### Why an extension could not handle it
+
+- Main-mode dispatch and pre-runtime host selection happen before session extensions exist.
+
+### Expected merge conflict zones
+
+- LOW: the existing multi-session dispatch object in `main.ts`.
+
 
 ## 2026-08-22 - emit agent_idle after settlement-deferred turns resolve
 

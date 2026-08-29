@@ -1,5 +1,23 @@
 # changes
 
+## Provider-neutral account app-server routes (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/modes/app-server/server/account.ts`: `account/providerAccounts/{read,pin,remove}` now dispatch to `core/credential-accounts.ts` (read handler became async), so desktop account management works for every provider instead of only the claude-sdk-oauth lane. Change notifications keep flowing through the same `account-events` bus.
+
+### Why
+
+- The desktop account picker should show and manage any provider's credential pool.
+
+### Why an extension could not handle it
+
+- App-server route registration is core server wiring.
+
+### Expected merge conflict zones
+
+- LOW: import block and the three handlers.
+
 ## Force daemon children onto Node and contain ws server errors (2026-08-25)
 
 ### What changed

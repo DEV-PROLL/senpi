@@ -186,10 +186,12 @@ import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinki
 import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { composeFilesystemPolicies } from "./tools/filesystem-policy.ts";
-import { createAllToolDefinitions } from "./tools/index.ts";
+import { createAllToolDefinitions, temporarilyDisabledToolNames } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
+/** Built-in shell tools routed exclusively through eval when experimental.bashEvalOnly is enabled. */
+const EVAL_ONLY_POLICY_TOOL_NAMES: readonly string[] = ["bash", "powershell"];
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 const DEFERRED_RETRY_QUEUE_OWNERS = new WeakSet<object>();
 
@@ -393,6 +395,7 @@ export type AgentSessionEvent =
 			type: "queue_update";
 			steering: readonly string[];
 			followUp: readonly string[];
+			ordered: readonly { text: string; mode: "steer" | "followUp"; enqueueOrder: number }[];
 	  }
 	| { type: "compaction_start"; reason: CompactionReason; requestId?: string }
 	| {
@@ -551,6 +554,8 @@ export interface AgentSessionConfig {
 	initialActiveToolNames?: string[];
 	/** Configured built-in defaults; fork-native builtin extension tools outside this set are omitted. */
 	defaultToolNames?: string[];
+	/** Tool names that remain executable only through the registered eval tool. */
+	evalOnlyToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -889,6 +894,7 @@ export class AgentSession {
 	// response must not retrigger threshold compaction from stale provider usage.
 	private _skipNextPostRetryCompactionCheck = false;
 	private _blockedPostCompactionAssistant: { assistant: AssistantMessage; revision: number } | undefined;
+	private _delegatedCompactionKey: { provider: string; id: string } | undefined;
 	private _skipNextPostCompactionAssistantCheck = false;
 	private _scheduledContinuationRecompacted = false;
 	private readonly _assistantsPendingAtCompaction = new WeakSet<AssistantMessage>();
@@ -947,6 +953,13 @@ export class AgentSession {
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _defaultToolNames?: Set<string>;
+	private _evalOnlyToolNames?: ReadonlySet<string>;
+	/** Explicit config override; when supplied it wins over the settings-derived policy across reloads. */
+	private readonly _evalOnlyToolNamesOverride?: ReadonlySet<string>;
+	/** Policy tools withheld from the model, retained so disarming can restore direct access. */
+	private readonly _withheldEvalOnlyToolNames = new Set<string>();
+	/** Active-tool selection as requested by callers, before eval-only filtering. */
+	private _requestedActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -1059,6 +1072,8 @@ export class AgentSession {
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._defaultToolNames = config.defaultToolNames ? new Set(config.defaultToolNames) : undefined;
+		this._evalOnlyToolNamesOverride = config.evalOnlyToolNames ? new Set(config.evalOnlyToolNames) : undefined;
+		this._evalOnlyToolNames = this._resolveEvalOnlyToolNames();
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -1525,6 +1540,7 @@ export class AgentSession {
 			type: "queue_update",
 			steering: [...this._steeringMessages],
 			followUp: [...this._followUpMessages],
+			ordered: [...this._queuedInputOrder].sort((a, b) => a.enqueueOrder - b.enqueueOrder),
 		});
 	}
 
@@ -1572,6 +1588,7 @@ export class AgentSession {
 	private _invalidateCompactionForModelSelection(): void {
 		this.abortCompaction();
 		this.abortBranchSummary();
+		this._delegatedCompactionKey = undefined;
 		this._incrementMessageRevision();
 	}
 
@@ -2157,7 +2174,8 @@ export class AgentSession {
 			) {
 				this._retireFailedRetryAssistant(msg);
 				compactedBeforeRetry = await this._runPrePromptCompaction(msg, true, requiredAutoCompaction, true);
-				retryContinuationBlocked = !compactedBeforeRetry && !this._isCompactionDelegated();
+				retryContinuationBlocked =
+					!compactedBeforeRetry && !this._isCompactionDelegated() && !cursorQuotaRe && !hardErrorFallbackEligible;
 			}
 
 			let retryOutcome: "continued" | "blocked" | "not-handled" | "cancelled" = "not-handled";
@@ -2758,6 +2776,9 @@ export class AgentSession {
 	): Promise<AgentToolResult<TDetails>> {
 		let activeTools = this.getActiveToolNames();
 		let tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		if (!tool && this._isEvalOnlyPolicyArmed() && this._evalOnlyToolNames?.has(toolName)) {
+			tool = this._toolRegistry.get(toolName);
+		}
 		if (
 			!tool &&
 			options?.activateInactiveTool === true &&
@@ -2859,6 +2880,28 @@ export class AgentSession {
 		return this._lazyToolActivators.some((activate) => activate(toolName));
 	}
 
+	private _isEvalOnlyPolicyArmed(): boolean {
+		return this._evalOnlyToolNames !== undefined && this._toolRegistry.has("eval");
+	}
+
+	/**
+	 * Resolve the eval-only policy from settings so a reload picks up a flag change.
+	 * An explicitly configured set stays authoritative for SDK embedders and tests.
+	 */
+	private _resolveEvalOnlyToolNames(): ReadonlySet<string> | undefined {
+		if (this._evalOnlyToolNamesOverride !== undefined) return this._evalOnlyToolNamesOverride;
+		return this.settingsManager.getExperimentalBashEvalOnly() ? new Set(EVAL_ONLY_POLICY_TOOL_NAMES) : undefined;
+	}
+
+	/** Publish per-tool eval-only redirect hints so a direct call names its own eval helper. */
+	private _publishEvalOnlyToolHints(): void {
+		if (!this._isEvalOnlyPolicyArmed()) return;
+		for (const name of this._evalOnlyToolNames ?? []) {
+			this.agent.removedToolHints[name] =
+				`Run ${name} inside an eval cell via tool.${name}({ command: "..." }); hooks and permissions still apply.`;
+		}
+	}
+
 	/**
 	 * Set active tools by name.
 	 * Only tools in the registry can be enabled. Unknown tool names are ignored.
@@ -2900,7 +2943,21 @@ export class AgentSession {
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
-		for (const name of toolNames) {
+		const policyArmed = this._isEvalOnlyPolicyArmed();
+		this._publishEvalOnlyToolHints();
+		const policyNames = this._evalOnlyToolNames;
+		let filteredToolNames = toolNames;
+		if (policyArmed && policyNames) {
+			for (const name of toolNames) {
+				if (policyNames.has(name)) this._withheldEvalOnlyToolNames.add(name);
+			}
+			filteredToolNames = toolNames.filter((name) => !policyNames.has(name));
+		} else {
+			this._withheldEvalOnlyToolNames.clear();
+		}
+		// Remember the unfiltered request so a later disarm can restore withheld shell tools.
+		this._requestedActiveToolNames = [...new Set([...toolNames, ...this._withheldEvalOnlyToolNames])];
+		for (const name of filteredToolNames) {
 			const tool = this._toolRegistry.get(name);
 			if (tool) {
 				tools.push(tool);
@@ -3087,9 +3144,13 @@ export class AgentSession {
 			appendSystemPrompt: loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined,
 		};
 		const basePrompt = loaderSystemPrompt ?? buildDynamicSystemPrompt(this._baseSystemPromptOptions);
-		return loaderAppendSystemPrompt.length > 0
-			? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}`
-			: basePrompt;
+		const prompt =
+			loaderAppendSystemPrompt.length > 0 ? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}` : basePrompt;
+		if (!this._isEvalOnlyPolicyArmed()) return prompt;
+		const helpers = [...(this._evalOnlyToolNames ?? [])]
+			.map((name) => `tool.${name}({ command: "..." })`)
+			.join(" or ");
+		return `${prompt}\n\nShell commands run ONLY inside eval cells via ${helpers}; hooks and permissions still apply.`;
 	}
 
 	/**
@@ -4275,7 +4336,12 @@ export class AgentSession {
 		},
 	): Promise<SystemPromptChangeEvent | undefined> {
 		const previousModel = this.model;
-		if (opts.invalidateCompaction && this._modelSelectionChangesContext(previousModel, model)) {
+		if (
+			opts.invalidateCompaction &&
+			(this._modelSelectionChangesContext(previousModel, model) ||
+				previousModel?.provider !== model.provider ||
+				previousModel?.id !== model.id)
+		) {
 			this._invalidateCompactionForModelSelection();
 		}
 		const thinking = this._getThinkingForModelSwitch(model, opts.ephemeralThinkingLevel);
@@ -4361,7 +4427,10 @@ export class AgentSession {
 			nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		}
 		const next = favoriteModels[nextIndex];
-		const invalidatesCompaction = this._modelSelectionChangesContext(currentModel, next.model);
+		const invalidatesCompaction =
+			this._modelSelectionChangesContext(currentModel, next.model) ||
+			currentModel?.provider !== next.model.provider ||
+			currentModel?.id !== next.model.id;
 		if (invalidatesCompaction) {
 			this._invalidateCompactionForModelSelection();
 		}
@@ -5261,6 +5330,7 @@ export class AgentSession {
 			) {
 				throw new CompactionCancelledError();
 			}
+			this._delegatedCompactionKey = undefined;
 			if (request.owner === "compaction" && this._compactionAbortController === request.controller) {
 				this._compactionAbortController = undefined;
 			}
@@ -5376,6 +5446,9 @@ export class AgentSession {
 		// also emitted with accepted:false so the compaction extension's circuit-breaker
 		// bookkeeping stops being dead code; other builtin session_compact handlers guard
 		// on event.accepted.
+		if (rejectionCause === "external-owner" && this.model) {
+			this._delegatedCompactionKey = { provider: this.model.provider, id: this.model.id };
+		}
 		const trimmedExtensionReason = extensionReason?.trim();
 		const detailedMessage = trimmedExtensionReason
 			? `Compaction rejected: ${trimmedExtensionReason}`
@@ -5767,14 +5840,12 @@ export class AgentSession {
 	}
 
 	private _isCompactionDelegated(): boolean {
-		const state = this._compactionLifecycle.state;
 		const model = this.model;
 		return (
-			state.status === "failed" &&
-			state.rejectionCause === "external-owner" &&
-			state.model !== undefined &&
+			this._delegatedCompactionKey !== undefined &&
 			model !== undefined &&
-			state.model.provider === model.provider
+			this._delegatedCompactionKey.provider === model.provider &&
+			this._delegatedCompactionKey.id === model.id
 		);
 	}
 
@@ -5785,6 +5856,7 @@ export class AgentSession {
 		willRetry = false,
 		allowSummaryOnly = false,
 	): Promise<boolean> {
+		if (this._isCompactionDelegated()) return false;
 		const controller = new AbortController();
 		const requestId = randomUUID();
 		this._claimCompactionController(controller, "compaction");
@@ -5974,6 +6046,7 @@ export class AgentSession {
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+		if (this._isCompactionDelegated()) return false;
 		const finishCompactionWork = this._sessionWorkBarrier.begin();
 		const agentMessagesAtStart = this.agent.state.messages.slice();
 		const autoCompactionController = new AbortController();
@@ -6234,6 +6307,7 @@ export class AgentSession {
 	}
 
 	private _refreshCurrentModelFromRegistry(): void {
+		this._delegatedCompactionKey = undefined;
 		const currentModel = this.model;
 		if (!currentModel) {
 			return;
@@ -6579,9 +6653,12 @@ export class AgentSession {
 				}),
 			})),
 		].filter((tool) => isAllowedTool(tool.definition.name));
+		// Withheld tools stay in _baseToolDefinitions (and therefore in _toolRegistry, which
+		// getRegisteredTool serves to the Cursor exec bridge) but are dropped from the model-facing
+		// definitions so they never reach the prompt. See temporarilyDisabledToolNames.
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
-				.filter(([name]) => isAllowedTool(name))
+				.filter(([name]) => isAllowedTool(name) && !temporarilyDisabledToolNames.has(name))
 				.map(([name, definition]) => [
 					name,
 					{
@@ -6632,15 +6709,23 @@ export class AgentSession {
 			toolRegistry.set(tool.name, tool);
 		}
 		this._toolRegistry = toolRegistry;
+		this._publishEvalOnlyToolHints();
 		const isDirectlyExposed = (name: string): boolean => {
 			const entry = this._toolDefinitions.get(name);
 			return entry !== undefined && normalizeToolExposure(entry.definition).exposure === "direct";
 		};
 
+		// A withheld tool is dropped from the DEFAULT selection only. An explicit activeToolNames
+		// request names the tool deliberately, and callers that do so (tests, SDK embedders,
+		// filesystem-policy wiring) still expect it to activate.
+		const hasExplicitActiveToolNames = options?.activeToolNames !== undefined;
 		const nextActiveToolNames = (
-			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
+			options?.activeToolNames
+				? [...options.activeToolNames]
+				: [...(this._requestedActiveToolNames ?? previousActiveToolNames)]
 		).filter((name) => {
 			if (!isAllowedTool(name)) return false;
+			if (!hasExplicitActiveToolNames && temporarilyDisabledToolNames.has(name)) return false;
 			const previousRegistrationIds = options?.previousActiveToolRegistrationIds;
 			if (!previousRegistrationIds) return true;
 			const current = this._toolDefinitions.get(name);
@@ -6677,6 +6762,7 @@ export class AgentSession {
 		includeAllExtensionTools?: boolean;
 		previousActiveToolRegistrationIds?: ReadonlyMap<string, string>;
 	}): void {
+		this._delegatedCompactionKey = undefined;
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
@@ -6748,7 +6834,9 @@ export class AgentSession {
 		const oldExtensionIdentities = oldExtensionRunner.getExtensionIdentities();
 		const previousFlagValues = oldExtensionRunner.getFlagValues();
 		const previousActiveToolRegistrationIds = new Map<string, string>();
-		for (const name of this.getActiveToolNames()) {
+		// Cover withheld eval-only tools too: the rebuild drops any seeded name missing from this
+		// map, which would strand shell tools when the policy disarms during this reload.
+		for (const name of this._requestedActiveToolNames ?? this.getActiveToolNames()) {
 			const entry = this._toolDefinitions.get(name);
 			if (entry) previousActiveToolRegistrationIds.set(name, deriveExtensionRegistrationId(entry.sourceInfo, name));
 		}
@@ -6758,6 +6846,12 @@ export class AgentSession {
 		});
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
+		this._delegatedCompactionKey = undefined;
+		// Capture the unfiltered request BEFORE the rebuild reassigns it, so a policy that
+		// disarms during this reload can still restore its withheld shell tools.
+		const requestedActiveToolNamesBeforeRebuild = [...(this._requestedActiveToolNames ?? this.getActiveToolNames())];
+		// A flag change must take effect on reload, matching documented settings hot-reload behavior.
+		this._evalOnlyToolNames = this._resolveEvalOnlyToolNames();
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		time("settings", "reload");
@@ -6787,7 +6881,7 @@ export class AgentSession {
 		time("resources", "reload");
 		try {
 			this._buildRuntime({
-				activeToolNames: this.getActiveToolNames(),
+				activeToolNames: requestedActiveToolNamesBeforeRebuild,
 				flagValues: previousFlagValues,
 				includeAllExtensionTools: true,
 				previousActiveToolRegistrationIds,
@@ -7070,6 +7164,14 @@ export class AgentSession {
 				errorMessage,
 			});
 			if (!switchedFallback) {
+				const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+				if (exhaustedChainKey) {
+					this._emit({
+						type: "retry_fallback_exhausted",
+						chainKey: exhaustedChainKey,
+						lastError: errorMessage,
+					});
+				}
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -7863,6 +7965,7 @@ export class AgentSession {
 
 			// Update agent state (preserving exact messages still awaiting persistence)
 			this._restoreAgentMessagesFromSession();
+			this._delegatedCompactionKey = undefined;
 			this._incrementMessageRevision();
 
 			// Emit session_tree event

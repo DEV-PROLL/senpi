@@ -354,10 +354,16 @@ export {
 export { type MainOptions, main } from "./main.ts";
 // Run modes for programmatic SDK usage
 export {
+	createHostDaemonPaths,
+	type EnsuredHost,
+	type EnsureHostOptions,
+	ensureHost,
+	type HostDaemonPaths,
 	InteractiveMode,
 	type InteractiveModeOptions,
 	type JsonAgentSessionEvent,
 	type ModelInfo,
+	PINNED_HOST_CLIENT_CAPABILITIES,
 	type PrintModeOptions,
 	RpcClient,
 	type RpcClientEvent,

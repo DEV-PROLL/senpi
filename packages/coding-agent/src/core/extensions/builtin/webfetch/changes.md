@@ -77,6 +77,27 @@ Vendored from [`code-yeongyu/pi-webfetch`](https://github.com/code-yeongyu/pi-we
   boundary must be re-applied together with the `HeadersInit` patch noted below.
 - `webfetch/content.ts` itself is untouched, so a re-vendor of that file cannot conflict.
 
+## 2026-08-26 - Port pi-webfetch PR #8 regression coverage
+
+### What changed
+
+- Added the one-redirect end-to-end regression, including final markdown content and the exact visited path sequence.
+- Strengthened explicit-article extraction coverage with a module-level Readability parse counter so the test fails if fallback parsing runs.
+- Added discard-body coverage for a body already destroyed before cleanup; existing senpi coverage already exercises dump success/failure, no-dump draining, drain errors, aborts, and the response-size bound.
+
+### Why
+
+- The merged upstream PR #8 added redirect and mutation-sensitive explicit-article regressions plus dump feature-detection coverage. Senpi already contains the corresponding cleanup implementation and stronger drain lifecycle coverage, but lacked these specific regression assertions.
+- Senpi retains `on?.("error")` rather than upstream's `once("error")`: the vendored response-body contract allows bodies without an error-listener API, and the optional registration guards both Bun-compatible bare bodies and Undici bodies without changing cleanup semantics. No defect was found requiring a semantic change.
+
+### Why an extension could not handle it
+
+- Redirect body disposal occurs inside the vendored fetcher's private request loop, before the webfetch extension receives a response. The explicit article and response-body test coverage targets vendored builtin modules directly.
+
+### Expected merge conflict zones
+
+- LOW in the webfetch suite tests and `changes.md`; production webfetch implementation is unchanged.
+
 ## Conflict zones
 
 Re-vendoring overwrites these files; this is a MANUAL_PACKAGES entry in `scripts/sync-builtin-extensions.mjs` (metadata only, no auto file-sync). Re-apply the `HeadersInit` patch and Tistory article/noise selector behavior after re-running the transform, then re-check `npm run check`. A jsdom upgrade can also change the worker lookup patched by `scripts/prepare-bun-compile-assets.mjs`; keep its fixture and the explicit worker entrypoints in `scripts/build-binaries.sh` and `packages/coding-agent/package.json` aligned.
