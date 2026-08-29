@@ -125,4 +125,13 @@ describe("GLM 5.3 openai-completions reasoning effort", () => {
 		const params = await captureParams(glm53OnZai());
 		expect(params.thinking?.type).toBe("enabled");
 	});
+
+	it.each(["glm-5.3-turbo", "glm-5.3-xl", "glm-5.3-anything-else"])(
+		"does not force thinking or reasoning metadata for unsupported %s variants",
+		async (id) => {
+			const params = await captureParams(glm53OnZai(id));
+			expect(params.thinking?.type).toBe("disabled");
+			expect(params.reasoning_effort).toBeUndefined();
+		},
+	);
 });

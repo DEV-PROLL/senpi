@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { setKittyProtocolActive } from "./keys.ts";
+import { isMultiplexerSession } from "./mux.ts";
 import { isNativeModifierPressed } from "./native-modifiers.ts";
 import { getNativeModuleCandidates } from "./native-module-path.ts";
 import { StdinBuffer } from "./stdin-buffer.ts";
@@ -63,6 +64,37 @@ export function normalizeNativeShiftEnterInput(
 
 export function normalizeAppleTerminalInput(data: string, isAppleTerminal: boolean, isShiftPressed: boolean): string {
 	return normalizeNativeShiftEnterInput(data, isAppleTerminal, isShiftPressed);
+}
+
+export function normalizeWarpWslShiftEnterInput(
+	data: string,
+	env: NodeJS.ProcessEnv = process.env,
+	platform: NodeJS.Platform = process.platform,
+	socketExists: (socketPath: string) => boolean = (socketPath) => {
+		try {
+			return fs.statSync(socketPath).isSocket();
+		} catch {
+			return false;
+		}
+	},
+): string {
+	if (data !== "\n" || platform !== "linux") return data;
+	if (
+		isMultiplexerSession(env) ||
+		env.SSH_CONNECTION?.trim() ||
+		env.SSH_CLIENT?.trim() ||
+		env.SSH_TTY?.trim()
+	) {
+		return data;
+	}
+	const isWarp = Boolean(env.WARP_SESSION_ID?.trim() || env.WARP_TERMINAL_SESSION_UUID?.trim());
+	const interopPath = env.WSL_INTEROP?.trim();
+	const isWsl =
+		isWarp &&
+		interopPath !== undefined &&
+		/^\/run\/WSL\/\d+_interop$/.test(interopPath) &&
+		socketExists(interopPath);
+	return isWarp && isWsl ? NATIVE_SHIFT_ENTER_SEQUENCE : data;
 }
 
 export function keyboardEnhancementEnabled(): boolean {

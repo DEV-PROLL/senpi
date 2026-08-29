@@ -9,6 +9,7 @@ import {
 	isImageMarker,
 } from "../image-markers.ts";
 import { getKeybindings } from "../keybindings.ts";
+import { normalizeWarpWslShiftEnterInput } from "../terminal.ts";
 import { decodePrintableKey, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
 import {
@@ -261,6 +262,10 @@ export interface EditorTheme {
 export interface EditorOptions {
 	paddingX?: number;
 	autocompleteMaxVisible?: number;
+	/** Test seam for terminal-specific input normalization. */
+	terminalEnvironment?: NodeJS.ProcessEnv;
+	terminalPlatform?: NodeJS.Platform;
+	terminalSocketExists?: (socketPath: string) => boolean;
 }
 
 const SLASH_COMMAND_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
@@ -308,6 +313,9 @@ export class Editor implements Component, Focusable {
 	protected tui: TUI;
 	private theme: EditorTheme;
 	private paddingX: number = 0;
+	private terminalEnvironment?: NodeJS.ProcessEnv;
+	private terminalPlatform?: NodeJS.Platform;
+	private terminalSocketExists?: (socketPath: string) => boolean;
 
 	// Store last render width for cursor navigation
 	private lastWidth: number = 80;
@@ -405,6 +413,9 @@ export class Editor implements Component, Focusable {
 		this.borderColor = theme.borderColor;
 		const paddingX = options.paddingX ?? 0;
 		this.paddingX = Number.isFinite(paddingX) ? Math.max(0, Math.floor(paddingX)) : 0;
+		this.terminalEnvironment = options.terminalEnvironment;
+		this.terminalPlatform = options.terminalPlatform;
+		this.terminalSocketExists = options.terminalSocketExists;
 		const maxVisible = options.autocompleteMaxVisible ?? 5;
 		this.autocompleteMaxVisible = Number.isFinite(maxVisible) ? Math.max(3, Math.min(20, Math.floor(maxVisible))) : 5;
 	}
@@ -740,6 +751,12 @@ export class Editor implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
+		data = normalizeWarpWslShiftEnterInput(
+			data,
+			this.terminalEnvironment,
+			this.terminalPlatform,
+			this.terminalSocketExists,
+		);
 		const kb = getKeybindings();
 
 		// Handle character jump mode (awaiting next character to jump to)
