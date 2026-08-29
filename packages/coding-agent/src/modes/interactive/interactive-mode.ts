@@ -4623,7 +4623,28 @@ export class InteractiveMode {
 				InteractiveMode.restoreCompactionEscapeOverride(this);
 				this.clearStatusIndicator("compaction");
 				this.autoCompactionProgressText = "";
-				if (event.aborted) {
+				// Checked before `aborted`: production external-owner rejections are
+				// emitted via `_rejectCompaction(..., true, reason)` and carry
+				// `aborted: true`, so this branch must win for auto reasons or the
+				// delegation state renders as a per-turn red error.
+				if (event.rejectionCause === "external-owner" && event.reason !== "manual") {
+					// Auto compaction is delegated to an external owner (Claude Agent SDK).
+					// This is expected state, not an error: surface it at most once per
+					// delegation episode as a muted informational line and mark the footer
+					// so the saturated context meter reads as "handled natively".
+					if (!this.externalOwnerCompactionNoticeShown) {
+						this.externalOwnerCompactionNoticeShown = true;
+						this.chatContainer.addChild(new Spacer(1));
+						this.chatContainer.addChild(
+							new Text(
+								theme.fg("muted", "The Claude Agent SDK manages and compacts this session's context natively."),
+								1,
+								0,
+							),
+						);
+					}
+					this.footer?.setCompactionDelegated?.(true);
+				} else if (event.aborted) {
 					// Prefer the extension-provided reason over the generic "cancelled"
 					// label so per-turn-cap / circuit-breaker / provider-error cancels are
 					// no longer indistinguishable from a user-triggered abort.
@@ -4683,23 +4704,6 @@ export class InteractiveMode {
 					// A real compaction landed: the delegation episode (if any) is over.
 					this.externalOwnerCompactionNoticeShown = false;
 					this.footer?.setCompactionDelegated?.(false);
-				} else if (event.rejectionCause === "external-owner" && event.reason !== "manual") {
-					// Auto compaction is delegated to an external owner (Claude Agent SDK).
-					// This is expected state, not an error: surface it at most once per
-					// delegation episode as a muted informational line and mark the footer
-					// so the saturated context meter reads as "handled natively".
-					if (!this.externalOwnerCompactionNoticeShown) {
-						this.externalOwnerCompactionNoticeShown = true;
-						this.chatContainer.addChild(new Spacer(1));
-						this.chatContainer.addChild(
-							new Text(
-								theme.fg("muted", "The Claude Agent SDK manages and compacts this session's context natively."),
-								1,
-								0,
-							),
-						);
-					}
-					this.footer?.setCompactionDelegated?.(true);
 				} else if (event.errorMessage) {
 					const errorMessage = sanitizeTerminalLabel(event.errorMessage);
 					if (event.reason === "manual") {
@@ -4781,6 +4785,10 @@ export class InteractiveMode {
 					why: `Retry switched models (${event.reason}); the turn continues on ${event.to}.`,
 				});
 				this.setExtensionStatus(FALLBACK_STATUS_KEY, `fallback: ${event.to}`);
+				// Provider/model failover ends any external-owner delegation episode:
+				// the fallback model does not inherit SDK-owned compaction state.
+				this.externalOwnerCompactionNoticeShown = false;
+				this.footer?.setCompactionDelegated?.(false);
 				break;
 			}
 
@@ -5419,6 +5427,11 @@ export class InteractiveMode {
 	}
 
 	renderInitialMessages(): void {
+		// Any full transcript rerender ends the external-owner delegation episode:
+		// the rendered notice is gone, so the guard must re-arm and the footer
+		// marker must not persist as stale state.
+		this.externalOwnerCompactionNoticeShown = false;
+		this.footer?.setCompactionDelegated?.(false);
 		const entries = this.sessionManager.buildContextEntries();
 		this.renderSessionEntries(entries, {
 			updateFooter: true,
@@ -5498,6 +5511,10 @@ export class InteractiveMode {
 	}
 
 	private rebuildChatFromMessages(): void {
+		// Transcript rebuild wipes the rendered notice; re-arm the delegation
+		// episode so the next external-owner rejection surfaces it again.
+		this.externalOwnerCompactionNoticeShown = false;
+		this.footer?.setCompactionDelegated?.(false);
 		try {
 			this.sessionManager?.reloadFromDisk?.();
 		} catch {
@@ -5854,6 +5871,9 @@ export class InteractiveMode {
 				this.showStatus(msg);
 			} else {
 				this.footer.invalidate();
+				// A model switch ends any external-owner delegation episode.
+				this.externalOwnerCompactionNoticeShown = false;
+				this.footer?.setCompactionDelegated?.(false);
 				this.updateEditorBorderColor();
 				const thinkingStr =
 					result.model.reasoning && result.thinkingLevel !== "off" ? ` (thinking: ${result.thinkingLevel})` : "";

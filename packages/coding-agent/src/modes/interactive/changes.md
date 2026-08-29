@@ -9,12 +9,19 @@
   natively.") at most once per delegation episode, instead of repainting a red error line on every
   rejected attempt. Manual `/compact` rejections keep their explicit error feedback. The episode is
   tracked entirely in the interactive layer from observed `compaction_end` events: it starts on an
-  external-owner rejection and the one-time notice re-arms on a successful compaction, a model switch,
-  or a session rebind; the logic does not depend on repeat rejection events arriving (the core
-  attempt-suppression half of #1174 lands separately).
+  external-owner rejection and the one-time notice re-arms on a successful compaction, a model switch
+  (selector, keyboard/favorite `cycleModel`, or retry provider failover via `retry_fallback_applied`),
+  a session rebind, or any full transcript rerender (`renderInitialMessages`/`rebuildChatFromMessages`,
+  covering branch/tree navigation, reload, and settings-driven rebuilds); the logic does not depend on
+  repeat rejection events arriving (the core attempt-suppression half of #1174 lands separately). The
+  external-owner branch is checked before the `aborted` branch because production rejections are
+  emitted via `_rejectCompaction(..., true, reason)` and carry `aborted: true`.
 - `components/footer.ts`: the context meter appends an ` (SDK)` marker while a delegation episode is
   active, so a saturated meter reads as "compacted natively by the SDK" rather than a stall. The marker
-  rides the existing tail segment and respects the footer width ladder.
+  rides the existing tail segment and respects the footer width ladder; when head elision would leave a
+  chopped fragment (e.g. "…SDK)"), the layout is re-planned without the marker so it renders complete or
+  not at all. The marker stays muted even when the >90% meter is error-tinted — delegation is expected
+  state, not alarm.
 - `grok/chrome.ts`: `InteractiveFooter` gains the optional `setCompactionDelegated` seam that feeds the
   marker.
 
