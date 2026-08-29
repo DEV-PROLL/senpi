@@ -1,5 +1,11 @@
 # changes
 
+## 2026-08-29 - Render external-owner compaction delegation once, as state (#1174 UX half)
+
+- Auto compaction rejections with `rejectionCause: "external-owner"` now render a single muted informational line ("The Claude Agent SDK manages and compacts this session's context natively.") at most once per delegation episode, instead of repainting a red error line on every rejected attempt. Manual `/compact` rejections keep their explicit error feedback.
+- A delegation episode is tracked entirely in the interactive layer from observed `compaction_end` events: it starts on an external-owner rejection and the one-time notice re-arms on a successful compaction, a model switch, or a session rebind. The logic does not depend on repeat rejection events arriving (the core attempt-suppression half of #1174 lands separately).
+- The footer context meter appends an ` (SDK)` marker while a delegation episode is active (`FooterComponent.setCompactionDelegated`, optional on `InteractiveFooter`), so a saturated meter reads as "compacted natively by the SDK" rather than a stall. The marker rides the existing tail segment and respects the footer width ladder.
+
 ## 2026-08-28 - Hydrate setup-only proxy mirrors from host state
 
 - Proxy refresh now hydrates the explicit session path with authoritative host entries when deferred persistence has not created the file yet, so setup entries are visible immediately in replacement contexts.

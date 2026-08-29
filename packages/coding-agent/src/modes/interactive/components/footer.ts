@@ -99,6 +99,7 @@ export class FooterComponent implements Component {
 	private session: InteractiveSession;
 	private footerData: ReadonlyFooterDataProvider;
 	private autoCompactEnabled = true;
+	private compactionDelegated = false;
 
 	constructor(session: InteractiveSession, footerData: ReadonlyFooterDataProvider) {
 		this.session = session;
@@ -111,6 +112,15 @@ export class FooterComponent implements Component {
 
 	setAutoCompactEnabled(enabled: boolean): void {
 		this.autoCompactEnabled = enabled;
+	}
+
+	/**
+	 * Marks the context meter while an external owner (the Claude Agent SDK)
+	 * manages compaction natively, so a saturated meter reads as delegated
+	 * rather than stalled.
+	 */
+	setCompactionDelegated(delegated: boolean): void {
+		this.compactionDelegated = delegated;
 	}
 
 	/**
@@ -186,10 +196,11 @@ export class FooterComponent implements Component {
 		}
 
 		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
+		const delegationIndicator = this.compactionDelegated ? " (SDK)" : "";
 		const ctxDisplay =
 			contextPercent === "?"
-				? `${contextTokens}/${formatTokens(contextWindow)} (?)${autoIndicator}`
-				: `${contextTokens}/${formatTokens(contextWindow)} (${contextPercent}%)${autoIndicator}`;
+				? `${contextTokens}/${formatTokens(contextWindow)} (?)${autoIndicator}${delegationIndicator}`
+				: `${contextTokens}/${formatTokens(contextWindow)} (${contextPercent}%)${autoIndicator}${delegationIndicator}`;
 		const ctxColored =
 			contextPercentValue > 90
 				? theme.fg("error", ctxDisplay)

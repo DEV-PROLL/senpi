@@ -920,6 +920,12 @@ export class InteractiveMode {
 	// Auto-compaction state
 	private autoCompactionEscapeHandler?: () => void;
 	private compactionEscapeOverrideActive = false;
+	/**
+	 * One-time notice guard for the external-owner compaction delegation episode
+	 * (e.g. the Claude Agent SDK owning compaction). Armed while true; re-armed by
+	 * a successful compaction, a model switch, or a session rebind.
+	 */
+	private externalOwnerCompactionNoticeShown = false;
 	private autoCompactionProgressText = "";
 
 	// Auto-retry state
@@ -2597,6 +2603,9 @@ export class InteractiveMode {
 
 	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
 		InteractiveMode.restoreCompactionEscapeOverride(this);
+		// A session switch/reset ends any external-owner delegation episode.
+		this.externalOwnerCompactionNoticeShown = false;
+		this.footer.setCompactionDelegated?.(false);
 		const session = this.session;
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -4671,6 +4680,26 @@ export class InteractiveMode {
 						this.addMessageToChat(summaryMessage);
 					}
 					this.footer.invalidate();
+					// A real compaction landed: the delegation episode (if any) is over.
+					this.externalOwnerCompactionNoticeShown = false;
+					this.footer.setCompactionDelegated?.(false);
+				} else if (event.rejectionCause === "external-owner" && event.reason !== "manual") {
+					// Auto compaction is delegated to an external owner (Claude Agent SDK).
+					// This is expected state, not an error: surface it at most once per
+					// delegation episode as a muted informational line and mark the footer
+					// so the saturated context meter reads as "handled natively".
+					if (!this.externalOwnerCompactionNoticeShown) {
+						this.externalOwnerCompactionNoticeShown = true;
+						this.chatContainer.addChild(new Spacer(1));
+						this.chatContainer.addChild(
+							new Text(
+								theme.fg("muted", "The Claude Agent SDK manages and compacts this session's context natively."),
+								1,
+								0,
+							),
+						);
+					}
+					this.footer.setCompactionDelegated?.(true);
 				} else if (event.errorMessage) {
 					const errorMessage = sanitizeTerminalLabel(event.errorMessage);
 					if (event.reason === "manual") {
@@ -6664,6 +6693,9 @@ export class InteractiveMode {
 		try {
 			const systemPromptChange = await this.session.setModel(model);
 			this.footer.invalidate();
+			// A model switch ends any external-owner delegation episode.
+			this.externalOwnerCompactionNoticeShown = false;
+			this.footer.setCompactionDelegated?.(false);
 			this.updateEditorBorderColor();
 			const systemPromptStr = systemPromptChange?.systemPromptName
 				? ` (optimized system prompt applied: ${systemPromptChange.systemPromptName})`
