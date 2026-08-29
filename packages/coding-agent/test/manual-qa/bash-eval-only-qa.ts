@@ -14,10 +14,10 @@ import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earen
 import { Type } from "typebox";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import { DefaultResourceLoader } from "../../src/core/resource-loader.ts";
-import { createInMemoryModelRegistry } from "../model-runtime-test-utils.ts";
 import { createAgentSession, type ExtensionFactory } from "../../src/core/sdk.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
+import { createInMemoryModelRegistry } from "../model-runtime-test-utils.ts";
 
 const [scratchDir, mode, outDir] = process.argv.slice(2);
 if (!scratchDir || !mode || !outDir) {
@@ -30,7 +30,7 @@ function log(line: string): void {
 	process.stdout.write(`${line}\n`);
 }
 
-const toolCallReceipts: Array<{ toolName: string; args: unknown }> = [];
+const toolCallReceipts: Array<{ toolName: string; input: unknown }> = [];
 
 async function main(): Promise<void> {
 	const agentDir = join(scratchDir, "agent-dir");
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
 			execute: async () => ({ content: [{ type: "text", text: "eval" }], details: {} }),
 		});
 		pi.on("tool_call", (event) => {
-			toolCallReceipts.push({ toolName: event.toolName, args: event.args });
+			toolCallReceipts.push({ toolName: event.toolName, input: event.input });
 		});
 	};
 
@@ -124,7 +124,12 @@ async function main(): Promise<void> {
 		log('## (ii) system prompt sentinel "tool.bash("');
 		log(`contains sentinel: ${sentinelIndex >= 0}`);
 		if (sentinelIndex >= 0) {
-			log(`sentinel line: ${prompt.slice(Math.max(0, sentinelIndex - 200), sentinelIndex + 120).split("\n").pop()}`);
+			log(
+				`sentinel line: ${prompt
+					.slice(Math.max(0, sentinelIndex - 200), sentinelIndex + 120)
+					.split("\n")
+					.pop()}`,
+			);
 		}
 		log("");
 
@@ -136,7 +141,6 @@ async function main(): Promise<void> {
 				.filter((part): part is { type: "text"; text: string } => part.type === "text")
 				.map((part) => part.text)
 				.join("\n");
-			log(`isError: ${result.isError === true}`);
 			log(`output contains "qa-ok": ${text.includes("qa-ok")}`);
 			log(`output: ${JSON.stringify(text.slice(0, 400))}`);
 		} catch (error) {
