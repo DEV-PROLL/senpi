@@ -617,10 +617,14 @@ export function createRpcConnectionHandler(
 	};
 
 	runtimeHost.setRebindSession(async () => {
-		await rebindSession();
+		// AgentSessionRuntime invokes this callback while completing a replacement.
+		// Do not await extension binding here: extensions may wait for session work
+		// that the replacement still owns. The command response must acknowledge the
+		// committed replacement; derived surfaces refresh out of band afterwards.
+		await rebindSession(true);
 	});
 
-	const rebindSession = async (): Promise<void> => {
+	const rebindSession = async (deferRefresh = false): Promise<void> => {
 		unsubscribeLoadedSurfaces?.();
 		unsubscribeExtensionEvents?.();
 		session = runtimeHost.session;
@@ -630,7 +634,7 @@ export function createRpcConnectionHandler(
 				})
 			: undefined;
 		subscribeLoadedSurfaceEvents();
-		await refreshLoadedSurfacesAfter(
+		const refresh = refreshLoadedSurfacesAfter(
 			() =>
 				session.bindExtensions({
 					uiContext: createExtensionUIContext(),
@@ -678,22 +682,32 @@ export function createRpcConnectionHandler(
 				}),
 			true,
 		);
-		unsubscribe?.();
-		unsubscribeBackpressure?.();
-		unsubscribe = session.subscribe((event) => {
-			if (event.type === "skill_invocation") {
-				outputEvent(event satisfies RpcSkillInvocationEvent);
-				return;
-			}
-			if (event.type === "command_invocation") {
-				outputEvent(event satisfies RpcCommandInvocationEvent);
-				return;
-			}
-			outputEvent(event);
-		});
-		unsubscribeBackpressure = session.agent.subscribe(async () => {
-			await waitForRpcBackpressure();
-		});
+		const installSessionSubscriptions = () => {
+			unsubscribe?.();
+			unsubscribeBackpressure?.();
+			unsubscribe = session.subscribe((event) => {
+				if (event.type === "skill_invocation") {
+					outputEvent(event satisfies RpcSkillInvocationEvent);
+					return;
+				}
+				if (event.type === "command_invocation") {
+					outputEvent(event satisfies RpcCommandInvocationEvent);
+					return;
+				}
+				outputEvent(event);
+			});
+			unsubscribeBackpressure = session.agent.subscribe(async () => {
+				await waitForRpcBackpressure();
+			});
+		};
+		if (deferRefresh) {
+			void refresh.then(installSessionSubscriptions, (cause) => {
+				outputEvent({ type: "rpc_error", error: String(cause) });
+			});
+			return;
+		}
+		await refresh;
+		installSessionSubscriptions();
 	};
 
 	/**
@@ -910,9 +924,6 @@ export function createRpcConnectionHandler(
 			case "new_session": {
 				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
 				const result = await runtimeHost.newSession(options);
-				if (!result.cancelled) {
-					await rebindSession();
-				}
 				return success(id, "new_session", result);
 			}
 
@@ -1145,17 +1156,11 @@ export function createRpcConnectionHandler(
 
 			case "switch_session": {
 				const result = await runtimeHost.switchSession(command.sessionPath, { cwdOverride: command.cwdOverride });
-				if (!result.cancelled) {
-					await rebindSession();
-				}
 				return success(id, "switch_session", result);
 			}
 
 			case "fork": {
 				const result = await runtimeHost.fork(command.entryId, { position: command.position });
-				if (!result.cancelled) {
-					await rebindSession();
-				}
 				return success(id, "fork", { text: result.selectedText, cancelled: result.cancelled });
 			}
 
@@ -1165,9 +1170,6 @@ export function createRpcConnectionHandler(
 					return error(id, "clone", "Cannot clone session: no current entry selected");
 				}
 				const result = await runtimeHost.fork(leafId, { position: "at" });
-				if (!result.cancelled) {
-					await rebindSession();
-				}
 				return success(id, "clone", { cancelled: result.cancelled });
 			}
 
@@ -1201,7 +1203,6 @@ export function createRpcConnectionHandler(
 
 			case "import_jsonl": {
 				const result = await runtimeHost.importFromJsonl(command.inputPath, command.cwdOverride);
-				if (!result.cancelled) await rebindSession();
 				return success(id, "import_jsonl", result);
 			}
 
