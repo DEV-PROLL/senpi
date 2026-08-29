@@ -40,6 +40,7 @@ import type {
 	AuthResult,
 	Context,
 	ImageContent,
+	Message,
 	Model,
 	ProviderHeaders,
 	SimpleStreamOptions,
@@ -839,6 +840,7 @@ export function truncateToolResultBodies(
 	messages: AgentMessage[] | undefined,
 	maxChars = CURSOR_TOOL_RESULT_MAX_CHARS,
 	maxBytes = CURSOR_TOOL_RESULT_MAX_BYTES,
+	convert = (candidate: AgentMessage[]) => convertToLlm(candidate),
 ): { messages: AgentMessage[] | undefined; changed: boolean } {
 	if (!Array.isArray(messages) || messages.length === 0) return { messages, changed: false };
 	const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -867,7 +869,7 @@ export function truncateToolResultBodies(
 	}
 
 	const measure = (candidate: AgentMessage[]): number => {
-		const converted = convertToLlm(candidate);
+		const converted = convert(candidate);
 		const activeUserMessageIndex = converted.at(-1)?.role === "user" ? converted.length - 1 : -1;
 		return measureCursorHistorySerializedBytes(converted, activeUserMessageIndex);
 	};
@@ -917,7 +919,7 @@ export function truncateToolResultBodies(
 	// If metadata alone exceeds the cap, discard the oldest complete turns. This
 	// search is also monotonic and avoids quadratic whole-history reserialization.
 	const turnRanges: Array<[number, number]> = [];
-	const isConvertedUser = (message: AgentMessage): boolean => convertToLlm([message])[0]?.role === "user";
+	const isConvertedUser = (message: AgentMessage): boolean => convert([message])[0]?.role === "user";
 	for (let index = 0; index < result.length; index++) {
 		if (!isConvertedUser(result[index])) continue;
 		const nextUser = result.findIndex((message, nextIndex) => nextIndex > index && isConvertedUser(message));
@@ -1448,7 +1450,16 @@ export class AgentSession {
 		this.agent.transformContext = async (messages, signal) => {
 			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
 			if (this.model?.provider === "cursor" || this.model?.provider === "cursor-cli-oauth") {
-				return (await truncateToolResultBodies(transformed)).messages ?? transformed;
+				return (
+					(
+						await truncateToolResultBodies(
+							transformed,
+							CURSOR_TOOL_RESULT_MAX_CHARS,
+							CURSOR_TOOL_RESULT_MAX_BYTES,
+							(candidate) => this.agent.convertToLlm(candidate) as Message[],
+						)
+					).messages ?? transformed
+				);
 			}
 			return transformed;
 		};

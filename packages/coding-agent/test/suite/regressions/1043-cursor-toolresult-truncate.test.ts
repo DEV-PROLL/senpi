@@ -8,6 +8,7 @@ import {
 	CURSOR_TOOL_RESULT_MAX_CHARS,
 	truncateToolResultBodies,
 } from "../../../src/core/agent-session.ts";
+import { convertToLlmForTransport } from "../../../src/core/messages.ts";
 import { createHarness, type Harness } from "../harness.ts";
 
 function textMessage(role: AgentMessage["role"], text: string): AgentMessage {
@@ -365,6 +366,55 @@ describe("1043 cursor toolResult truncate", () => {
 			expect(bytes).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
 		});
 	}
+
+	it("measures blocked images with the configured transport converter (R9-1)", () => {
+		const messages = cursorPairedMessages([""]);
+		const result = messages.find((message) => message.role === "toolResult");
+		if (result?.role !== "toolResult") throw new Error("expected tool result");
+		result.content = Array.from({ length: 708 * 2 }, (_, index) =>
+			index % 2 === 0
+				? { type: "image" as const, data: "AA==", mimeType: "image/png" }
+				: { type: "text" as const, text: "x" },
+		);
+		const convert = (candidate: AgentMessage[]) =>
+			convertToLlmForTransport(candidate, { blockImages: true, alwaysKeepNewest: 1 });
+		const before = serializedCursorHistoryBytes(convert(messages) as never);
+		expect(before).toBeGreaterThan(CURSOR_TOOL_RESULT_MAX_BYTES);
+		const { messages: next, changed } = truncateToolResultBodies(
+			messages,
+			CURSOR_TOOL_RESULT_MAX_CHARS,
+			CURSOR_TOOL_RESULT_MAX_BYTES,
+			convert,
+		);
+		expect(changed).toBe(true);
+		if (!next) throw new Error("expected messages");
+		expect(serializedCursorHistoryBytes(convert(next) as never)).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+	});
+
+	it("measures maxHistoricalImages elision with the configured transport converter (R9-1)", () => {
+		const messages = cursorPairedMessages([""]);
+		const result = messages.find((message) => message.role === "toolResult");
+		if (result?.role !== "toolResult") throw new Error("expected tool result");
+		result.content = Array.from({ length: 708 * 2 }, (_, index) =>
+			index % 2 === 0
+				? { type: "image" as const, data: "AA==", mimeType: "image/png" }
+				: { type: "text" as const, text: "x" },
+		);
+		messages.splice(messages.length - 1, 0, textMessage("assistant", "completed"));
+		const convert = (candidate: AgentMessage[]) =>
+			convertToLlmForTransport(candidate, { blockImages: false, maxHistoricalImages: 0, alwaysKeepNewest: 1 });
+		const before = serializedCursorHistoryBytes(convert(messages) as never);
+		expect(before).toBeGreaterThan(CURSOR_TOOL_RESULT_MAX_BYTES);
+		const { messages: next, changed } = truncateToolResultBodies(
+			messages,
+			CURSOR_TOOL_RESULT_MAX_CHARS,
+			CURSOR_TOOL_RESULT_MAX_BYTES,
+			convert,
+		);
+		expect(changed).toBe(true);
+		if (!next) throw new Error("expected messages");
+		expect(serializedCursorHistoryBytes(convert(next) as never)).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+	});
 
 	it("keeps grapheme clusters intact and retains a marker when only marker space remains", () => {
 		const messages = [textMessage("toolResult", "👩‍💻e\u0301".repeat(10))];
