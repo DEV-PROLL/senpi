@@ -266,6 +266,7 @@ function createRemoteSessionProxy(
 			if (property === "appendLabelChange") {
 				return (entryId: string, label?: string) => void client.setLabel(entryId, label);
 			}
+			if (property === "getCwd") return () => state.cwd;
 			if (property === "getSessionName") return () => state.sessionName;
 			if (property === "getUsageTotals") return () => state.usageTotals;
 			const value = Reflect.get(sessionManager, property, sessionManager);
@@ -331,8 +332,14 @@ function createRemoteSessionProxy(
 				if (usage && !mirroredCurrentAssistantUsage) {
 					mirroredCurrentAssistantUsage = true;
 					const latestPromptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+					const contextWindow = state.model?.contextWindow ?? 0;
+					const contextTokens = usage.input + usage.cacheRead + usage.cacheWrite;
 					state = {
 						...state,
+						contextUsage:
+							contextWindow > 0
+								? { tokens: contextTokens, contextWindow, percent: (contextTokens / contextWindow) * 100 }
+								: undefined,
 						usageTotals: {
 							...state.usageTotals,
 							input: state.usageTotals.input + usage.input,
@@ -498,6 +505,7 @@ function createRemoteSessionProxy(
 					if (localBashAbortController) localBashAbortController.abort();
 					else void client.abortBash().catch(reportActionFailure("abortBash"));
 				};
+			if (property === "getContextUsage") return () => state.contextUsage;
 			if (property === "getSessionStats") return () => client.getSessionStats();
 			if (property === "exportToHtml")
 				return (outputPath?: string) => client.exportHtml(outputPath).then((result) => result.path);
@@ -659,6 +667,7 @@ function stateFromRpc(state: {
 	isCompacting: boolean;
 	pendingMessageCount: number;
 	usageTotals: import("../../core/session-manager.ts").UsageTotals;
+	contextUsage?: import("../../core/extensions/types.ts").ContextUsage;
 	retryAttempt: number;
 	isBashRunning: boolean;
 	sessionFile?: string;

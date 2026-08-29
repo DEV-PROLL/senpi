@@ -11,6 +11,7 @@ import type { PromptDisposition, SessionStats } from "../../core/agent-session.t
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { ServiceTier } from "../../core/extensions/builtin/service-tier.ts";
+import type { ContextUsage } from "../../core/extensions/types.ts";
 import type { SessionEntry, SessionTreeNode, UsageTotals } from "../../core/session-manager.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import type { RpcSlashCommand } from "./rpc-command-surface.ts";
@@ -281,6 +282,7 @@ export interface RpcSessionState {
 	messageCount: number;
 	pendingMessageCount: number;
 	usageTotals: UsageTotals;
+	contextUsage?: ContextUsage;
 	retryAttempt: number;
 	isBashRunning: boolean;
 }

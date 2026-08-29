@@ -156,6 +156,7 @@ describe("interactive host runtime", () => {
 			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
 			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
 		});
+		local.session.getContextUsage = () => ({ tokens: 42, contextWindow: 4242, percent: 1 });
 		const runtime = await createInteractiveHostRuntime(local, {
 			socket: qa.socket,
 			ensureHost: async () => undefined,

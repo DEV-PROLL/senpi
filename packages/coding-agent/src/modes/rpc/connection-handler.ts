@@ -188,6 +188,7 @@ export function buildRpcSessionState(session: AgentSession): RpcSessionState {
 		messageCount: session.messages.length,
 		pendingMessageCount: session.pendingMessageCount,
 		usageTotals: session.sessionManager.getUsageTotals(),
+		contextUsage: session.getContextUsage(),
 	};
 }
 
