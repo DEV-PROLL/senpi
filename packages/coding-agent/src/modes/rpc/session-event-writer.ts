@@ -249,7 +249,13 @@ export class SessionEventWriter {
 	}
 
 	private async drainConnectionQueue(queue: RecordQueue): Promise<void> {
-		while (queue.head) await this.drainQueue(queue);
+		while (true) {
+			const next = queue.head
+				? queue
+				: [...this.queues.values()].find((candidate) => candidate.targetId === queue.targetId && candidate.head);
+			if (!next) return;
+			await this.drainQueue(next);
+		}
 	}
 
 	private async drainQueue(queue: RecordQueue): Promise<void> {
