@@ -35,6 +35,7 @@ import type {
 import { isVideoMimeType } from "../types.ts";
 import { combineAbortSignals } from "../utils/abort-signals.ts";
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
+import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
@@ -43,6 +44,7 @@ import { getAnthropicCompat, isAnthropicApiBaseUrl } from "../utils/prompt-cache
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { appendRetryAfterMsMarker, extract429RetryAfterMs } from "../utils/retry-hint.ts";
+import { normalizeAnthropicRetryFailure } from "../utils/retry-profile/failure.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import {
 	applyServerFallbackAbort,
@@ -346,11 +348,7 @@ export interface AnthropicOptions extends StreamOptions {
 	 * Default: true.
 	 */
 	interleavedThinking?: boolean;
-	/**
-	 * Anthropic refusal fallback. When set, the request includes the server-side
-	 * fallback beta and Anthropic retries eligible refusals on the configured
-	 * fallback target before returning a final response.
-	 */
+	/** Anthropic server-side fallback for eligible refusal stop reasons. */
 	refusalFallbacks?: AnthropicRefusalFallback;
 	/**
 	 * Anthropic tool choice behavior. String values map to Anthropic's built-in
@@ -377,16 +375,10 @@ function mergeHeaders(...headerSources: (Record<string, string | null> | undefin
 }
 
 function mergeClientHeaders(
-	model: Model<"anthropic-messages">,
+	_model: Model<"anthropic-messages">,
 	...headerSources: (Record<string, string | null> | undefined)[]
 ): Record<string, string | null> {
-	const merged = mergeHeaders(...headerSources);
-	if (model.provider === "kimi-coding") {
-		for (const name of Object.keys(merged)) {
-			if (name.toLowerCase() === "user-agent") delete merged[name];
-		}
-		merged["User-Agent"] = getPiUserAgent();
-	}
+	const merged = mergeHeaders({ "User-Agent": getPiUserAgent() }, ...headerSources);
 	return merged;
 }
 
@@ -1042,6 +1034,33 @@ function isCacheableUserContentBlock(
 	return block?.type === "text" || block?.type === "image" || block?.type === "tool_result";
 }
 
+function appendUserBlocks(params: MessageParam[], newBlocks: ContentBlockParam[]): void {
+	if (newBlocks.length === 0) return;
+	const lastParam = params[params.length - 1];
+	if (lastParam?.role === "user") {
+		if (typeof lastParam.content === "string") {
+			lastParam.content = [{ type: "text", text: lastParam.content }, ...newBlocks];
+		} else if (Array.isArray(lastParam.content)) {
+			(lastParam.content as ContentBlockParam[]).push(...newBlocks);
+		}
+	} else {
+		params.push({ role: "user", content: newBlocks });
+	}
+}
+
+function isToolLoopContinuation(messages: MessageParam[]): boolean {
+	const tail = messages[messages.length - 1];
+	const preceding = messages[messages.length - 2];
+	return (
+		tail?.role === "user" &&
+		Array.isArray(tail.content) &&
+		tail.content.some((block) => block.type === "tool_result") &&
+		preceding?.role === "assistant" &&
+		Array.isArray(preceding.content) &&
+		preceding.content.some((block) => block.type === "tool_use")
+	);
+}
+
 function markUserMessageCacheCheckpoint(message: MessageParam, cacheControl: CacheControlEphemeral): boolean {
 	if (message.role !== "user") return false;
 	if (Array.isArray(message.content)) {
@@ -1275,6 +1294,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 		try {
 			let client: Anthropic;
 			let isOAuth: boolean;
+			let usageModel = model;
 
 			if (options?.client) {
 				client = options.client;
@@ -1386,6 +1406,17 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				if (event.type === "message_start") {
 					output.responseId = event.message.id;
 					output.model = event.message.model;
+					const fallback =
+						output.model === model.id
+							? undefined
+							: model.compat?.allowedFallbackModels?.find(
+									(candidate) =>
+										typeof candidate !== "string" &&
+										candidate.provider === model.provider &&
+										candidate.model === output.model,
+								);
+					const fallbackCost = typeof fallback === "string" ? undefined : fallback?.cost;
+					usageModel = fallbackCost ? { ...model, id: output.model, cost: fallbackCost } : model;
 					// Capture initial token usage from message_start event
 					// This ensures we have input token counts even if the stream is aborted early
 					output.usage.input = event.message.usage.input_tokens || 0;
@@ -1594,7 +1625,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					// Anthropic doesn't provide total_tokens, compute from components
 					output.usage.totalTokens =
 						output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
-					calculateCost(model, output.usage);
+					calculateCost(usageModel, output.usage);
 				}
 			}
 
@@ -1648,6 +1679,18 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					}
 				}
 			}
+			const failure = normalizeAnthropicRetryFailure(error);
+			appendAssistantMessageDiagnostic(output, {
+				type: "provider_retry_failure",
+				timestamp: Date.now(),
+				details: {
+					kind: failure.kind,
+					...(failure.statusCode !== undefined ? { statusCode: failure.statusCode } : {}),
+					...(failure.providerCodes !== undefined ? { providerCodes: failure.providerCodes } : {}),
+					...(failure.retryAfterMs !== undefined ? { retryAfterMs: failure.retryAfterMs } : {}),
+					...(failure.shouldRetry !== undefined ? { shouldRetry: failure.shouldRetry } : {}),
+				},
+			});
 			output.errorMessage = errorMessage;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
@@ -1760,7 +1803,6 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 	if (!options?.reasoning) {
 		return stream(model, context, {
 			...base,
-			refusalFallbacks: options?.refusalFallbacks,
 			thinkingEnabled: false,
 		} satisfies AnthropicOptions);
 	}
@@ -1771,7 +1813,6 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 		const effort = mapThinkingLevelToEffort(model, options.reasoning);
 		return stream(model, context, {
 			...base,
-			refusalFallbacks: options?.refusalFallbacks,
 			thinkingEnabled: true,
 			effort,
 		} satisfies AnthropicOptions);
@@ -1790,7 +1831,6 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 
 	return stream(model, context, {
 		...base,
-		refusalFallbacks: options?.refusalFallbacks,
 		maxTokens,
 		thinkingEnabled: true,
 		thinkingBudgetTokens: Math.min(adjusted.thinkingBudget, Math.max(0, maxTokens - 1024)),
@@ -2226,10 +2266,7 @@ function convertMessages(
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				if (msg.content.trim().length > 0) {
-					params.push({
-						role: "user",
-						content: sanitizeSurrogates(msg.content),
-					});
+					appendUserBlocks(params, [{ type: "text", text: sanitizeSurrogates(msg.content) }]);
 				}
 			} else {
 				const blocks: ContentBlockParam[] = msg.content.map((item) => {
@@ -2265,10 +2302,7 @@ function convertMessages(
 					return true;
 				});
 				if (filteredBlocks.length === 0) continue;
-				params.push({
-					role: "user",
-					content: filteredBlocks,
-				});
+				appendUserBlocks(params, filteredBlocks);
 			}
 		} else if (msg.role === "assistant") {
 			const blocks: ContentBlockParam[] = [];
@@ -2390,16 +2424,16 @@ function convertMessages(
 			if (toolResults.length === 0) continue;
 
 			// Displaced reference-bearing results must follow every tool_result block.
-			params.push({
-				role: "user",
-				content: [...toolResults, ...siblingContent],
-			});
+			appendUserBlocks(params, [...toolResults, ...siblingContent]);
 		}
 	}
 
+	const retainPrecedingCheckpoint = isToolLoopContinuation(params);
 	if (cacheControl && params.length > 0 && markUserMessageCacheCheckpoint(params[params.length - 1], cacheControl)) {
-		for (let index = params.length - 2; index >= 0; index--) {
-			if (markUserMessageCacheCheckpoint(params[index], cacheControl)) break;
+		if (retainPrecedingCheckpoint) {
+			for (let index = params.length - 2; index >= 0; index--) {
+				if (markUserMessageCacheCheckpoint(params[index], cacheControl)) break;
+			}
 		}
 	}
 

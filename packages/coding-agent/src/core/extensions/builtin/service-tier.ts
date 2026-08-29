@@ -264,6 +264,20 @@ export default function serviceTierExtension(pi: ExtensionAPI): void {
 		const memoryModel = resolveServiceTierMemoryModel(ctx.modelRegistry, event.model);
 		liveMemoryKey = `${memoryModel.provider}/${memoryModel.id}`;
 		liveMemoryTier = getRememberedServiceTier(settingsManager, ctx.modelRegistry, event.model);
+
+		// `service_tier` is an OpenAI-family request field, so hopping to a non-Codex model leaves the
+		// intent with nothing to act on: `before_provider_request` already refuses to emit the tier
+		// there, but the session flag kept `isFastModeActive()` (and with it the RPC `fastMode` and the
+		// lightning indicator) claiming fast for a model that can never be served at that tier.
+		//
+		// Codex -> Codex is deliberately untouched: fast mode is a SESSION intent that survives a
+		// mid-session Codex switch (see service-tier-extension.test.ts "keeps session fast mode on
+		// across a mid-session switch to another Codex model"), and an incoming model's remembered
+		// "auto" is honored on the wire by `liveMemoryTier` below, not by clearing the flag here.
+		if (sessionFastMode && event.model.api !== OPENAI_CODEX_RESPONSES_API) {
+			sessionFastMode = false;
+			pi.setSessionFastMode(false);
+		}
 	});
 
 	pi.registerCommand("fast", {

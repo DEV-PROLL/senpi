@@ -75,10 +75,10 @@ describe("buildEvalPrompt", () => {
 		// Then: task-only helpers and the DAG are exposed only when callable.
 		expect(withoutSpawns).not.toContain("agent(");
 		expect(withoutSpawns).not.toContain("output(*ids");
-		expect(withoutSpawns).not.toContain("<dag>");
+		expect(withoutSpawns).not.toContain("<workflow>");
 		expect(withSpawns).toContain('agent(prompt, agent?="researcher"');
 		expect(withSpawns).toContain('output(*ids, format?="raw"');
-		expect(withSpawns).toContain("<dag>");
+		expect(withSpawns).toContain("<workflow>");
 		expect(withSpawns).toContain("omit it to use `researcher`");
 	});
 
@@ -89,12 +89,12 @@ describe("buildEvalPrompt", () => {
 		const node = buildEvalPrompt({ py: false, js: true, rb: false, jl: false }, { spawns: false }).description;
 
 		// When: their embedded reuse-chain examples are rendered.
-		// Then: only Python kernels carry examples, and those teach batch + tool bridging.
-		expect(python).toContain("Count all TypeScript source files under src/ excluding tests");
-		expect(python).toContain("tool.grep");
-		expect(python).toContain("parallel([");
+		// Then: JS kernels carry the batched fan-out examples, Python kernels carry the kernel-hop example, and other languages have none.
+		expect(node).toContain("Count all TypeScript source files under src/ excluding tests");
+		expect(node).toContain("tool.grep");
+		expect(node).toContain("Promise.all");
+		expect(python).toContain("JS kernel is busy with a detached cell — continue in py");
 		expect(ruby).not.toContain("<examples>");
-		expect(node).not.toContain("<examples>");
 	});
 
 	it("documents core helpers with Node wording and no excluded surface", () => {

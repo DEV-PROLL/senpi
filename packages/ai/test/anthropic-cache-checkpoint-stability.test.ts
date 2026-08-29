@@ -213,4 +213,68 @@ describe("Anthropic cache checkpoints", () => {
 
 		expect((await captureOAuthCacheMarkers(model, unpairedResultContext)).toolResultIds).toEqual([]);
 	});
+
+	it("does not add a rolling checkpoint to an ordinary multi-turn history", () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const params = buildAnthropicWarmPromptCacheParams(model, {
+			messages: [
+				{ role: "user", content: "first", timestamp: 1 },
+				fauxAssistantMessage([{ type: "text", text: "answer" }], { stopReason: "stop" }),
+				{ role: "user", content: "second", timestamp: 2 },
+			],
+		});
+
+		expect(cacheBreakpointCount(params)).toBe(1);
+	});
+
+	it("handles empty history without creating checkpoints", () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		expect(cacheBreakpointCount(buildAnthropicWarmPromptCacheParams(model, { messages: [] }))).toBe(0);
+	});
+
+	it("does not create rolling checkpoints across a long non-tool history", () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const messages = Array.from({ length: 13 }, (_, index) =>
+			index % 2 === 0
+				? { role: "user" as const, content: `user ${index}`, timestamp: index }
+				: fauxAssistantMessage([{ type: "text", text: `assistant ${index}` }], { stopReason: "stop" }),
+		);
+
+		expect(cacheBreakpointCount(buildAnthropicWarmPromptCacheParams(model, { messages }))).toBe(1);
+	});
+
+	it("retains checkpoints across the compaction boundary before the latest tool loop", () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const params = buildAnthropicWarmPromptCacheParams(model, {
+			messages: [
+				{ role: "user", content: "compacted summary", timestamp: 1 },
+				fauxAssistantMessage(fauxToolCall("read", {}, { id: FIRST_TOOL_USE_ID }), { stopReason: "toolUse" }),
+				toolResultMessage(FIRST_TOOL_USE_ID),
+			],
+		});
+
+		expect(markedToolResultIds(params)).toEqual([FIRST_TOOL_USE_ID]);
+		expect(cacheBreakpointCount(params)).toBe(2);
+	});
+
+	it("retains checkpoints after coalescing an interrupted tool turn with user text", () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const params = buildAnthropicWarmPromptCacheParams(model, {
+			messages: [
+				{ role: "user", content: "first", timestamp: 1 },
+				fauxAssistantMessage(fauxToolCall("read", {}, { id: FIRST_TOOL_USE_ID }), { stopReason: "toolUse" }),
+				toolResultMessage(FIRST_TOOL_USE_ID),
+				{ role: "user", content: "continue", timestamp: 2 },
+			],
+		});
+		const messages = params.messages;
+
+		expect(messages.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+		expect(messages[2].content).toEqual([
+			{ type: "tool_result", tool_use_id: FIRST_TOOL_USE_ID, content: "toolu_first result", is_error: false },
+			{ type: "text", text: "continue", cache_control: { type: "ephemeral" } },
+		]);
+		expect(cacheBreakpointCount(params)).toBeLessThanOrEqual(4);
+		expect(cacheBreakpointCount(params)).toBe(2);
+	});
 });

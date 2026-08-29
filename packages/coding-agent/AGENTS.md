@@ -6,6 +6,7 @@
 
 ```text
 src/cli.ts, cli-main.ts, main.ts   Bootstrap, args, mode dispatch
+src/bun-runtime.ts              Bun-vs-Node runtime selection for bun-installed CLI (`SENPI_RUNTIME` pin)
 src/bun/cli.ts, src/bun/register-cursor-agent.ts   Bun-binary entry; static cursor-agent module install
 src/package-manager-cli.ts         install/update/config subcommands (incl. `senpi update --models`)
 src/core/agent-session.ts          Session lifecycle and runtime
@@ -34,7 +35,8 @@ src/core/compaction/               Core compaction mechanics
 src/modes/interactive/             TUI mode and components
 src/modes/app-server/              App-server transport and RPC registry; runtime.ts
                                    wiring, search/ fuzzy file search
-src/modes/rpc/                     JSONL RPC mode/client/types and the ordered command
+src/modes/rpc/                     JSONL RPC mode/client/types, shared Unix-socket multi-session host,
+                                   ensureHost handshake, lifecycle supervisor/watchdog, and the ordered command
                                    surface (get_commands / commands_changed)
 src/modes/print-mode.ts            One-shot mode
 test/suite/harness.ts              Preferred faux-provider harness
