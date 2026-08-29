@@ -1,5 +1,29 @@
 # changes
 
+## 2026-08-29 - Route local shell callback failures through spill cleanup
+
+### What changed
+
+- `packages/coding-agent/src/core/tools/bash.ts`: local stdout/stderr data listeners now catch
+  arbitrary `onData` failures, stop the child process, and rethrow through the executor's cleanup
+  boundary so failed large-output spills are finalized and removed.
+- Added `test/suite/regressions/bash-spill-local-on-chunk.test.ts` with a real local shell command
+  whose `onChunk` callback throws a string.
+
+### Why
+
+- A callback throw from a real local stream listener escaped the executor promise, allowing the
+  command to resolve and leaving its spill file on disk.
+
+### Why an extension could not handle it
+
+- The local process data listeners are installed by the built-in `createLocalShellOperations`
+  backend, before extension callbacks reach the executor's cleanup boundary.
+
+### Expected merge conflict zones
+
+- `tools/bash.ts`: local stream listener registration and abort handling.
+
 ## 2026-08-29 - Make externally owned compaction delegation sticky
 
 ### What changed

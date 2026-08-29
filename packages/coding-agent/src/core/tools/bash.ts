@@ -111,6 +111,8 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 			if (child.pid) trackDetachedChildPid(child.pid);
 			let timedOut = false;
 			let timeoutHandle: NodeJS.Timeout | undefined;
+			let streamCallbackError: unknown;
+			let hasStreamCallbackError = false;
 			// Fires once the process tree has been killed so waitForChildProcess
 			// stops preserving output tails; descendants that survive the group
 			// kill must not keep the aborted command running forever.
@@ -121,6 +123,16 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 			};
 
 			try {
+				const handleData = (data: Buffer) => {
+					if (hasStreamCallbackError) return;
+					try {
+						onData(data);
+					} catch (error) {
+						streamCallbackError = error;
+						hasStreamCallbackError = true;
+						onAbort();
+					}
+				};
 				// Set timeout if provided.
 				if (timeoutMs !== undefined) {
 					timeoutHandle = setTimeout(() => {
@@ -129,8 +141,8 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 					}, timeoutMs);
 				}
 				// Stream stdout and stderr.
-				child.stdout?.on("data", onData);
-				child.stderr?.on("data", onData);
+				child.stdout?.on("data", handleData);
+				child.stderr?.on("data", handleData);
 				// Handle abort signal by killing the entire process tree.
 				if (signal) {
 					if (signal.aborted) onAbort();
@@ -139,6 +151,9 @@ export function createLocalShellOperations(shellName: string, resolveShellConfig
 				// Handle shell spawn errors and wait for the process to terminate without hanging
 				// on inherited stdio handles held by detached descendants.
 				const exitCode = await waitForChildProcess(child, { signal: killedController.signal });
+				if (hasStreamCallbackError) {
+					throw streamCallbackError;
+				}
 				if (signal?.aborted) {
 					throw new Error("aborted");
 				}

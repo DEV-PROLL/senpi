@@ -27,6 +27,8 @@
   `uncaughtException`.
 - Failed bash spill files are now removed after cleanup while surfaced full-output paths remain
   readable, and command or update-callback failures preserve any secondary cleanup error.
+- Local shell stream callback failures now enter the executor cleanup path, preventing uncaught
+  callback throws from leaving large-output spill files behind.
 - `cursor-cli-oauth` no longer mixes Cursor's internal tool-call protocol, arguments, and results into assistant text; Cursor still owns execution, while Senpi now stores and renders only the model's actual prose ([OmO #7169](https://github.com/code-yeongyu/oh-my-openagent/issues/7169)).
 
 - On the `claude-sdk-oauth` lane, the "Compaction rejected: the Claude Agent SDK owns compaction for
