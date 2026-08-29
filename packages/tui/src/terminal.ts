@@ -90,6 +90,7 @@ export function normalizeWarpWslShiftEnterInput(
 	const isWarp = Boolean(env.WARP_SESSION_ID?.trim() || env.WARP_TERMINAL_SESSION_UUID?.trim());
 	const interopPath = env.WSL_INTEROP?.trim();
 	const isWsl =
+		isWarp &&
 		interopPath !== undefined &&
 		/^\/run\/WSL\/\d+_interop$/.test(interopPath) &&
 		socketExists(interopPath);

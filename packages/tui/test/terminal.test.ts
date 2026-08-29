@@ -147,6 +147,23 @@ describe("normalizeAppleTerminalInput", () => {
 });
 
 describe("normalizeWarpWslShiftEnterInput", () => {
+	it("does not check the WSL socket when Warp is not detected", () => {
+		let socketChecks = 0;
+		assert.equal(
+			normalizeWarpWslShiftEnterInput(
+				"\n",
+				{ WSL_INTEROP: "/run/WSL/321_interop" },
+				"linux",
+				() => {
+					socketChecks += 1;
+					return true;
+				},
+			),
+			"\n",
+		);
+		assert.equal(socketChecks, 0);
+	});
+
 	it("rejects regular files, directories, and symlinks to non-sockets", () => {
 		const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tui-wsl-"));
 		const regularFile = path.join(tempDir, "regular-file");
