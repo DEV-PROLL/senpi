@@ -372,6 +372,7 @@ describe("openai-completions tool_choice", () => {
 		expect(getModel("zai", "glm-4.7")?.compat?.zaiToolStream).toBe(true);
 		expect(getModel("zai", "glm-5-turbo")?.compat?.zaiToolStream).toBe(true);
 		expect(getModel("zai", "glm-5.2")?.compat?.zaiToolStream).toBe(true);
+		expect(getModel("zai", "glm-5.3")?.compat?.zaiToolStream).toBe(true);
 	});
 
 	it("stores z.ai effort metadata", () => {
@@ -402,6 +403,84 @@ describe("openai-completions tool_choice", () => {
 				max: "max",
 			});
 		}
+	});
+	it("stores z.ai GLM-5.3 catalog and effort metadata", () => {
+		for (const provider of ["zai", "zai-coding-cn"] as const) {
+			const model = getModel(provider, "glm-5.3")!;
+			expect(model).toMatchObject({
+				name: "GLM-5.3",
+				reasoning: true,
+				input: ["text"],
+				contextWindow: 1_000_000,
+				maxTokens: 131_072,
+			});
+			expect(model.compat?.supportsReasoningEffort).toBe(true);
+			expect(model.thinkingLevelMap).toEqual({
+				off: null,
+				minimal: null,
+				low: "low",
+				medium: null,
+				high: "high",
+				xhigh: null,
+				max: "max",
+			});
+		}
+	});
+
+	it("maps z.ai GLM-5.3 thinking levels to reasoning_effort", async () => {
+		const model = getModel("zai", "glm-5.3")!;
+		const cases = [
+			{ reasoning: "low", effort: "low" },
+			{ reasoning: "medium", effort: "high" },
+			{ reasoning: "high", effort: "high" },
+			{ reasoning: "xhigh", effort: "max" },
+			{ reasoning: "max", effort: "max" },
+		] as const;
+
+		for (const testCase of cases) {
+			let payload: unknown;
+
+			await streamSimple(
+				model,
+				{
+					messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
+				},
+				{
+					apiKey: "test",
+					reasoning: testCase.reasoning,
+					onPayload: (params: unknown) => {
+						payload = params;
+					},
+				},
+			).result();
+
+			const params = (payload ?? mockState.lastParams) as { thinking?: unknown; reasoning_effort?: string };
+			expect(params.thinking).toEqual({ type: "enabled", clear_thinking: false });
+			expect(params.reasoning_effort).toBe(testCase.effort);
+		}
+	});
+
+	it("does not send disabled thinking for GLM-5.3 when reasoning is off through streamSimple", async () => {
+		const model = getModel("zai", "glm-5.3")!;
+		let payload: unknown;
+
+		await streamSimple(
+			model,
+			{
+				messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
+			},
+			{
+				apiKey: "test",
+				onPayload: (params: unknown) => {
+					payload = params;
+				},
+			},
+		).result();
+
+		const params = (payload ?? mockState.lastParams) as { thinking?: { type?: string }; reasoning_effort?: string };
+		expect(params.thinking).toEqual({ type: "enabled", clear_thinking: false });
+		expect(params.thinking?.type).not.toBe("disabled");
+		expect(params.reasoning_effort).toBeUndefined();
 	});
 
 	it("maps z.ai GLM-5.2 thinking levels to reasoning_effort", async () => {
@@ -1619,7 +1698,11 @@ describe("openai-completions tool_choice", () => {
 	});
 
 	it("sends max_tokens for Z.AI completions models", async () => {
-		const cases = [getModel("zai", "glm-5-turbo")!, getModel("zai", "glm-5.2")!] as const;
+		const cases = [
+			getModel("zai", "glm-5-turbo")!,
+			getModel("zai", "glm-5.2")!,
+			getModel("zai", "glm-5.3")!,
+		] as const;
 
 		for (const model of cases) {
 			expect(model.compat?.maxTokensField).toBe("max_tokens");

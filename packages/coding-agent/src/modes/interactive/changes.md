@@ -118,7 +118,6 @@
 ### Expected merge conflict zones
 
 - LOW: `interactive-mode.ts` `compaction_end` case and `interactive-host-runtime.ts` wire event handling.
-||||||| 84a19a642
 ## Explain disk-capacity failures during uncaught interactive shutdown (2026-08-29)
 
 ### What changed
