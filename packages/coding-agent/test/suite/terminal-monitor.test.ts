@@ -243,8 +243,9 @@ describe("terminal monitor tool", () => {
 
 	it("fires one native create watch event", async () => {
 		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const registry = new MonitorRegistry((event) => sink.push(event));
 		try {
-			const tool = createMonitorTool({ ...ctx, monitorRegistry: new MonitorRegistry((event) => sink.push(event)) });
+			const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
 			const line = sink.waitFor((event) => event.type === "line", "file create");
 			const started = await tool.execute("file-create", {
 				description: "artifact",
@@ -255,24 +256,27 @@ describe("terminal monitor tool", () => {
 			await writeFile(join(root, "artifact"), "created");
 			expect((await line).type).toBe("line");
 		} finally {
+			registry.dispose();
 			await rm(root, { recursive: true, force: true });
 		}
-	});
+	}, 15_000);
 
 	it("fires one native modify watch event", async () => {
 		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
 		const file = join(root, "artifact");
+		const registry = new MonitorRegistry((event) => sink.push(event));
 		try {
 			await writeFile(file, "before");
-			const tool = createMonitorTool({ ...ctx, monitorRegistry: new MonitorRegistry((event) => sink.push(event)) });
+			const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
 			const line = sink.waitFor((event) => event.type === "line", "file modify");
 			await tool.execute("file-modify", { description: "artifact", path: file, event: "modify" } as MonitorInput);
 			await writeFile(file, "after");
 			expect((await line).type).toBe("line");
 		} finally {
+			registry.dispose();
 			await rm(root, { recursive: true, force: true });
 		}
-	});
+	}, 15_000);
 
 	it("shares capacity with terminal sessions", async () => {
 		const limited = new TerminalManager({ maxSessions: 1 });
@@ -309,8 +313,8 @@ describe("terminal monitor tool", () => {
 
 	it("cancels a native watch through kill_bash", async () => {
 		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const registry = new MonitorRegistry((event) => sink.push(event));
 		try {
-			const registry = new MonitorRegistry((event) => sink.push(event));
 			const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
 			const started = await tool.execute("file-kill", {
 				description: "artifact",
@@ -324,9 +328,48 @@ describe("terminal monitor tool", () => {
 			expect(firstText(killed)).toContain(`Killed ${id}`);
 			expect(registry.snapshot()).toEqual([]);
 		} finally {
+			registry.dispose();
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	it("adds external-directory approval for native paths", () => {
+		const requests = createBuiltinParserRegistry().parse("monitor", { path: "/tmp/secret/file" }, process.cwd());
+		expect(requests.map((request) => request.permission)).toEqual(["read", "external_directory"]);
+	});
+
+	it("reconciles exited terminal capacity for native watches", async () => {
+		const limited = new TerminalManager({ maxSessions: 1 });
+		const registry = new MonitorRegistry((event) => sink.push(event), { reserve: () => limited.reserve() });
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		try {
+			const created = await limited.create("sh", {
+				command: "sh",
+				args: ["-c", "true"],
+				cwd: root,
+				cols: 80,
+				rows: 24,
+				env: { ...process.env },
+			});
+			await new Promise<void>((resolve) => {
+				if (created.runtime.exited) resolve();
+				else created.runtime.session.onExit(() => resolve());
+			});
+			await expect(
+				registry.registerFile({
+					description: "after exit",
+					path: join(root, "new"),
+					event: "create",
+					timeoutMs: 1000,
+					cwd: root,
+				}),
+			).resolves.toMatch(/^watch_/);
+		} finally {
+			await registry.stopAllFiles();
+			await limited.teardown();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
 
 	it("uses the same bash permission class as command execution", () => {
 		const requests = createBuiltinParserRegistry().parse("monitor", { command: "rm -rf /tmp/monitor" }, "/tmp");

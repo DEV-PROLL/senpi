@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- Native terminal file monitors now safely serialize delivery, handle watcher failures, preserve paused transitions, validate regular files and access errors, honor external-directory permissions, detect content-preserving rewrites, and release terminal capacity during lifecycle teardown.
 - On the `claude-sdk-oauth` lane, the "Compaction rejected: the Claude Agent SDK owns compaction for
   this session" notice now renders at most once per delegation episode as a muted informational line
   instead of repainting a red error line every turn, and the footer context meter shows an `(SDK)`

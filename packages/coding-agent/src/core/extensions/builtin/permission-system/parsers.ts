@@ -140,7 +140,14 @@ export function createBuiltinParserRegistry(): ParserRegistry {
 	registry.register("bash_input", parseBashLikePermission("input"));
 	registry.register("monitor", (toolName, input, cwd) => {
 		const path = getString(input, "path");
-		if (path) return [{ permission: "read", patterns: [path], always: [path] }];
+		if (path) {
+			return withExternalDirectoryRequests(
+				[{ permission: "read", patterns: [path], always: [path] }],
+				[path],
+				cwd,
+				"file",
+			);
+		}
 		return parseBashLikePermission("command")(toolName, input, cwd);
 	});
 

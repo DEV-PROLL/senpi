@@ -30,6 +30,7 @@ export class TerminalManager {
 	private readonly runtimes = new Map<string, TerminalRuntimeSession>();
 	private readonly scrollback?: number;
 	private readonly maxSessions: number;
+	private readonly exited = new Set<string>();
 	private reservations = 0;
 
 	constructor(options: TerminalManagerOptions = {}) {
@@ -43,11 +44,13 @@ export class TerminalManager {
 	}
 
 	get activeSize(): number {
-		return this.runtimes.size + this.reservations;
+		this.reconcileRuntimes();
+		return this.runtimes.size - this.exited.size + this.reservations;
 	}
 
 	reserve(): (() => void) | null {
-		if (this.activeSize >= this.maxSessions) return null;
+		this.reconcileRuntimes();
+		if (this.runtimes.size - this.exited.size + this.reservations >= this.maxSessions) return null;
 		this.reservations += 1;
 		let released = false;
 		return () => {
@@ -73,6 +76,9 @@ export class TerminalManager {
 			throw error;
 		}
 		this.runtimes.set(entry.id, runtime);
+		runtime.session.onExit(() => {
+			this.exited.add(entry.id);
+		});
 		release();
 		this.reconcileRuntimes();
 		return { id: entry.id, runtime };
@@ -106,6 +112,7 @@ export class TerminalManager {
 		await this.registry.teardown();
 		for (const runtime of this.runtimes.values()) runtime.dispose();
 		this.runtimes.clear();
+		this.exited.clear();
 	}
 
 	/** Dispose runtime wrappers whose registry entry was pruned (capacity/LRU eviction). */
@@ -115,6 +122,7 @@ export class TerminalManager {
 			if (liveIds.has(id)) continue;
 			runtime.dispose();
 			this.runtimes.delete(id);
+			this.exited.delete(id);
 		}
 	}
 }

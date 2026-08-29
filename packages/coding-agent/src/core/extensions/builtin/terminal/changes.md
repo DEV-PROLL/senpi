@@ -2,9 +2,22 @@
 
 ## Add native one-shot file monitors (2026-08-29)
 
+### What changed
+
 - `monitor({ path, event: "create" | "modify" })` now watches a file with a `watch_N` identity.
-- Native watches share terminal capacity, participate in monitor pause/rearm and reload ownership, and can be cancelled with `kill_bash`.
-- Watches use `fs.watch` with a small stat-polling reconciliation fallback and normal read-path permission checks.
+- Native watches serialize reconciliation and settlement, handle watcher errors, fence registration during teardown/reload, preserve paused transitions, validate regular files and access errors, detect content-preserving rewrites, share promptly reconciled terminal capacity, and use external-directory approval for external paths.
+
+### Why
+
+- Native monitors must deliver exactly once and remain safe across cancellation, reload, permission boundaries, filesystem timestamp limitations, and terminal capacity churn.
+
+### Why this cannot be expressed externally
+
+- The watcher, stat reconciliation, lifecycle ownership, and shared terminal reservation are private to the builtin terminal extension.
+
+### Expected merge conflict zones
+
+- LOW: `monitor-registry.ts`, `manager.ts`, and the native monitor regression suite.
 
 
 ## Monitor snapshots cross the RPC wire (2026-08-28)
