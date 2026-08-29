@@ -46,7 +46,10 @@ function scratch(label: string) {
 	return { root, agentDir, sessionDir, cwd, socket };
 }
 
-function spawnHost(qa: ReturnType<typeof scratch>): ChildProcessWithoutNullStreams {
+function spawnHost(
+	qa: ReturnType<typeof scratch>,
+	model: { provider: string; id: string } = { provider: MOCK_PROVIDER, id: MOCK_MODEL },
+): ChildProcessWithoutNullStreams {
 	const child = spawn(
 		process.execPath,
 		[
@@ -57,9 +60,9 @@ function spawnHost(qa: ReturnType<typeof scratch>): ChildProcessWithoutNullStrea
 			"--listen",
 			`unix://${qa.socket}`,
 			"--provider",
-			MOCK_PROVIDER,
+			model.provider,
 			"--model",
-			MOCK_MODEL,
+			model.id,
 		],
 		{
 			cwd: qa.cwd,
@@ -339,8 +342,21 @@ describe("interactive host runtime", () => {
 	it("reflects host service-tier changes in the attached session and footer state", async () => {
 		const qa = scratch("tier-sync");
 		const fake = await startFakeModelServer();
-		writeRpcModelsJson(qa.agentDir, fake.origin);
-		const host = spawnHost(qa);
+		const model = { provider: "openai-codex", id: "gpt-5.6-sol" };
+		writeFileSync(
+			join(qa.agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					[model.provider]: {
+						baseUrl: fake.origin,
+						apiKey: "test-key",
+						api: "openai-codex-responses",
+						models: [{ id: model.id, reasoning: true, contextWindow: 128000, maxTokens: 4096 }],
+					},
+				},
+			}),
+		);
+		const host = spawnHost(qa, model);
 		await waitForHost(host, qa.socket);
 		const localSessionManager = SessionManager.create(qa.cwd, qa.sessionDir);
 		const sessionPath = localSessionManager.getSessionFile();
