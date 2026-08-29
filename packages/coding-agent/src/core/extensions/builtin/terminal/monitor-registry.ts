@@ -1,5 +1,6 @@
 import { type FSWatcher, watch } from "node:fs";
-import { access, readFile, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, open, stat } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import { describeExit } from "./tools/spawn.ts";
@@ -68,6 +69,7 @@ interface FileMonitorRecord {
 	size: number;
 	digest: string;
 	pendingChange: boolean;
+	dirty: boolean;
 	checking: Promise<void> | undefined;
 	readonly deadline: ReturnType<typeof setTimeout>;
 }
@@ -168,22 +170,41 @@ export class MonitorRegistry {
 			this.#pendingRegistrations -= 1;
 			throw new Error(`Cannot watch file ${path}: ${error instanceof Error ? error.message : String(error)}`);
 		}
+		let registrationError: string | undefined;
 		watcher.on("error", (error) => {
+			registrationError = `watcher error: ${error instanceof Error ? error.message : String(error)}`;
 			const record = this.#files.get(id);
-			if (record)
-				this.#settleFile(record, `watcher error: ${error instanceof Error ? error.message : String(error)}`);
+			if (record) this.#settleFile(record, registrationError);
 		});
-		if (this.#disposed || lifecycle !== this.#lifecycle) {
-			watcher.close();
+		let registrationCleaned = false;
+		const finishRegistration = () => {
+			if (registrationCleaned) return;
+			registrationCleaned = true;
 			release?.();
 			this.#pendingRegistrations -= 1;
+		};
+		const cleanupRegistration = () => {
+			if (registrationCleaned) return;
+			watcher.close();
+			finishRegistration();
+		};
+		if (this.#disposed || lifecycle !== this.#lifecycle) {
+			cleanupRegistration();
 			throw new Error("Cannot create file monitor: monitor registry is disposed.");
 		}
-		const digest = initial ? await this.#digest(path) : "";
-		if (this.#disposed) {
-			watcher.close();
-			release?.();
-			this.#pendingRegistrations -= 1;
+		let digest: string;
+		try {
+			digest = initial ? await this.#digest(path) : "";
+		} catch (error) {
+			cleanupRegistration();
+			throw error;
+		}
+		if (registrationError) {
+			cleanupRegistration();
+			throw new Error(registrationError);
+		}
+		if (this.#disposed || lifecycle !== this.#lifecycle) {
+			cleanupRegistration();
 			throw new Error("Cannot create file monitor: monitor registry is disposed.");
 		}
 		const record: FileMonitorRecord = {
@@ -202,6 +223,7 @@ export class MonitorRegistry {
 			size: initial?.size ?? 0,
 			digest,
 			pendingChange: false,
+			dirty: false,
 			checking: undefined,
 			deadline: setTimeout(() => {
 				const current = this.#files.get(id);
@@ -209,7 +231,11 @@ export class MonitorRegistry {
 			}, options.timeoutMs),
 		};
 		this.#files.set(id, record);
-		this.#pendingRegistrations -= 1;
+		finishRegistration();
+		if (registrationError || this.#disposed || lifecycle !== this.#lifecycle) {
+			this.#settleFile(record, registrationError ?? "watcher killed");
+			throw new Error(registrationError ?? "Cannot create file monitor: monitor registry is disposed.");
+		}
 		this.#notifyChange();
 		return id;
 	}
@@ -242,7 +268,11 @@ export class MonitorRegistry {
 
 	async #checkFile(id: string): Promise<void> {
 		const record = this.#files.get(id);
-		if (!record || record.settled || record.checking) return;
+		if (!record || record.settled) return;
+		if (record.checking) {
+			record.dirty = true;
+			return;
+		}
 		record.checking = this.#checkFileImpl(record)
 			.catch((error) => {
 				if (!record.settled)
@@ -250,6 +280,10 @@ export class MonitorRegistry {
 			})
 			.finally(() => {
 				record.checking = undefined;
+				if (record.dirty && !record.settled) {
+					record.dirty = false;
+					void this.#checkFile(id);
+				}
 			});
 		return record.checking;
 	}
@@ -346,8 +380,26 @@ export class MonitorRegistry {
 	}
 
 	async #digest(path: string): Promise<string> {
+		const SAMPLE_SIZE = 64 * 1024;
 		try {
-			return (await readFile(path)).toString("base64");
+			const handle = await open(path, "r");
+			try {
+				const metadata = await handle.stat();
+				const hash = createHash("sha256");
+				const first = Buffer.alloc(Math.min(SAMPLE_SIZE, metadata.size));
+				if (first.length > 0) {
+					await handle.read(first, 0, first.length, 0);
+					hash.update(first);
+				}
+				if (metadata.size > SAMPLE_SIZE) {
+					const last = Buffer.alloc(SAMPLE_SIZE);
+					await handle.read(last, 0, last.length, metadata.size - last.length);
+					hash.update(last);
+				}
+				return `${metadata.size}:${hash.digest("hex")}`;
+			} finally {
+				await handle.close();
+			}
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return "";
 			throw error;

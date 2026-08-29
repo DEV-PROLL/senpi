@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBuiltinParserRegistry } from "../../src/core/extensions/builtin/permission-system/parsers.ts";
@@ -337,6 +337,59 @@ describe("terminal monitor tool", () => {
 		const requests = createBuiltinParserRegistry().parse("monitor", { path: "/tmp/secret/file" }, process.cwd());
 		expect(requests.map((request) => request.permission)).toEqual(["read", "external_directory"]);
 	});
+
+	it("classifies missing descendants beneath external symlink parents as external", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const outside = await mkdtemp(join(process.cwd(), ".native-outside-"));
+		try {
+			const link = join(root, "link");
+			await symlink(outside, link, "dir");
+			const requests = createBuiltinParserRegistry().parse(
+				"monitor",
+				{ path: join(link, "not-yet-created") },
+				root,
+			);
+			expect(requests.map((request) => request.permission)).toEqual(["read", "external_directory"]);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("detects content changes even when the timestamp is restored", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const file = join(root, "artifact");
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			await writeFile(file, "before");
+			const original = await stat(file);
+			await registry.registerFile({ description: "artifact", path: file, event: "modify", timeoutMs: 5000, cwd: root });
+			const line = sink.waitFor((event) => event.type === "line", "timestamp-preserving modify");
+			await writeFile(file, "after");
+			await utimes(file, original.atime, original.mtime);
+			await line;
+			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(1);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("keeps large-file fingerprints bounded", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const file = join(root, "large");
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			await writeFile(file, Buffer.alloc(64 * 1024 * 1024, 0x61));
+			const before = process.memoryUsage().rss;
+			await registry.registerFile({ description: "large", path: file, event: "modify", timeoutMs: 5000, cwd: root });
+			const after = process.memoryUsage().rss;
+			expect(after - before).toBeLessThan(32 * 1024 * 1024);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
 
 	it("reconciles exited terminal capacity for native watches", async () => {
 		const limited = new TerminalManager({ maxSessions: 1 });

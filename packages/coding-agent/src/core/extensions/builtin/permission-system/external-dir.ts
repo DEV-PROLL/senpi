@@ -19,12 +19,20 @@ export function expandHome(inputPath: string): string {
 }
 
 function normalizePath(inputPath: string): string {
-	try {
-		if (fs.existsSync(inputPath)) {
-			return fs.realpathSync(inputPath);
+	let candidate = path.normalize(inputPath);
+	const suffix: string[] = [];
+	for (;;) {
+		try {
+			const resolved = fs.realpathSync(candidate);
+			return suffix.length === 0 ? resolved : path.join(resolved, ...suffix.reverse());
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") return candidate;
+			const parent = path.dirname(candidate);
+			if (parent === candidate) return candidate;
+			suffix.push(path.basename(candidate));
+			candidate = parent;
 		}
-	} catch {}
-	return path.normalize(inputPath);
+	}
 }
 
 export function isExternalPath(inputPath: string, cwd: string): boolean {
