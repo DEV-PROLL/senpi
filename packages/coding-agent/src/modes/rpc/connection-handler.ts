@@ -60,7 +60,7 @@ import {
 } from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
 import { buildRpcCommandsForSession, createCommandsChangedEvent, rpcCommandListDigest } from "./rpc-command-surface.ts";
-import { rpcCommandShapeError, rpcMessageLengthError } from "./rpc-input-validation.ts";
+import { rpcCommandPayloadError, rpcCommandShapeError, rpcMessageLengthError } from "./rpc-input-validation.ts";
 import type {
 	RpcAuthProvider,
 	RpcCommand,
@@ -850,13 +850,13 @@ export function createRpcConnectionHandler(
 						? { role: "user" as const, content, timestamp: Date.now() }
 						: { role: "user" as const, content, timestamp: Date.now() };
 				session.sessionManager.appendMessage(message);
-				session.messages.push(message);
+				session.agent.state.messages = session.sessionManager.buildSessionContext().messages;
 				return success(id, "append_user_message");
 			}
 
 			case "append_session_entry": {
 				session.sessionManager.appendEntry(command.entry);
-				if (command.entry.type === "message") session.messages.push(command.entry.message);
+				session.agent.state.messages = session.sessionManager.buildSessionContext().messages;
 				return success(id, "append_session_entry");
 			}
 
@@ -1105,7 +1105,7 @@ export function createRpcConnectionHandler(
 				return success(id, "set_label");
 
 			case "bash": {
-				outputEvent({ type: "bash_start" });
+				if (routingSessionId !== undefined) outputEvent({ type: "bash_start" });
 				try {
 					const eventResult = await session.extensionRunner.emitUserBash({
 						type: "user_bash",
@@ -1127,7 +1127,7 @@ export function createRpcConnectionHandler(
 					});
 					return success(id, "bash", result);
 				} finally {
-					outputEvent({ type: "bash_end" });
+					if (routingSessionId !== undefined) outputEvent({ type: "bash_end" });
 				}
 			}
 
@@ -1352,9 +1352,10 @@ export function createRpcConnectionHandler(
 		}
 
 		const command = parsed as RpcCommand;
+		const payloadError = rpcCommandPayloadError(command);
 		const messageLengthError = rpcMessageLengthError(command);
-		if (messageLengthError) {
-			output(error(command.id, command.type, messageLengthError));
+		if (payloadError || messageLengthError) {
+			output(error(command.id, command.type, payloadError ?? messageLengthError!));
 			await waitForRpcBackpressure();
 			return;
 		}
