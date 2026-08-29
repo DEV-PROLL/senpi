@@ -255,6 +255,7 @@ function createRemoteSessionProxy(
 	let localBashAbortController: AbortController | undefined;
 	let localBashRunning = false;
 	let hostBashRunning = initialState.isBashRunning;
+	let nextQueuedInputOrder = Math.max(0, ...initialState.ordered.map((item) => item.enqueueOrder));
 	let sessionManager = local.sessionManager;
 	let settingsManager = SettingsManager.create(initialState.cwd, agentDir, {
 		projectTrusted: initialState.projectTrusted,
@@ -303,6 +304,7 @@ function createRemoteSessionProxy(
 		if (wireEvent.type === "auto_retry_start") state = { ...state, retryAttempt: wireEvent.attempt };
 		if (wireEvent.type === "auto_retry_end") state = { ...state, retryAttempt: 0 };
 		if (wireEvent.type === "queue_update") {
+			nextQueuedInputOrder = Math.max(nextQueuedInputOrder, ...wireEvent.ordered.map((item) => item.enqueueOrder));
 			state = {
 				...state,
 				steering: [...wireEvent.steering],
@@ -389,6 +391,7 @@ function createRemoteSessionProxy(
 	const refresh = async (): Promise<void> => {
 		const nextState = await client.getState();
 		state = { ...stateFromRpc(nextState) };
+		nextQueuedInputOrder = Math.max(0, ...nextState.ordered.map((item) => item.enqueueOrder));
 		let messages: AgentSession["messages"];
 		settingsManager = SettingsManager.create(nextState.cwd, agentDir, {
 			projectTrusted: nextState.projectTrusted,
@@ -459,6 +462,7 @@ function createRemoteSessionProxy(
 					const next = await client.setModel(model.provider, model.id);
 					return { systemPromptName: next.systemPromptName, model: next };
 				};
+			if (property === "reserveQueuedInputOrder") return () => ++nextQueuedInputOrder;
 			if (property === "cycleModel") return () => client.cycleModel();
 			if (property === "setThinkingLevel")
 				return (level: AgentSession["thinkingLevel"]) =>

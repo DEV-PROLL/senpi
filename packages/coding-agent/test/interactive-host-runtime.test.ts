@@ -520,6 +520,43 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("reserves queued input order after the host queue", async () => {
+		const qa = scratch("queue-order");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
+		try {
+			const started = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "agent_start") return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			void runtime.session.prompt("hold-open-500 queue-order");
+			await started;
+			await runtime.session.steer("queued-one");
+			await runtime.session.steer("queued-two");
+			const reserved = runtime.session.reserveQueuedInputOrder();
+			expect(reserved).toBeGreaterThan(2);
+		} finally {
+			await runtime.session.abort();
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("reports host work through isIdle while streaming", async () => {
 		const qa = scratch("idle-sync");
 		const fake = await startFakeModelServer();
