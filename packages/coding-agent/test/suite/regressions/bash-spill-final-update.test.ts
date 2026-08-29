@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
+import { runInNewContext } from "node:vm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const spillState = vi.hoisted(() => ({
@@ -14,6 +15,19 @@ const spillState = vi.hoisted(() => ({
 		errno: -5,
 		syscall: "close",
 	}),
+	rmCalls: 0,
+	rmFailNext: false,
+}));
+
+vi.mock("node:fs/promises", () => ({
+	rm: async (path: string) => {
+		spillState.rmCalls++;
+		if (spillState.rmFailNext) {
+			spillState.rmFailNext = false;
+			throw new Error(`unlink failed for ${path}`);
+		}
+		rmSync(path, { force: true });
+	},
 }));
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -49,6 +63,8 @@ describe("bash spill final updates", () => {
 		spillState.createdStreams.length = 0;
 		spillState.tempFilePaths.length = 0;
 		spillState.emitCloseError = false;
+		spillState.rmCalls = 0;
+		spillState.rmFailNext = false;
 		vi.useFakeTimers();
 		vi.setSystemTime(1000);
 	});
@@ -164,6 +180,80 @@ describe("bash spill final updates", () => {
 			await expect(execution).rejects.toBe(timerError);
 			expect(updateCount).toBe(3);
 			expect(spillState.createdStreams[0]?.destroyed).toBe(true);
+		} finally {
+			vi.unstubAllEnvs();
+			vi.useRealTimers();
+			rmSync(testDir, { recursive: true, force: true });
+		}
+	});
+
+	it("cleans up a spill when the command rejects a string", async () => {
+		const testDir = mkdtempSync(join(tmpdir(), "bash-spill-string-command-"));
+		try {
+			vi.stubEnv("TMPDIR", testDir);
+			const operations: BashOperations = {
+				exec: async (_command, _cwd, { onData }) => {
+					onData(Buffer.alloc(DEFAULT_MAX_BYTES + 1, "x"));
+					throw "command failed";
+				},
+			};
+			const bash = createBashTool(testDir, { operations });
+
+			await expect(bash.execute("string-command-failure", { command: "chatty" })).rejects.toBe("command failed");
+			expect(spillState.createdStreams[0]?.destroyed).toBe(true);
+			expect(existsSync(spillState.tempFilePaths[0] ?? "")).toBe(false);
+		} finally {
+			vi.unstubAllEnvs();
+			vi.useRealTimers();
+			rmSync(testDir, { recursive: true, force: true });
+		}
+	});
+
+	it("cleans up a spill when the final update rejects a cross-realm error", async () => {
+		const testDir = mkdtempSync(join(tmpdir(), "bash-spill-cross-realm-update-"));
+		try {
+			vi.stubEnv("TMPDIR", testDir);
+			const callbackError = runInNewContext("new Error('cross-realm update failed')");
+			const operations: BashOperations = {
+				exec: async (_command, _cwd, { onData }) => {
+					onData(Buffer.alloc(DEFAULT_MAX_BYTES + 1, "x"));
+					return { exitCode: 0 };
+				},
+			};
+			const bash = createBashTool(testDir, { operations });
+			let updateCount = 0;
+
+			await expect(
+				bash.execute("cross-realm-update-failure", { command: "chatty" }, undefined, () => {
+					updateCount++;
+					if (updateCount === 2) throw callbackError;
+				}),
+			).rejects.toBe(callbackError);
+			expect(spillState.createdStreams[0]?.destroyed).toBe(true);
+			expect(existsSync(spillState.tempFilePaths[0] ?? "")).toBe(false);
+		} finally {
+			vi.unstubAllEnvs();
+			vi.useRealTimers();
+			rmSync(testDir, { recursive: true, force: true });
+		}
+	});
+
+	it("retains an accumulator spill path after a failed removal for retry", async () => {
+		const testDir = mkdtempSync(join(tmpdir(), "bash-spill-remove-retry-"));
+		try {
+			vi.stubEnv("TMPDIR", testDir);
+			const { OutputAccumulator } = await import("../../../src/core/tools/output-accumulator.ts");
+			const output = new OutputAccumulator({ maxBytes: 1, tempFilePrefix: "retry" });
+			spillState.rmFailNext = true;
+			output.appendText("spill");
+			const spillPath = output.snapshot().fullOutputPath;
+			expect(spillPath).toBeDefined();
+
+			await expect(output.removeTempFile()).rejects.toThrow("unlink failed");
+			expect(output.snapshot().fullOutputPath).toBe(spillPath);
+			expect(existsSync(spillPath ?? "")).toBe(true);
+			await output.removeTempFile();
+			expect(existsSync(spillPath ?? "")).toBe(false);
 		} finally {
 			vi.unstubAllEnvs();
 			vi.useRealTimers();

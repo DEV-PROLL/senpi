@@ -277,8 +277,8 @@ export class OutputAccumulator {
 			return;
 		}
 		const path = this.tempFilePath;
-		this.tempFilePath = undefined;
 		await rm(path, { force: true });
+		this.tempFilePath = undefined;
 	}
 
 	private takeTempFileStream(): WriteStream | undefined {

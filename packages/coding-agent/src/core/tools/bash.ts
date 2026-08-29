@@ -426,7 +426,6 @@ export function createShellToolDefinition(
 						},
 					});
 				} catch (error) {
-					if (!(error instanceof Error)) throw error;
 					outputUpdateError = error;
 					hasOutputUpdateError = true;
 				}
@@ -479,14 +478,12 @@ export function createShellToolDefinition(
 						hasPrimaryError = true;
 					}
 				} catch (error) {
-					if (!(error instanceof Error)) throw error;
 					primaryError = error;
 					hasPrimaryError = true;
 				}
 				try {
 					await output.closeTempFile();
 				} catch (closeError) {
-					if (!(closeError instanceof Error)) throw closeError;
 					if (hasPrimaryError) {
 						throw new AggregateError(
 							[primaryError, closeError],
@@ -546,12 +543,10 @@ export function createShellToolDefinition(
 					});
 					exitCode = result.exitCode;
 				} catch (err) {
-					if (!(err instanceof Error)) throw err;
 					let snapshot: Awaited<ReturnType<typeof finishOutput>>;
 					try {
 						snapshot = await finishOutput();
 					} catch (cleanupError) {
-						if (!(cleanupError instanceof Error)) throw cleanupError;
 						throw new AggregateError([err, cleanupError], "Bash command and output cleanup failed");
 					}
 					const { text } = formatOutput(snapshot, "");
@@ -565,7 +560,6 @@ export function createShellToolDefinition(
 					try {
 						await output.removeTempFile();
 					} catch (unlinkError) {
-						if (!(unlinkError instanceof Error)) throw unlinkError;
 						throw new AggregateError([err, unlinkError], "Bash command and output cleanup failed");
 					}
 					throw err;

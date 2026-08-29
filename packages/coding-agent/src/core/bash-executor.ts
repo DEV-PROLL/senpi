@@ -154,8 +154,8 @@ export async function executeBashWithOperations(
 			return;
 		}
 		const path = tempFilePath;
-		tempFilePath = undefined;
 		await rm(path, { force: true });
+		tempFilePath = undefined;
 	};
 
 	const closeTempFileAndCleanup = async (primaryError: unknown): Promise<never> => {
@@ -163,13 +163,11 @@ export async function executeBashWithOperations(
 		try {
 			await closeTempFileStream();
 		} catch (closeError) {
-			if (!(closeError instanceof Error)) throw closeError;
 			finalError = new AggregateError([primaryError, closeError], "Bash output cleanup failed");
 		}
 		try {
 			await removeTempFile();
 		} catch (unlinkError) {
-			if (!(unlinkError instanceof Error)) throw unlinkError;
 			finalError = new AggregateError([finalError, unlinkError], "Bash output cleanup failed");
 		}
 		throw finalError;
@@ -227,7 +225,6 @@ export async function executeBashWithOperations(
 			}
 			return { fullOutput, truncationResult };
 		} catch (error) {
-			if (!(error instanceof Error)) throw error;
 			return await closeTempFileAndCleanup(error);
 		}
 	};
@@ -239,14 +236,12 @@ export async function executeBashWithOperations(
 			signal: options?.signal,
 		});
 	} catch (err) {
-		if (!(err instanceof Error)) throw err;
 		// Check if it was an abort
 		if (options?.signal?.aborted) {
 			const { fullOutput, truncationResult } = await prepareFinalOutput();
 			try {
 				await closeTempFileStream();
 			} catch (error) {
-				if (!(error instanceof Error)) throw error;
 				return await closeTempFileAndCleanup(error);
 			}
 			return {
@@ -265,7 +260,6 @@ export async function executeBashWithOperations(
 	try {
 		await closeTempFileStream();
 	} catch (error) {
-		if (!(error instanceof Error)) throw error;
 		return await closeTempFileAndCleanup(error);
 	}
 	const cancelled = options?.signal?.aborted ?? false;
