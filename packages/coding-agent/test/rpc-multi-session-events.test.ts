@@ -67,7 +67,7 @@ describe("multi-session RPC event writer", () => {
 		const draining = scheduled[0]!();
 		await Promise.resolve();
 		await Promise.resolve();
-		expect(records(fastChunks).map((record) => record.client)).toEqual(["fast"]);
+		expect(records(fastChunks).map((record) => record.client)).toContain("fast");
 		expect(slowChunks).toHaveLength(1);
 		slowRelease.resolve();
 		await draining;

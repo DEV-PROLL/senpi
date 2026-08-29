@@ -58,8 +58,8 @@ function toolUpdateKey(value: RpcRecord): string | undefined {
  * Process-wide stdout scheduler for multi-session RPC mode.
  *
  * Each queue contains complete structured JSONL records for one routing handle.
- * Draining takes one record per queue in round-robin order and waits for stdout
- * backpressure before selecting the next one. A record is deliberately written
+ * Draining takes one record per queue in round-robin order. Classic stdout
+ * backpressure remains serialized; socket lanes drain independently. A record is deliberately written
  * by itself: coalescing records from different sessions would obscure the
  * scheduling boundary and violate D9.
  */
@@ -80,7 +80,10 @@ export class SessionEventWriter {
 	private readonly scheduleFlush: FlushScheduler;
 	private flushScheduled = false;
 	private drainPromise?: Promise<void>;
+	private readonly drainingConnections = new Set<string>();
+	private readonly pendingConnectionDrains = new Set<Promise<void>>();
 	private inFlight?: { queue: RecordQueue; node: QueueNode };
+	private readonly inFlightMessages = new Map<string, RpcRecord[]>();
 	private failure?: unknown;
 
 	constructor(writeRaw: RawWriter, scheduleFlush?: FlushScheduler);
@@ -121,6 +124,14 @@ export class SessionEventWriter {
 		this.connections.set(id, connection);
 	}
 
+	/** Replay the current assistant message to a newly attached connection. */
+	replayInFlightMessage(sessionId: string, targetId: string): void {
+		for (const record of this.inFlightMessages.get(sessionId) ?? []) {
+			this.appendSessionRecord(sessionId, record, targetId);
+		}
+		if (this.inFlightMessages.has(sessionId)) this.requestFlush();
+	}
+
 	unregisterConnection(id: string): void {
 		this.connections.delete(id);
 	}
@@ -140,6 +151,10 @@ export class SessionEventWriter {
 		if (this.sealedSessions.has(sessionId)) return false;
 		const targetId = this.connectionContext.getStore();
 		const record = value as RpcRecord;
+		if (record.type === "message_start") this.inFlightMessages.set(sessionId, [structuredClone(record)]);
+		else if (record.type === "message_update" && this.inFlightMessages.has(sessionId))
+			this.inFlightMessages.get(sessionId)!.push(structuredClone(record));
+		else if (record.type === "message_end") this.inFlightMessages.delete(sessionId);
 		const isTargeted = record.type === "response" || record.type === "extension_ui_request";
 		const targets = isTargeted ? [targetId] : this.connections.size > 0 ? [...this.connections.keys()] : [undefined];
 		for (const target of targets) {
@@ -209,45 +224,61 @@ export class SessionEventWriter {
 	private async drainUntilEmpty(): Promise<void> {
 		do {
 			await this.drainReadyQueues();
-		} while (this.readyQueues.length > 0);
+			if (this.pendingConnectionDrains.size > 0) await Promise.all([...this.pendingConnectionDrains]);
+		} while (this.readyQueues.length > 0 || this.pendingConnectionDrains.size > 0);
 	}
 
 	private async drainReadyQueues(): Promise<void> {
 		while (this.readyQueues.length > 0) {
 			const queue = this.readyQueues.shift()!;
 			queue.ready = false;
-			const node = queue.head;
-			if (!node) continue;
-
-			this.unlink(queue, node);
-			this.inFlight = { queue, node };
-			try {
-				// D9: exactly one complete record per raw write. The next lane is not
-				// selected until this record has cleared stdout backpressure.
-				const connection = queue.targetId ? this.connections.get(queue.targetId) : undefined;
-				const writeRaw = connection?.writeRaw ?? this.writeRaw;
-				const waitForBackpressure = connection?.waitForBackpressure ?? this.waitForBackpressure;
-				if (!connection && queue.targetId) {
-					node.resolve?.();
-				} else {
-					writeRaw(serializeJsonLine(node.value));
-					if (waitForBackpressure) await waitForBackpressure();
-					node.resolve?.();
-				}
-			} catch (cause) {
-				node.reject?.(cause);
-				throw cause;
-			} finally {
-				this.inFlight = undefined;
+			if (!queue.head) continue;
+			if (queue.targetId) {
+				if (this.drainingConnections.has(queue.targetId)) continue;
+				this.drainingConnections.add(queue.targetId);
+				const drain = this.drainConnectionQueue(queue);
+				this.pendingConnectionDrains.add(drain);
+				void drain.finally(() => {
+					this.pendingConnectionDrains.delete(drain);
+					this.drainingConnections.delete(queue.targetId!);
+				});
+				continue;
 			}
+			await this.drainQueue(queue);
+		}
+	}
 
-			if (queue.head) {
-				this.markReady(queue);
-			} else if (queue.sessionId || queue.targetId) {
-				for (const [key, candidate] of this.queues) {
-					if (candidate === queue) this.queues.delete(key);
-				}
+	private async drainConnectionQueue(queue: RecordQueue): Promise<void> {
+		while (queue.head) await this.drainQueue(queue);
+	}
+
+	private async drainQueue(queue: RecordQueue): Promise<void> {
+		const node = queue.head;
+		if (!node) return;
+		this.unlink(queue, node);
+		this.inFlight = { queue, node };
+		try {
+			const connection = queue.targetId ? this.connections.get(queue.targetId) : undefined;
+			const writeRaw = connection?.writeRaw ?? this.writeRaw;
+			const waitForBackpressure = connection?.waitForBackpressure ?? this.waitForBackpressure;
+			if (!connection && queue.targetId) node.resolve?.();
+			else {
+				writeRaw(serializeJsonLine(node.value));
+				if (waitForBackpressure) await waitForBackpressure();
+				node.resolve?.();
 			}
+		} catch (cause) {
+			node.reject?.(cause);
+			throw cause;
+		} finally {
+			this.inFlight = undefined;
+		}
+		if (queue.head) {
+			if (queue.targetId) {
+				// The connection lane owns its ordering and continues directly.
+			} else this.markReady(queue);
+		} else if (queue.sessionId || queue.targetId) {
+			for (const [key, candidate] of this.queues) if (candidate === queue) this.queues.delete(key);
 		}
 	}
 
@@ -349,7 +380,13 @@ export class SessionEventWriter {
 	}
 
 	private markReady(queue: RecordQueue): void {
-		if (queue.ready || this.inFlight?.queue === queue || !queue.head) return;
+		if (
+			queue.ready ||
+			this.inFlight?.queue === queue ||
+			(queue.targetId && this.drainingConnections.has(queue.targetId)) ||
+			!queue.head
+		)
+			return;
 		queue.ready = true;
 		this.readyQueues.push(queue);
 	}
