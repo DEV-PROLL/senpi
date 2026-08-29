@@ -5,8 +5,9 @@
 ### What changed
 
 - `agent-session.ts`: names in `temporarilyDisabledToolNames` are dropped from `definitionRegistry`
-  (which becomes `_toolDefinitions`, and therefore the prompt snippets and guidelines) and from
-  `nextActiveToolNames`. `_baseToolDefinitions` stays unfiltered, so `_toolRegistry` remains whole.
+  (which becomes `_toolDefinitions`, and therefore the prompt snippets and guidelines) and from the
+  DEFAULT `nextActiveToolNames` selection. `_baseToolDefinitions` stays unfiltered, so
+  `_toolRegistry` remains whole, and an explicit `activeToolNames` request still activates the tool.
 
 ### Why
 
@@ -16,6 +17,10 @@
   of what the request advertised, so every Cursor grep frame would have answered
   `Tool "grep" is not available in this session`. Withholding now happens only where the
   model-facing surface is derived, leaving programmatic name-based resolution working.
+- The active-name filter applies to the default selection only. A caller that passes
+  `activeToolNames` has named the tool deliberately; overriding that would have broken
+  `filesystem-policy`'s contract that policies reach all six built-in file tools, and the
+  `defaultTools` explicit-precedence guard.
 
 ### Why an extension could not handle it
 
