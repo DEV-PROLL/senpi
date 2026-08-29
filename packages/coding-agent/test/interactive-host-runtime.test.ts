@@ -132,6 +132,62 @@ async function waitForHost(child: ChildProcessWithoutNullStreams, socket: string
 }
 
 describe("interactive host runtime", () => {
+	it("does not issue getState per streamed delta while mirroring usage totals", async () => {
+		const qa = scratch("usage-deltas");
+		const fake = await startFakeModelServer({ multiDelta: true });
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const getState = vi.spyOn(RpcClient.prototype, "getState");
+		let messageUpdates = 0;
+		let assistantUpdatesWithUsage = 0;
+		let assistantMessageEnds = 0;
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+			onWarning: vi.fn(),
+		});
+		try {
+			const settled = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type === "message_end" && event.message.role === "assistant") assistantMessageEnds++;
+					if (event.type === "message_update") {
+						messageUpdates++;
+						if (event.message.role === "assistant" && event.message.usage) assistantUpdatesWithUsage++;
+					}
+					if (event.type !== "agent_settled") return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			await runtime.session.prompt("multi-delta-usage");
+			await settled;
+			expect(getState).toHaveBeenCalledTimes(0);
+			expect(messageUpdates).toBeGreaterThan(1);
+			expect(assistantUpdatesWithUsage).toBeGreaterThan(1);
+			expect(messageUpdates).toBeGreaterThan(1);
+			expect(assistantUpdatesWithUsage).toBeGreaterThan(1);
+			expect(assistantMessageEnds).toBe(1);
+			expect(runtime.session.sessionManager.getUsageTotals()).toEqual({
+				input: 1,
+				output: 1,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: 0.00003,
+				latestCacheHitRate: 0,
+			});
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("is live to parallel clients, prompts remotely, and remains durably resumable", async () => {
 		const qa = scratch("remote");
 		const fake = await startFakeModelServer();
