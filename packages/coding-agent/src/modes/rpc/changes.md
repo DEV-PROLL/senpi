@@ -1,5 +1,19 @@
 # changes
 
+## 2026-08-30 - Honor cwd overrides for multi-session switch_session
+
+- `session-binding.ts` now binds the RPC connection handler to a live session runtime host, and `session-registry.ts` exposes the runtime's replacement-aware `switchSession` seam instead of treating the open-time runtime shape as the complete binding contract.
+- `interactive-host-runtime.ts` forwards only the wire-supported `cwdOverride` when switching through the shared host, so the host's normal runtime replacement rebuilds settings and other cwd-bound state for the effective directory.
+- `rpc-session-registry.test.ts` covers a replacement switch and verifies that the runtime and `list_sessions` report the override cwd.
+
+### Why
+
+- Multi-session bindings are created once at `open_session`; a later `switch_session` must reach the replacement-aware runtime method rather than remain coupled to the initial session-open runtime.
+
+### Expected merge conflict zones
+
+- LOW: `session-binding.ts` runtime host construction and `session-registry.ts` session runtime type.
+
 ## 2026-08-28 - Hydrate unnamed deferred setup entries
 
 - `get_state` ships deferred (not-yet-persisted) session entries whenever the session holds any entry beyond the auto-appended bootstrap kinds (`model_change`, `thinking_level_change`), no longer gated on a session name, so unnamed custom-only setup mutations hydrate the shared-host proxy mirror before the first provider turn. Plain fresh sessions still omit `entries`, preserving classic/socket state parity; a setup that appends ONLY a bare model/thinking change (and nothing else) stays host-side until the first turn.
