@@ -405,7 +405,7 @@ describe("required compaction deterministic fallback", () => {
 				observedBranch,
 			),
 		).toBeUndefined();
-		expect(projectionCount).toBe(2);
+		expect(projectionCount).toBe(1);
 	});
 
 	it("accepts the reconstructed retained context exactly at the input cap and rejects one token below", () => {
@@ -505,6 +505,72 @@ describe("required compaction deterministic fallback", () => {
 		);
 		expect(result?.firstKeptEntryId).toBe(assistantId);
 		expect(result?.details).toMatchObject({ retainedSuffix: "earlier-safe-boundary" });
+	});
+
+	it("rejects incomplete tool calls even when a matching result is retained", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		const assistantId = harness.sessionManager.appendMessage({
+			...fauxAssistantMessage("", { timestamp: 4, stopReason: "toolUse" }),
+			provider: "google",
+			model: "gemini-3-flash",
+			content: [
+				{
+					type: "toolCall",
+					id: "incomplete-call",
+					name: "read",
+					arguments: {},
+					incomplete: true,
+					thoughtSignature: validSig,
+				},
+			],
+		});
+		harness.sessionManager.appendMessage({
+			role: "toolResult",
+			toolCallId: "incomplete-call",
+			toolName: "read",
+			content: [{ type: "text", text: "result" }],
+			isError: false,
+			timestamp: 5,
+		});
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+
+		expect(
+			createRequiredCompactionFallback(
+				{ ...preparation, firstKeptEntryId: assistantId },
+				100_000,
+				"summarization-timeout",
+				{},
+				branchEntries,
+			),
+		).toBeUndefined();
+	});
+
+	it("keeps fallback candidate scanning linear for a 10,000-entry malformed history", () => {
+		const harness = createBlockingContext({ usageTokens: 9_900 });
+		for (let index = 0; index < 10_000; index++) {
+			harness.sessionManager.appendMessage({ role: "user", content: `history-${index}`, timestamp: index + 4 });
+		}
+		const malformedBoundary = harness.sessionManager.appendMessage({
+			...createGeminiAssistantMessage([{ type: "text", text: "retained", textSignature: "not-base64" }], {
+				timestamp: 20_000,
+				stopReason: "stop",
+			}),
+		});
+		const branchEntries = harness.sessionManager.getBranch();
+		const preparation = prepareCompaction(branchEntries, harness.ctx.getCompactionSettings(), true)!;
+		const startedAt = performance.now();
+		const result = createRequiredCompactionFallback(
+			{ ...preparation, firstKeptEntryId: malformedBoundary },
+			100_000_000,
+			"summarization-timeout",
+			{},
+			branchEntries,
+		);
+		const elapsedMs = performance.now() - startedAt;
+
+		expect(result).toBeUndefined();
+		expect(elapsedMs).toBeLessThan(10_000);
 	});
 
 	it("rejects duplicate tool results instead of replaying them", () => {

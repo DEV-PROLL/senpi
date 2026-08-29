@@ -1,7 +1,12 @@
 import { type CompactionPreparation, type CompactionResult, estimateTokens } from "../../../compaction/index.ts";
 import { StreamDurationBudgetError, StreamIdleTimeoutError } from "../../../compaction/stream-watchdog.ts";
 import { filterContextExcludedMessages } from "../../../messages.ts";
-import { buildSessionContext, type CompactionEntry, type SessionEntry } from "../../../session-manager.ts";
+import {
+	buildSessionContext,
+	type CompactionEntry,
+	getSessionContextEntryId,
+	type SessionEntry,
+} from "../../../session-manager.ts";
 import { SummarizationOverflowExhaustedError } from "./overflow-retry.ts";
 import { hasUnsafeRetainedContent } from "./retained-message-safety.ts";
 import { SummaryRequestError } from "./speculative.ts";
@@ -56,34 +61,6 @@ function hasMeaningfulUserText(entry: SessionEntry): boolean {
 }
 
 /**
- * Validates that retained tool calls and tool results remain paired in proper sequence,
- * and that we do not cut through an atomic signed/tool chain.
- */
-function hasValidToolChains(messages: ReturnType<typeof filterContextExcludedMessages>): boolean {
-	const declaredCalls = new Set<string>();
-	const resolvedCalls = new Set<string>();
-
-	for (const msg of messages) {
-		if (!isRecord(msg)) continue;
-		if (msg.role === "assistant" && Array.isArray(msg.content)) {
-			for (const block of msg.content) {
-				if (isRecord(block) && block.type === "toolCall" && typeof block.id === "string") {
-					if (declaredCalls.has(block.id)) return false;
-					declaredCalls.add(block.id);
-				}
-			}
-		} else if (msg.role === "toolResult" && typeof msg.toolCallId === "string") {
-			// Every retained result must resolve exactly one preceding call.
-			if (!declaredCalls.has(msg.toolCallId) || resolvedCalls.has(msg.toolCallId)) {
-				return false;
-			}
-			resolvedCalls.add(msg.toolCallId);
-		}
-	}
-	return declaredCalls.size === resolvedCalls.size;
-}
-
-/**
  * Bound a value graph that came from persisted, potentially hostile session data.
  * Returns false when the graph contains anything we must not read (accessors,
  * non-plain prototypes, cycles, functions, symbols) so callers fail closed
@@ -109,31 +86,6 @@ function isSafeBoundedValue(value: unknown, seen = new Set<object>(), depth = 0)
 		if (!isSafeBoundedValue(descriptor.value, seen, depth + 1)) return false;
 	}
 	return true;
-}
-
-/**
- * Conservative retained-context size. Fails closed (Infinity) on any unsafe or
- * un-serializable value, and exits early once `budget` is exceeded so an
- * oversized retained message cannot force an allocation-heavy full scan.
- */
-function estimateConservativeTokens(
-	messages: ReturnType<typeof filterContextExcludedMessages>,
-	budget: number,
-): number {
-	let total = 0;
-	for (const message of messages) {
-		if (!isSafeBoundedValue(message)) return Number.POSITIVE_INFINITY;
-		let serialized: string | undefined;
-		try {
-			serialized = JSON.stringify(message);
-		} catch {
-			return Number.POSITIVE_INFINITY;
-		}
-		if (serialized === undefined) return Number.POSITIVE_INFINITY;
-		total += Math.max(estimateTokens(message), Buffer.byteLength(serialized));
-		if (total > budget) return total;
-	}
-	return total;
 }
 
 export function classifyRequiredCompactionFallbackFailure(
@@ -193,6 +145,101 @@ export function createRequiredCompactionFallback(
 	};
 	let candidateCount = 0;
 
+	const syntheticCompaction: CompactionEntry = {
+		type: "compaction",
+		id: "__senpi_deterministic_fallback_preview__",
+		parentId: branchEntries.at(-1)?.id ?? null,
+		timestamp: new Date(0).toISOString(),
+		summary,
+		firstKeptEntryId: branchEntries[0]?.id ?? preparation.firstKeptEntryId,
+		tokensBefore: preparation.tokensBefore,
+		details: { ...baseDetails, retainedSuffix: "prepared" },
+		fromHook: true,
+	};
+
+	let projectedMessages: ReturnType<typeof filterContextExcludedMessages>;
+	try {
+		projectedMessages = filterContextExcludedMessages(
+			buildSessionContext([...branchEntries, syntheticCompaction]).messages,
+		);
+	} catch {
+		if (diagnostics) diagnostics.rejectionReason = "context-reconstruction-failed";
+		return undefined;
+	}
+
+	const messageIndexesByEntryId = new Map<string, number>();
+	for (const [index, message] of projectedMessages.entries()) {
+		const entryId = getSessionContextEntryId(message);
+		if (entryId !== undefined) messageIndexesByEntryId.set(entryId, index);
+	}
+	const summaryIndex = messageIndexesByEntryId.get(syntheticCompaction.id);
+	const unsafeSuffix = new Array(projectedMessages.length + 1).fill(false);
+	const tokenSuffix = new Array(projectedMessages.length + 1).fill(0);
+	const toolCalls = new Map<string, { indexes: number[]; incomplete: boolean }>();
+	const toolResults = new Map<string, number[]>();
+	for (let index = projectedMessages.length - 1; index >= 0; index--) {
+		const message = projectedMessages[index];
+		tokenSuffix[index] = tokenSuffix[index + 1];
+		let messageUnsafe = false;
+		let serialized: string | undefined;
+		try {
+			messageUnsafe = hasUnsafeRetainedContent([message]);
+			serialized = isSafeBoundedValue(message) ? JSON.stringify(message) : undefined;
+			tokenSuffix[index] +=
+				serialized === undefined
+					? Number.POSITIVE_INFINITY
+					: Math.max(estimateTokens(message), Buffer.byteLength(serialized));
+		} catch {
+			messageUnsafe = true;
+			tokenSuffix[index] = Number.POSITIVE_INFINITY;
+		}
+		unsafeSuffix[index] = unsafeSuffix[index + 1] || messageUnsafe;
+		if (!isRecord(message)) continue;
+		if (message.role === "toolResult" && typeof message.toolCallId === "string") {
+			const indexes = toolResults.get(message.toolCallId) ?? [];
+			indexes.push(index);
+			toolResults.set(message.toolCallId, indexes);
+		} else if (message.role === "assistant" && Array.isArray(message.content)) {
+			for (const block of message.content) {
+				if (!isRecord(block) || block.type !== "toolCall" || typeof block.id !== "string") continue;
+				const call = toolCalls.get(block.id) ?? { indexes: [], incomplete: false };
+				call.indexes.push(index);
+				call.incomplete ||= block.incomplete === true;
+				toolCalls.set(block.id, call);
+			}
+		}
+	}
+	const invalidToolChainDiff = new Int32Array(projectedMessages.length + 2);
+	const markInvalidRange = (start: number, endExclusive: number) => {
+		const boundedStart = Math.max(0, start);
+		const boundedEnd = Math.min(projectedMessages.length + 1, endExclusive);
+		if (boundedStart >= boundedEnd) return;
+		invalidToolChainDiff[boundedStart]++;
+		invalidToolChainDiff[boundedEnd]--;
+	};
+	for (const [id, call] of toolCalls) {
+		const results = toolResults.get(id) ?? [];
+		if (call.indexes.length !== 1 || results.length !== 1) {
+			markInvalidRange(0, Math.max(call.indexes[0] ?? -1, results[0] ?? -1) + 1);
+			continue;
+		}
+		const callIndex = call.indexes[0];
+		const resultIndex = results[0];
+		if (call.incomplete) markInvalidRange(0, resultIndex + 1);
+		else if (callIndex < resultIndex) markInvalidRange(callIndex + 1, resultIndex + 1);
+		else markInvalidRange(0, resultIndex + 1);
+	}
+	for (const [id, results] of toolResults) {
+		if (toolCalls.has(id)) continue;
+		markInvalidRange(0, results[0] + 1);
+	}
+	const toolChainValidAt = new Array(projectedMessages.length + 1).fill(true);
+	let invalidToolChainCount = 0;
+	for (let index = 0; index < toolChainValidAt.length; index++) {
+		invalidToolChainCount += invalidToolChainDiff[index];
+		toolChainValidAt[index] = invalidToolChainCount === 0;
+	}
+
 	const projectCandidate = (
 		firstKeptEntryId: string,
 		retainedSuffix: NonNullable<DeterministicFallbackDetails["retainedSuffix"]>,
@@ -205,36 +252,29 @@ export function createRequiredCompactionFallback(
 			tokensBefore: preparation.tokensBefore,
 			details,
 		};
-		const syntheticCompaction: CompactionEntry = {
-			type: "compaction",
-			id: "__senpi_deterministic_fallback_preview__",
-			parentId: branchEntries.at(-1)?.id ?? null,
-			timestamp: new Date(0).toISOString(),
-			summary: result.summary,
-			firstKeptEntryId: result.firstKeptEntryId,
-			tokensBefore: result.tokensBefore,
-			details: result.details,
-			fromHook: true,
-		};
-		let retainedMessages: ReturnType<typeof filterContextExcludedMessages>;
-		try {
-			retainedMessages = filterContextExcludedMessages(
-				buildSessionContext([...branchEntries, syntheticCompaction]).messages,
-			);
-		} catch {
+		const startIndex = messageIndexesByEntryId.get(firstKeptEntryId);
+		if (startIndex === undefined) {
 			if (diagnostics) diagnostics.rejectionReason = "context-reconstruction-failed";
 			return undefined;
 		}
-		if (hasUnsafeRetainedContent(retainedMessages)) {
+		const retainedStart = Math.min(startIndex, projectedMessages.length);
+		if (unsafeSuffix[retainedStart]) {
 			if (diagnostics) diagnostics.rejectionReason = "unsafe-retained-content";
 			return undefined;
 		}
-		if (!hasValidToolChains(retainedMessages)) {
+		if (!toolChainValidAt[retainedStart]) {
 			if (diagnostics) diagnostics.rejectionReason = "atomic-tool-chain-cut";
 			return undefined;
 		}
 		const budget = contextWindow - preparation.settings.reserveTokens;
-		const retainedTokens = estimateConservativeTokens(retainedMessages, budget);
+		const summaryTokens =
+			summaryIndex === undefined
+				? Number.POSITIVE_INFINITY
+				: Math.max(
+						estimateTokens(projectedMessages[summaryIndex]),
+						Buffer.byteLength(JSON.stringify(projectedMessages[summaryIndex])),
+					);
+		const retainedTokens = (tokenSuffix[retainedStart] ?? Number.POSITIVE_INFINITY) + summaryTokens;
 		if (retainedTokens > budget) {
 			if (diagnostics) {
 				diagnostics.rejectionReason = "retained-token-budget-exceeded";
