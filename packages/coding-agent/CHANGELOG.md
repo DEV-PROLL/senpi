@@ -19,6 +19,10 @@
   this session" notice now renders at most once per delegation episode as a muted informational line
   instead of repainting a red error line every turn, and the footer context meter shows an `(SDK)`
   marker while the SDK owns compaction. Manual `/compact` feedback is unchanged.
+- On the `claude-sdk-oauth` lane, automatic compaction no longer re-attempts and re-logs a rejection
+  every turn after the Claude Agent SDK owns compaction: the first `external-owner` rejection makes the
+  delegation sticky until compaction is accepted, the model or provider changes, or the session
+  navigates to another branch. Manual `/compact` behavior is unchanged.
 
 ### Removed
 
