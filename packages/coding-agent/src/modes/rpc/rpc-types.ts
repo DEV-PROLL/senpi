@@ -659,6 +659,25 @@ export interface RpcServiceTierChangedEvent {
 	tier?: ServiceTier;
 	fastMode: boolean;
 }
+/**
+ * Emitted after the host swapped the live session behind this connection (new session,
+ * fork, or switch), carrying the new authoritative identity.
+ *
+ * A replacement can be initiated by ANY attached client. Without this event the other
+ * attached clients keep their stale identity and keep routing replacement-dependent
+ * actions at the session that no longer exists. Additive: an old client that does not
+ * know the type filters it out.
+ */
+export interface RpcSessionReplacedEvent {
+	type: "session_replaced";
+	/** Durable session id of the session now bound to this connection. */
+	sessionId: string;
+	/** Session file backing the new session, absent for a deferred setup-only session. */
+	sessionFile?: string;
+	cwd: string;
+	sessionName?: string;
+}
+
 /** Emitted after the loaded skill, extension, or MCP inventory changes. */
 export interface RpcLoadedSurfacesChangedEvent {
 	type: "loaded_surfaces_changed";

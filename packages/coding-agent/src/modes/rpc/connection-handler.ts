@@ -72,6 +72,7 @@ import type {
 	RpcLoadedMcpServer,
 	RpcMcpServerStatus,
 	RpcResponse,
+	RpcSessionReplacedEvent,
 	RpcSessionState,
 	RpcSkillInvocationEvent,
 } from "./rpc-types.ts";
@@ -627,7 +628,21 @@ export function createRpcConnectionHandler(
 	const rebindSession = async (deferRefresh = false): Promise<void> => {
 		unsubscribeLoadedSurfaces?.();
 		unsubscribeExtensionEvents?.();
+		const replacedSession = session !== runtimeHost.session;
 		session = runtimeHost.session;
+		if (replacedSession) {
+			// A replacement can be driven by ANY attached client, so every connection must be
+			// told the live binding moved and given the new authoritative identity. Emitted
+			// before the derived-surface refresh so a client cannot act on the old identity in
+			// the window the refresh takes.
+			outputEvent({
+				type: "session_replaced",
+				sessionId: session.sessionId,
+				sessionFile: session.sessionFile,
+				cwd: session.sessionManager.getCwd(),
+				sessionName: session.sessionName,
+			} satisfies RpcSessionReplacedEvent);
+		}
 		unsubscribeExtensionEvents = clientCapabilities?.includes(EXTENSION_EVENTS_CAPABILITY)
 			? session.extensionRunner.onRpcEvent(({ name, data }) => {
 					outputEvent({ type: "extension_event", name, data } satisfies RpcExtensionEvent);
