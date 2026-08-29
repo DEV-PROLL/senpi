@@ -93,6 +93,17 @@
   `min(threshold + lead, window - reserve)`. Past that cap it blocks as before. Disable with
   `compaction.graceBandEnabled: false`.
 
+- Oversized tool results are now capped before they enter the context. A single result is limited to
+  `min(50000, max(8192, 5% of the context window))`; the full output is written to a spill file and
+  the kept excerpt carries a marker naming that path, so the model can read it back on demand.
+  Disable with `compaction.toolAdmissionEnabled: false`.
+- A context-budget reminder is delivered once per compaction generation as the remaining runway
+  approaches the threshold, so the model can wrap up verbose exploration before the summary is
+  taken. Disable with `compaction.reminderEnabled: false`.
+- A grace band defers blocking compaction while a speculative summary is still generating, up to
+  `min(threshold + lead, window - reserve)`. Past that cap it blocks as before. Disable with
+  `compaction.graceBandEnabled: false`.
+
 ### Changed
 
 - Speculative summarization now starts on an absolute lead of `clamp(threshold * 0.125, 8192, 32768)`
