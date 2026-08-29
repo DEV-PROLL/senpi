@@ -1,5 +1,42 @@
 # Local fork changes
 
+## Cursor CLI OAuth tool-frame suppression boundary (2026-08-29)
+
+- Suppress Cursor CLI tool protocol frames without creating assistant text, while still closing the preceding text segment and resetting cumulative-snapshot tracking so post-tool prose is not lost.
+
+
+## Credential rotation and fallback parity fixes (2026-08-28)
+
+- Preserve dotted bare model IDs in fallback tombstone matching, admit policy-only credential slots, avoid consuming half-open leases during runtime preflight, and isolate service-created credential pool state under the requested agent directory.
+
+
+## Shared RPC attachment lifecycle (2026-08-28)
+
+- Socket RPC dispatch remains re-entrant so extension UI responses can resolve in-flight commands.
+- Shared-path session attachments retain one runtime binding and only emit terminal closure on the final attachment.
+- Per-connection attachment ownership now preserves duplicate-open counts and waits for in-flight opens before disconnect cleanup.
+- The exported open-session response and protocol table expose `attached`, and synchronous prompt transport failures report failed preflight.
+
+
+## Bun-compiled runtime assets (2026-08-27)
+
+### What changed
+
+- Bun-compiled coding-agent binaries now embed the imagegen bundled skill through the builtin's file-asset import; Node distributions continue to use the copied `dist` asset.
+
+### Why
+
+- Copying the skill into `dist` does not add it to Bun's compile graph, so compiled binaries lost the skill while emitting a missing-skill diagnostic.
+
+### Why an extension could not handle it
+
+- The compiled asset graph and builtin resource path are established by the package build and extension implementation before an extension can provide resources.
+
+### Expected merge conflict zones
+
+- LOW: `packages/coding-agent/src/core/extensions/builtin/imagegen/index.ts` and its asset declaration.
+
+
 ## @anthropic-ai/sdk peer alignment (2026-08-26)
 
 ### What changed
@@ -59,6 +96,10 @@ The divergence lives in core wiring, package identity, or build plumbing that ex
 
 - HIGH: `package.json` and the generated publish/install/platform locks.
 - LOW: the redirect response-body compatibility helper and its regression test.
+
+## 2026-08-25 — Attach compatible shared RPC hosts
+
+`ensureHost` now attaches to any compatible RPC socket, including a host started by another client surface, while retaining typed refusal for incompatible unmanaged owners. Hosts senpi starts continue to use canonical `host.pid` and `settings.json` state; attached hosts are not lifecycle-managed.
 
 ## models.json schema accepts the video input modality (2026-08-23)
 

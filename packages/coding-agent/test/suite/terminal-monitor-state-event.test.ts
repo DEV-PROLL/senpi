@@ -75,4 +75,47 @@ describe("terminal monitor liveness event", () => {
 		}
 		expect(states.at(-1)).toEqual({ activeCount: 0, monitors: [] });
 	});
+
+	it("emits terminal_monitor_state over pi.rpc.emit when a monitor starts", async () => {
+		const rpcEvents: Array<{ name: string; data: unknown }> = [];
+		const harness = await createHarness({
+			extensionFactories: [registerTerminalExtension],
+		});
+		harnesses.push(harness);
+		await harness.session.bindExtensions({});
+		const unsubscribe = harness.getExtensionRunner().onRpcEvent((event) => {
+			rpcEvents.push(event);
+		});
+
+		try {
+			const started = await harness.session.executeTool("monitor", {
+				description: "rpc liveness test",
+				command: "sleep 30",
+				persistent: true,
+			});
+			const bashId = /bash_\d+/.exec(resultText(started))?.[0];
+			if (!bashId) throw new Error("Monitor did not return a bash id");
+
+			try {
+				expect(rpcEvents).toContainEqual({
+					name: "terminal_monitor_state",
+					data: {
+						activeCount: 1,
+						monitors: [
+							{
+								id: bashId,
+								description: "rpc liveness test",
+								paused: false,
+								startedAtMs: expect.any(Number),
+							},
+						],
+					},
+				});
+			} finally {
+				await harness.session.executeTool("kill_bash", { bash_id: bashId });
+			}
+		} finally {
+			unsubscribe();
+		}
+	});
 });

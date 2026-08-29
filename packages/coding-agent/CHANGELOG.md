@@ -4,8 +4,180 @@
 
 ### Breaking Changes
 
+### Added
+
+- New experimental setting `experimental.bashEvalOnly` (default `false`). When enabled, the `bash` and
+  `powershell` tools are withheld from the model-facing tool surface and run only inside eval cells via
+  `tool.bash({ command: "..." })`, with system-prompt guidance and a redirect hint if the model calls them
+  directly. Hooks and permission checks still apply to those commands. The policy is inert whenever the
+  `eval` tool is unavailable, so shell access is never lost, and it follows the flag across a reload.
+
+### Changed
+
+- `grep` is temporarily withheld from the model-facing tool surface. It no longer appears in the
+  system prompt or the active tool names, so the model can neither see nor call it. The tool is
+  still built and stays resolvable by name for programmatic callers such as the Cursor exec bridge,
+  and restoring it is removing its entry from `temporarilyDisabledToolNames`.
+
 ### Fixed
 
+- `cursor-cli-oauth` no longer mixes Cursor's internal tool-call protocol, arguments, and results into assistant text; Cursor still owns execution, while Senpi now stores and renders only the model's actual prose ([OmO #7169](https://github.com/code-yeongyu/oh-my-openagent/issues/7169)).
+
+- On the `claude-sdk-oauth` lane, the "Compaction rejected: the Claude Agent SDK owns compaction for
+  this session" notice now renders at most once per delegation episode as a muted informational line
+  instead of repainting a red error line every turn, and the footer context meter shows an `(SDK)`
+  marker while the SDK owns compaction. Manual `/compact` feedback is unchanged.
+- On the `claude-sdk-oauth` lane, automatic compaction no longer re-attempts and re-logs a rejection
+  every turn after the Claude Agent SDK owns compaction: the first `external-owner` rejection makes the
+  delegation sticky until compaction is accepted, the model or provider changes, or the session
+  navigates to another branch. Manual `/compact` behavior is unchanged.
+
+### Removed
+
+## [2026.8.29] - 2026-08-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.28-2] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+- Terminal monitor snapshots now also publish on the RPC `extension_event` path as `terminal_monitor_state` (`activeCount` plus per-watch `id`/`description`/`paused`/`startedAtMs`). Clients receive them only when they advertise `extension_events`; the in-process `pi.events` channel is unchanged.
+
+- `--auto-title-sessions` opts non-interactive launches into engine-side session auto-titling, so `--mode rpc` hosts (including `--multi-session`) generate session titles and publish them through the existing `session_info_changed` event. Resumed sessions that already have context messages are still never retitled.
+
+### Changed
+
+### Fixed
+
+- Interactive crashes caused by a full filesystem (`ENOSPC`) or exhausted disk quota (`EDQUOT`) now explain what failed and tell the user to free filesystem space or quota before retrying, while preserving the original error and exit behavior ([#1184](https://github.com/code-yeongyu/senpi/pull/1184) by [@minpeter](https://github.com/minpeter)).
+
+- A client socket that drops while its session's turn is still streaming no longer aborts the run mid-turn: the dropped connection's refcounted release is deferred until the turn settles (`agent_settled`/`agent_idle`), then the path reservation frees as before. This also fixes the RPC socket host never idle-exiting after such a drop (the sealed session leaked the lifecycle observer's busy counter, so the supervisor saw a permanently active turn).
+
+- A model with no fallback chain of its own no longer wedges the session on a terminal error. `resolveChainKey` now falls through exact -> base -> a shipped `"*"` wildcard lane, so an upstream that hard-fails (e.g. repeated provider 500s) can still rotate to a healthy model instead of ending the turn permanently. The wildcard is a last resort only: a model's own chain wins, an in-flight fallback episode keeps walking its own chain, and an explicit `[]` tombstone on the model's key still switches fallback off (`hasExplicitFallbackOptOut`). Disable the lane itself with `"*": []`.
+
+### Removed
+
+## [2026.8.28] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+- Bun-compiled binaries now embed the imagegen bundled skill so resource discovery remains available after compilation.
+
+- `/account <provider> [list | pin <name> | unpin | remove <name>]` manages any provider's credential accounts, the TUI footer shows the active account as `(provider@account)` whenever a provider pools more than one credential, `auth check --json` reports a non-secret `accounts` array, and the account RPC/app-server surfaces (`get_provider_accounts`, `account_pin`, `account_remove`, `account/providerAccounts/*`) now work for every provider instead of only the Claude lane.
+
+### Changed
+
+### Fixed
+
+- Shared interactive host sessions no longer print `Thinking level: [object Promise]` on Shift+Tab: the TUI awaits the four session reads the shared-host proxy answers over RPC (`cycleThinkingLevel`, `getAvailableThinkingLevels`, `getSessionStats`, `getUserMessagesForForking`), the thinking-level status and footer render from the `thinking_level_changed` event so every attached client converges, and `/settings` thinking options, `/fork`, and `/session` work again.
+- User messages no longer render twice in shared-host sessions: the RPC prompt success response now carries `data.disposition` (`started`/`queued`/`handled`), delivered through client response hooks that run synchronously inside frame dispatch, so optimistic user echoes resolve exactly like the local path; `streamingBehavior` and `thinkingLevel` are forwarded again, so mid-stream submissions queue instead of failing.
+- Resuming a session that a live shared host already holds no longer fails with `session_path_in_use`: `open_session` on a fully-open path now attaches to the existing session (same handle, `attached: true`), and the runtime is torn down only when the last attachment closes.
+- Fire-and-forget session setters proxied to the shared host (thinking level, steering/follow-up mode, auto-compaction, session name, bash abort) now surface RPC failures through a typed warning instead of vanishing silently.
+
+- Imagegen missing-skill diagnostics now go to stderr, keeping RPC NDJSON stdout clean when a compiled binary lacks the optional skill asset.
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+### Breaking Changes
+
+### Added
+
+- Any provider holding more than one credential now rotates between them inside a single request: a conversation sticks to one account through session-stable HRW affinity, a 429 or 401 on one account fails over to a healthy sibling before the model fallback chain is consulted, and cooldowns persist across restarts with absolute deadlines. Rotation is transparent only before committed output - a failure after streaming has begun is never replayed. Providers with a single credential are unaffected.
+- A second credential can be added with one environment variable (`OPENAI_API_KEY_2` and up, for any provider's primary key variable) or declared per provider in `models.json` under a validated `credentials` policy block (`rotation`, `affinity`, cooldown bounds, and named slot references). The block holds policy and references only; key material stays in `auth.json` or the environment.
+
+### Fixed
+
+- Goal tool results (`create_goal`, `update_goal`, `get_goal`) now render as a TUI widget — status-colored header with compact token and elapsed usage, objective preview (full objective plus created/updated timestamps when expanded), and the blocked reason — instead of dumping the raw JSON payload into the transcript. The model-facing JSON result text is unchanged.
+
+- The interactive fast-mode indicator and RPC fast-mode state now clear when a session switches from a Codex model to a non-Codex model, instead of retaining a stale `⚡` marker from the previous provider.
+- Native todo lists with an explicit empty `todos: []` payload now clear persisted todo state and remove the `todo-sidebar`, while absent payloads remain ignored and lists with pending work remain visible.
+- Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and late filesystem
+  close failures, waiting for the stream's terminal `close` event and failing only the tool call
+  instead of returning an incomplete path or terminating the interactive session through
+  `uncaughtException`.
+- Tool results without a custom renderer (MCP-wrapped tools and third-party extensions in particular) that return a JSON payload now render as a bounded key-value view in the TUI instead of a raw JSON dump; prose and malformed-JSON outputs keep the previous rendering byte for byte.
+- JavaScript-first `eval` guidance now makes the fastest composition path explicit: the first cells use the persistent JavaScript kernel, independent lookups fan out with `Promise.all`, and a later cell can continue in an idle Python kernel when JavaScript is occupied by detached work. This documents the runtime's actual multi-kernel execution model instead of teaching a serial Python-only workflow.
+- JavaScript kernel persistence transforms now rewrite only top-level declarations and remain literal-safe, so strings and nested function bodies are not accidentally modified when state is carried from one cell to the next.
+- Detached-eval busy diagnostics now identify the occupied cell and list each idle enabled kernel that can continue the step, turning a same-language contention failure into an actionable runtime choice.
+- Eval orchestration keeps detached cells observable and bounded: completion, failure, cancellation, `peek`, and `stop` remain explicit lifecycle states; completion metadata records wall time, kernel time, detach state, and nested tool counts; and the hard wall-clock limit remains active across bridge calls and detachment.
+- JavaScript eval remains available on supported Node runtimes while optional Python, Ruby, and Julia interpreters are capability-gated. The JavaScript kernel uses a persistent worker with a controlled inline fallback, and the runtime exposes bounded `parallel()`/`pipeline()` composition without claiming an unmeasured percentage speedup.
+
+### Added
+
+- Interactive sessions now use the shared multi-session Unix-socket RPC host by default when a persisted session is available, with attach-compatible protocol and capability handshakes; `SENPI_DISABLE_SHARED_HOST=1` opts a launch back into the local runtime. The host lifecycle supervisor provides transient/persistent idle-exit policy and an orphan-proof watchdog, and bundled clients can invoke the hidden supervisor route for the same behavior.
+- Active goals now stop auto-continuing after 150 automatic continuations without accepted direct user input ([#1139](https://github.com/code-yeongyu/senpi/issues/1139)): a persisted unattended budget survives assistant-text changes and tool use, the goal blocks mechanically (`unattended continuation limit reached`), and any user message resumes it with the budget restored. Monitor-delayed deliveries (armed wake sources) do not consume the budget.
+
+### Changed
+
+### Removed
+
+## [2026.8.28] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+- Bun-compiled binaries now embed the imagegen bundled skill so resource discovery remains available after compilation.
+
+- `/account <provider> [list | pin <name> | unpin | remove <name>]` manages any provider's credential accounts, the TUI footer shows the active account as `(provider@account)` whenever a provider pools more than one credential, `auth check --json` reports a non-secret `accounts` array, and the account RPC/app-server surfaces (`get_provider_accounts`, `account_pin`, `account_remove`, `account/providerAccounts/*`) now work for every provider instead of only the Claude lane.
+
+### Changed
+
+### Fixed
+
+- Shared-host `/resume` now completes for sessions with blocked or paused Goals and refreshes the interactive proxy's
+  session identity, manager, history, and token context instead of timing out or returning to the empty bootstrap
+  composer with a stale `0/1M` footer.
+- Shared interactive host sessions no longer print `Thinking level: [object Promise]` on Shift+Tab: the TUI awaits the four session reads the shared-host proxy answers over RPC (`cycleThinkingLevel`, `getAvailableThinkingLevels`, `getSessionStats`, `getUserMessagesForForking`), the thinking-level status and footer render from the `thinking_level_changed` event so every attached client converges, and `/settings` thinking options, `/fork`, and `/session` work again.
+- User messages no longer render twice in shared-host sessions: the RPC prompt success response now carries `data.disposition` (`started`/`queued`/`handled`), delivered through client response hooks that run synchronously inside frame dispatch, so optimistic user echoes resolve exactly like the local path; `streamingBehavior` and `thinkingLevel` are forwarded again, so mid-stream submissions queue instead of failing.
+- Resuming a session that a live shared host already holds no longer fails with `session_path_in_use`: `open_session` on a fully-open path now attaches to the existing session (same handle, `attached: true`), and the runtime is torn down only when the last attachment closes.
+- Fire-and-forget session setters proxied to the shared host (thinking level, steering/follow-up mode, auto-compaction, session name, bash abort) now surface RPC failures through a typed warning instead of vanishing silently.
+- Imagegen missing-skill diagnostics now go to stderr, keeping RPC NDJSON stdout clean when a compiled binary lacks the optional skill asset.
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+### Breaking Changes
+
+### Added
+
+- Any provider holding more than one credential now rotates between them inside a single request: a conversation sticks to one account through session-stable HRW affinity, a 429 or 401 on one account fails over to a healthy sibling before the model fallback chain is consulted, and cooldowns persist across restarts with absolute deadlines. Rotation is transparent only before committed output - a failure after streaming has begun is never replayed. Providers with a single credential are unaffected.
+- A second credential can be added with one environment variable (`OPENAI_API_KEY_2` and up, for any provider's primary key variable) or declared per provider in `models.json` under a validated `credentials` policy block (`rotation`, `affinity`, cooldown bounds, and named slot references). The block holds policy and references only; key material stays in `auth.json` or the environment.
+
+### Fixed
+
+- Goal tool results (`create_goal`, `update_goal`, `get_goal`) now render as a TUI widget — status-colored header with compact token and elapsed usage, objective preview (full objective plus created/updated timestamps when expanded), and the blocked reason — instead of dumping the raw JSON payload into the transcript. The model-facing JSON result text is unchanged.
+
+## [2026.8.26-2] - 2026-08-26
+
+### Breaking Changes
+
+### Fixed
+
+- Cursor quota and eligible hard-error fallback now advances after required pre-retry compaction is rejected instead of stalling the turn; ordinary transient retry compaction blocking is unchanged.
+- Hard-error fallback exhaustion now emits `retry_fallback_exhausted` when the configured chain has no usable candidate.
+- A goal continuation whose backstop timer fired after the session was replaced or reloaded no longer crashes the session with "This extension ctx is stale after session replacement or reload". The timer callback (and its own error handler) now treats a retired context as "no UI" instead of letting the stale-context error escape as an uncaught exception; unrelated delivery failures are still reported.
+- Idle warm compaction now applies as soon as its summary finishes generating while the session is idle, so the `[compaction]` block renders during the idle gap and the next message stacks below it instead of the prompt waiting behind a compaction that was generated minutes earlier; stale or racy applies keep the previous warm-hold behavior.
+- The canonical user message no longer renders above the `[compaction]` block when a compaction applies during prompt admission: the pending-echo reconciliation now appends it after the rebuilt transcript, matching the session's canonical order.
+- An uncaught dead-terminal error (e.g. a stdin read EIO after the controlling terminal detached) no longer prints the `exiting due to uncaughtException` banner and exits 1: `uncaughtCrash` routes it to the silent `emergencyTerminalExit()`, matching terminal write errors. `isDeadTerminalError` now also accepts Bun's raw `errno: 5`/`-5` shape.
+- config-reload no longer rejects a directory watch target that covers the agent directory when every filter glob is root-anchored and none of the anchored paths intersects a protected path (`auth.json`, `sessions/`, `logs/`) in either direction. With the default `~/.omo/agent` layout this lets the omo extension's `~/.omo` user-config watch register instead of failing with "Configuration watch target is restricted" (code-yeongyu/oh-my-openagent#7064). Unfiltered targets, unanchored filters, and filters resolving into or onto a protected path stay rejected.
+- A crash that kills the interactive session is now recorded in the debug log (`<agent dir>/<brand>-debug.log`) as an `uncaught crash (<origin>)` entry with the error and stack, redacted and written with `0600` permissions. Previously the crash banner reached only the terminal, so closing the terminal — or a crash caused by the terminal itself — left no evidence to diagnose. The crash path itself is unchanged: same ordering, same exit code, same banner, and a failed log write cannot affect it.
 ### Added
 
 ### Changed

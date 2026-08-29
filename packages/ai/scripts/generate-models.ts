@@ -15,6 +15,7 @@ import {
 import type {
 	AnthropicMessagesCompat,
 	Api,
+	BedrockCompat,
 	KnownProvider,
 	Model,
 	ModelCost,
@@ -394,7 +395,7 @@ const OPENAI_TOOL_SEARCH_MODEL_IDS = new Set([
 const OPENAI_ADDITIONAL_TOOLS_MODEL_IDS = OPENAI_TOOL_SEARCH_MODEL_IDS;
 const OPENAI_CODEX_ADDITIONAL_TOOLS_MODEL_IDS = new Set(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
 const OPENAI_LONG_CONTEXT_INPUT_THRESHOLD = 272000;
-const GPT_56_SOL_DEFAULT_CONTEXT_WINDOW = 400000;
+const GPT_56_SOL_DEFAULT_CONTEXT_WINDOW = 650000;
 const OPENAI_SHORT_CONTEXT_CAPPED_MODEL_IDS = new Set([
 	"gpt-5.4",
 	"gpt-5.5",
@@ -864,6 +865,18 @@ function applyAnthropicAllowedFallbackModelMetadata(models: readonly Model<"anth
 	}
 }
 
+// Bedrock global cross-region inference profiles for OpenAI GPT-5.6 serve the same
+// weights as the regional `openai.gpt-5.6-*` entries and accept `strict: true` tool
+// schemas, but models.dev only reports `structured_output` on the regional IDs. Without
+// this override a regeneration silently drops `compat.supportsStrictMode`, and
+// `bedrock-converse-stream.ts` then rejects `strict: "require"` sampling and downgrades
+// `strict: "prefer"` to an unconstrained schema.
+const BEDROCK_STRICT_MODE_MODEL_IDS = new Set([
+	"global.openai.gpt-5.6-luna",
+	"global.openai.gpt-5.6-sol",
+	"global.openai.gpt-5.6-terra",
+]);
+
 function applyStrictToolCompatMetadata(model: Model<Api>): void {
 	if (
 		(model.provider === "openai" || model.provider === "cloudflare-ai-gateway") &&
@@ -872,6 +885,8 @@ function applyStrictToolCompatMetadata(model: Model<Api>): void {
 		model.compat = { ...(model.compat as OpenAIResponsesCompat | undefined), supportsStrictMode: true };
 	} else if (model.provider === "anthropic" && model.api === "anthropic-messages") {
 		mergeAnthropicMessagesCompat(model, { supportsStrictTools: true });
+	} else if (model.provider === "amazon-bedrock" && BEDROCK_STRICT_MODE_MODEL_IDS.has(model.id)) {
+		model.compat = { ...(model.compat as BedrockCompat | undefined), supportsStrictMode: true };
 	}
 }
 

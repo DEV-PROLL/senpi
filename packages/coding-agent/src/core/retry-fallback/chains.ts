@@ -2,7 +2,13 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { isValidThinkingLevel } from "../../cli/args.ts";
 import { findExactModelReferenceMatch, parseModelPattern } from "../model-resolver.ts";
-import { type FallbackAuthTiers, MAX_PROVIDERS_PER_FAMILY, parseBareSelector, rankFamilyModels } from "./expansion.ts";
+import {
+	type FallbackAuthTiers,
+	MAX_PROVIDERS_PER_FAMILY,
+	matchesFamily,
+	parseBareSelector,
+	rankFamilyModels,
+} from "./expansion.ts";
 
 export interface FallbackSelector {
 	raw: string;
@@ -127,6 +133,45 @@ export function baseSelector(selector: Pick<FallbackSelector, "provider" | "id">
  * Provider-qualified keys and entries keep exact semantics, and an explicit key
  * always overrides the expansion it collides with.
  */
+/**
+ * Chain key matched when no exact or base key resolves for the current model.
+ * Exists so a model without its own configured chain still has an escape lane:
+ * without it, a hard-failing upstream wedges the session terminal even though
+ * healthy fallback targets exist (desktop thread 487d7c29, 2026-08-28: nine
+ * consecutive upstream 500s, zero fallback attempts, terminal error).
+ * Users disable it with the `"*": []` tombstone.
+ */
+export const WILDCARD_CHAIN_KEY = "*";
+
+/**
+ * Whether the user explicitly switched fallback OFF for this model with the
+ * documented `[]` tombstone (exact key, base key, or a bare family key that
+ * covers it). The shipped wildcard lane must never resurrect fallback against
+ * that instruction, so the wildcard gate consults this first.
+ *
+ * Bare-family matching is deliberately conservative: an ambiguous match
+ * suppresses the wildcard rather than overriding an explicit opt-out, because a
+ * surprising extra fallback hop is worse than a missing convenience lane.
+ */
+export function hasExplicitFallbackOptOut(
+	chains: FallbackChains,
+	currentModel: Model<Api>,
+	currentThinking: ThinkingLevel | undefined,
+): boolean {
+	const base = formatSelector(currentModel).toLowerCase();
+	const exact = currentThinking ? `${base}:${currentThinking}`.toLowerCase() : base;
+	for (const [key, entries] of Object.entries(chains)) {
+		if (!Array.isArray(entries) || !isChainTombstone(entries)) continue;
+		if (key === WILDCARD_CHAIN_KEY) continue;
+		const normalizedKey = key.trim().toLowerCase();
+		const keyBase = normalizedBase(normalizedKey);
+		if (keyBase === base || normalizedKey === exact) return true;
+		// Bare family key (no provider prefix): treat an id match as covering.
+		if (!normalizedKey.includes("/") && matchesFamily(currentModel, keyBase)) return true;
+	}
+	return false;
+}
+
 export function canonicalizeFallbackChains(chains: FallbackChains, lookup: FallbackModelLookup): FallbackChains {
 	const models = availableModels(lookup);
 	const tiers = authTiers(lookup);
@@ -186,6 +231,17 @@ export function canonicalizeFallbackChains(chains: FallbackChains, lookup: Fallb
 		if (tombstones.has(normalizedBase(key))) delete canonical[key];
 	}
 
+	// The wildcard key is not a model selector, so both loops above skip it.
+	// Its entries expand exactly like any other chain; a `[]` tombstone removes
+	// the lane entirely. Self-selection of the failing model is prevented at
+	// candidate time (nextCandidate's "self" skip), not here, because the
+	// wildcard has no key selector to filter against.
+	const wildcardEntries = chains[WILDCARD_CHAIN_KEY];
+	if (Array.isArray(wildcardEntries) && !isChainTombstone(wildcardEntries)) {
+		const canonicalEntries = expandEntries(wildcardEntries, WILDCARD_CHAIN_KEY);
+		if (canonicalEntries.length > 0) canonical[WILDCARD_CHAIN_KEY] = canonicalEntries;
+	}
+
 	return canonical;
 }
 
@@ -193,11 +249,18 @@ export function resolveChainKey(
 	currentModel: Model<Api>,
 	currentThinking: ThinkingLevel | undefined,
 	chains: FallbackChains,
+	options?: { allowWildcard?: boolean },
 ): string | undefined {
 	const base = formatSelector(currentModel);
 	const exact = currentThinking ? `${base}:${currentThinking}` : base;
 	if (Object.hasOwn(chains, exact)) return exact;
-	return Object.hasOwn(chains, base) ? base : undefined;
+	if (Object.hasOwn(chains, base)) return base;
+	// The wildcard is opt-in per call site: it is a last resort for a model with
+	// no chain of its own, and it must never hijack a session already walking a
+	// configured chain (the last rung of that chain usually has no key either).
+	// nextCandidate consults the active episode's chainKey before asking for it.
+	if (!options?.allowWildcard) return undefined;
+	return Object.hasOwn(chains, WILDCARD_CHAIN_KEY) ? WILDCARD_CHAIN_KEY : undefined;
 }
 
 function formatParsedSelector(selector: FallbackSelector): string {

@@ -74,7 +74,7 @@ describe("InteractiveMode scoped-setting caller compatibility", () => {
 		expect(setSessionModel).not.toHaveBeenCalled();
 	});
 
-	it("keeps the settings UI thinking selector on the global-setting setter", () => {
+	it("keeps the settings UI thinking selector on the global-setting setter", async () => {
 		// Given: the settings selector is opened with both thinking-setting APIs observable.
 		const setThinkingLevel = vi.fn();
 		const setSessionThinkingLevel = vi.fn();
@@ -105,7 +105,9 @@ describe("InteractiveMode scoped-setting caller compatibility", () => {
 		}
 
 		// When: the interactive settings callback selects a new thinking level.
-		showSettingsSelector.call(fakeThis);
+		// showSettingsSelector is async: it awaits the (possibly remote) thinking-level
+		// list before building the selector.
+		await showSettingsSelector.call(fakeThis);
 		const callbacks = settingsCapture.callbacks;
 		if (callbacks === undefined) throw new Error("Settings callbacks were not captured");
 		callbacks.onThinkingLevelChange("high");

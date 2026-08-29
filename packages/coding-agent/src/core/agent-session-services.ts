@@ -163,6 +163,8 @@ export async function createAgentSessionServices(
 		options.modelRuntime ??
 		(await ModelRuntime.create({
 			credentials: authStorage,
+			authPath: join(agentDir, "auth.json"),
+			agentDir,
 			modelsPath: join(agentDir, "models.json"),
 			signal: options.modelRuntimeSignal,
 		}));

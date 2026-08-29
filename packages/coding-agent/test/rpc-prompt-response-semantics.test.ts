@@ -335,6 +335,10 @@ describe("RPC prompt response semantics", () => {
 					data: {
 						steering: ["Change direction"],
 						followUp: ["Summarize when finished"],
+						ordered: [
+							{ text: "Change direction", mode: "steer", enqueueOrder: expect.any(Number) },
+							{ text: "Summarize when finished", mode: "followUp", enqueueOrder: expect.any(Number) },
+						],
 					},
 				});
 			});

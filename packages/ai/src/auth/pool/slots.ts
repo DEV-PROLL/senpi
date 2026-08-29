@@ -101,6 +101,23 @@ export function pinSlot(credential: PooledCredential, name: string): PooledCrede
 	return { ...credential, pinned: name };
 }
 
+/**
+ * Projects one named slot onto the flat credential shape for request-scoped
+ * resolution; pool bookkeeping fields are stripped so provider handlers see a
+ * plain credential and never write pool state back through the projection.
+ */
+export function projectSlot(credential: PooledCredential | undefined, name: string): Credential | undefined {
+	if (!credential) return undefined;
+	const slot = findSlot(credential, name);
+	if (!slot) return undefined;
+	const { accounts: _accounts, pinned: _pinned, ...flat } = credential;
+	if (flat.type === "oauth") {
+		if (slot.access === undefined || slot.refresh === undefined || slot.expires === undefined) return undefined;
+		return { ...flat, access: slot.access, refresh: slot.refresh, expires: slot.expires };
+	}
+	return { ...flat, key: slot.key };
+}
+
 function slotFromFlatCredentialNamed(credential: Credential, name: string): CredentialSlot {
 	if (credential.type === "oauth") {
 		return {
@@ -141,6 +158,22 @@ export function appendLoginSlot(current: PooledCredential | undefined, flat: Cre
  * flat fields, while every sibling and the pin survive byte-identical. A flat
  * current entry keeps today's whole-write shape.
  */
+/**
+ * Merges a rotated OAuth credential into the NAMED slot. The flat top-level
+ * projection rotates only when it mirrored that slot's previous material, so
+ * refreshing a secondary slot never disturbs what an older binary reads.
+ */
+export function mergeRefreshedSlot(current: PooledCredential, name: string, refreshed: Credential): Credential {
+	if (refreshed.type !== "oauth" || current.type !== "oauth") return current;
+	if (!Array.isArray(current.accounts) || current.accounts.length === 0) return mergeRefreshed(current, refreshed);
+	const target = current.accounts.find((slot) => slot.name === name);
+	if (!target) return current;
+	const rotated = { access: refreshed.access, refresh: refreshed.refresh, expires: refreshed.expires };
+	const accounts = current.accounts.map((slot) => (slot === target ? { ...slot, ...rotated } : slot));
+	const mirrorsFlat = target.access === current.access || target.refresh === current.refresh;
+	return mirrorsFlat ? { ...current, ...rotated, accounts } : { ...current, accounts };
+}
+
 export function mergeRefreshed(current: PooledCredential, refreshed: Credential): Credential {
 	if (!Array.isArray(current.accounts) || current.accounts.length === 0) {
 		return refreshed;

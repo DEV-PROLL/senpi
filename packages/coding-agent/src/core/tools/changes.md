@@ -1,5 +1,56 @@
 # core/tools changes
 
+## grep is temporarily withheld from the model-facing tool surface (2026-08-29)
+
+### What changed
+
+- `index.ts`: added `temporarilyDisabledToolNames`, currently holding `grep`. Tools named here are
+  still constructed by `createAllToolDefinitions` and stay resolvable through
+  `AgentSession.getRegisteredTool`, but are dropped from the prompt-bearing tool definitions and
+  from the active tool names, so the model can neither see nor call them.
+
+### Why
+
+- Search routing is being re-evaluated and the model should not reach for `grep` in the meantime.
+  This is a withholding, not a removal: every grep code path stays intact, and restoring the tool
+  is deleting its entry from the set.
+
+### Why an extension could not handle it
+
+- The withheld set has to be applied where the session materializes its tool surface; an extension
+  cannot remove a builtin from the prompt-bearing definitions or the active tool names.
+
+### Expected merge conflict zones
+
+- `index.ts`: the `temporarilyDisabledToolNames` export sits directly below `allToolNames`, so an
+  upstream change that adds or removes a builtin tool name will conflict there. Resolve by keeping
+  both the upstream tool-name edit and this set; the set is intended to be emptied, not carried.
+
+## Output spill streams capture early storage failures (2026-08-26)
+
+### What changed
+
+- `output-accumulator.ts`: attaches an `error` listener when its full-output `WriteStream` is
+  created, records the first failure, and rejects `closeTempFile()` through the terminal `close`
+  boundary, including when a filesystem close failure follows `finish`.
+- `closeTempFile()` preserves the first storage failure and removes its error and close listeners
+  after settlement, preventing a premature success or post-completion listener leak.
+
+### Why
+
+- Bash output can cross the in-memory limit while `/tmp` is quota-exhausted. The stream previously
+  had no listener until `closeTempFile()`, so an early `EDQUOT`/`ENOSPC` event reached
+  `uncaughtException` and killed the TUI. A late filesystem close failure could also arrive after
+  `finish`; waiting for `close` ensures the normal tool promise owns either failure.
+
+### Why an extension could not handle it
+
+- The built-in shell tool writes the spill stream before extension result hooks run.
+
+### Expected merge conflict zones
+
+- LOW: `output-accumulator.ts` stream creation and close lifecycle.
+
 ## Tooling layer re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed

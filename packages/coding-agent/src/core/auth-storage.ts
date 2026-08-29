@@ -388,6 +388,10 @@ export class AuthStorage implements CredentialStore {
 		return new AuthStorage(new FileAuthStorageBackend(normalizedAuthPath), normalizedAuthPath);
 	}
 
+	getStoragePath(): string | undefined {
+		return this.authPath;
+	}
+
 	static fromStorage(storage: AuthStorageBackend): AuthStorage {
 		return new AuthStorage(storage);
 	}

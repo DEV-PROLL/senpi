@@ -1,5 +1,25 @@
 # Core Extensions Changes
 
+
+## Builtin /account command (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/account/index.ts` (new) registered as builtin `account`: `/account <provider> [list | pin <name> | unpin | remove <name>]` over `core/credential-accounts.ts`, for every provider. Output carries account names and health only. Existing lane commands (`/claude-account`, cursor accounts) are untouched.
+
+### Why
+
+- Pool management needs one first-class TUI entry point that is not tied to a single provider lane.
+
+### Why an extension could not handle it
+
+- It IS an extension; it ships builtin so every install has the command without configuration.
+
+### Expected merge conflict zones
+
+- LOW: one import + one registration line in `builtin/index.ts`.
+
+
 ## Extension contracts re-diverge from upstream dcd4619 (2026-08-25)
 
 ### What changed

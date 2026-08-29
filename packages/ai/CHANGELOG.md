@@ -11,6 +11,79 @@
 ### Fixed
 
 - Coalesced adjacent Anthropic user and tool-result turns without changing standalone string user-message content.
+- Anthropic prompt caching now retains the previous checkpoint while tool loops append a new result, avoiding repeated prefix reprocessing for API-key and OAuth requests.
+
+### Removed
+
+## [2026.8.29] - 2026-08-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.28-2] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.28] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+- GPT-5.6 Sol model catalog entries now advertise a 650,000-token context window for direct OpenAI and ChatGPT OAuth providers; Terra and Luna remain at 272,000.
+
+### Fixed
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+- Duplicate cursor exec tool-call ids no longer brick Anthropic resumes: exec-frame ids are uniquified before block synthesis (Cursor reuses one parent id across compound-tool sub-frames, e.g. StrReplace → read + write), and the Anthropic pre-submit sanitizer repairs already-corrupted transcripts by renaming duplicate `tool_use` ids payload-wide and remapping their `tool_result` blocks in call order (previously such sessions failed every request with `tool_use ids must be unique`).
+
+### Breaking Changes
+
+### Added
+
+- Credential pool engine under `@earendil-works/pi-ai/auth/pool/*`: HRW slot selection with an injected hasher (`select`), a three-way in-lane failure taxonomy (`classify`), and a slot failover runner (`failover`) that rotates accounts only before committed output and marks post-output failures with the turn-retry suppression prefix.
+- `AuthResolutionOverrides.slotName` resolves provider auth against one named credential slot, refreshing exactly that slot under the store lock while siblings and the flat downgrade projection stay untouched.
+- `getApiKeyEnvVars` is exported so consumers can generalize over the canonical provider-id to API-key env-var mapping instead of re-deriving it.
+
+### Changed
+
+- Credential storage doc comments describe pooled entries: one entry per provider, optionally pooling sibling slots under `accounts` while the flat fields remain a valid credential.
+
+### Fixed
+
+### Removed
+
+## [2026.8.26-2] - 2026-08-26
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Classify kiro-lb gateway byte/token payload-cap and enhanced upstream context-limit rejections as context overflow so the agent shrinks its input and retries instead of failing the session on HTTP 400s.
 
 ### Removed
 
