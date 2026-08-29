@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Coalesced adjacent Anthropic user and tool-result turns without changing standalone string user-message content.
+
 ### Removed
 
 ## [2026.8.26] - 2026-08-26

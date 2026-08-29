@@ -2241,12 +2241,17 @@ function convertMessages(
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				if (msg.content.trim().length > 0) {
-					appendUserBlocks(params, [
-						{
-							type: "text",
-							text: sanitizeSurrogates(msg.content),
-						},
-					]);
+					const lastParam = params[params.length - 1];
+					if (lastParam?.role === "user") {
+						appendUserBlocks(params, [
+							{
+								type: "text",
+								text: sanitizeSurrogates(msg.content),
+							},
+						]);
+					} else {
+						params.push({ role: "user", content: sanitizeSurrogates(msg.content) });
+					}
 				}
 			} else {
 				const blocks: ContentBlockParam[] = msg.content.map((item) => {

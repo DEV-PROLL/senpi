@@ -108,6 +108,31 @@ describe("Anthropic adjacent user and toolResult coalescence", () => {
 		});
 	});
 
+	it("preserves standalone string user messages as string content", async () => {
+		let captured: WirePayload | undefined;
+		const client = {
+			messages: {
+				create: (params: unknown) => {
+					captured = params as WirePayload;
+					return { asResponse: async () => createSseResponse() };
+				},
+			},
+		} as Anthropic;
+
+		const context: Context = {
+			messages: [userMessage("standalone prompt")],
+		};
+
+		const stream = streamAnthropic(getModel("anthropic", "claude-haiku-4-5"), context, {
+			apiKey: "fake-key",
+			client,
+			cacheRetention: "none",
+		});
+		await stream.result();
+
+		expect(captured?.messages).toEqual([{ role: "user", content: "standalone prompt" }]);
+	});
+
 	it("coalesces consecutive user text messages into a single user turn", async () => {
 		let captured: WirePayload | undefined;
 		const client = {
