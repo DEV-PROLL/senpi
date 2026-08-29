@@ -244,6 +244,7 @@ function createRemoteSessionProxy(
 				return (entryId: string, label?: string) => void client.setLabel(entryId, label);
 			}
 			if (property === "getSessionName") return () => state.sessionName;
+			if (property === "getUsageTotals") return () => state.usageTotals;
 			const value = Reflect.get(sessionManager, property, sessionManager);
 			return typeof value === "function" ? value.bind(sessionManager) : value;
 		},
@@ -285,7 +286,26 @@ function createRemoteSessionProxy(
 			local.agent.state.messages.push(structuredClone(wireEvent.message));
 		}
 		if (wireEvent.type === "message_end") {
-			if (wireEvent.message.role === "assistant") streamingAssistant = structuredClone(wireEvent.message);
+			if (wireEvent.message.role === "assistant") {
+				streamingAssistant = structuredClone(wireEvent.message);
+				const usage = wireEvent.message.usage;
+				if (usage) {
+					const latestPromptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+					state = {
+						...state,
+						usageTotals: {
+							...state.usageTotals,
+							input: state.usageTotals.input + usage.input,
+							output: state.usageTotals.output + usage.output,
+							cacheRead: state.usageTotals.cacheRead + usage.cacheRead,
+							cacheWrite: state.usageTotals.cacheWrite + usage.cacheWrite,
+							cost: state.usageTotals.cost + (usage.cost?.total ?? 0),
+							latestCacheHitRate:
+								latestPromptTokens > 0 ? (usage.cacheRead / latestPromptTokens) * 100 : undefined,
+						},
+					};
+				}
+			}
 			const messages = local.agent.state.messages;
 			const previous = messages.at(-1);
 			if (previous?.role === wireEvent.message.role)
@@ -587,6 +607,7 @@ function stateFromRpc(state: {
 	isStreaming: boolean;
 	isCompacting: boolean;
 	pendingMessageCount: number;
+	usageTotals: import("../../core/session-manager.ts").UsageTotals;
 	retryAttempt: number;
 	isBashRunning: boolean;
 	sessionFile?: string;

@@ -185,6 +185,7 @@ export function buildRpcSessionState(session: AgentSession): RpcSessionState {
 		autoCompactionEnabled: session.autoCompactionEnabled,
 		messageCount: session.messages.length,
 		pendingMessageCount: session.pendingMessageCount,
+		usageTotals: session.sessionManager.getUsageTotals(),
 	};
 }
 
