@@ -166,13 +166,11 @@ describe("favorite models frozen order", () => {
 		);
 
 		const renderedLines = selector.render(44).map(stripAnsi);
-		const modelRows = renderedLines.filter((line) => line.includes(`[${provider}]`));
+		const modelRows = renderedLines.filter((line) => /^(?:→ | {2})[*-] /.test(line));
 		expect(modelRows).toHaveLength(ids.length);
 		expect(modelRows.every((line) => visibleWidth(line) <= 44)).toBe(true);
-		expect(
-			renderedLines.filter((line) => /^(?:→ | {2})[*-] /.test(line)).every((line) => line.includes(`[${provider}]`)),
-		).toBe(true);
-		expect(renderedLines.filter((line) => line.includes(longId.slice(0, 30))).length).toBe(1);
+		expect(modelRows.filter((line) => line.includes(`[${provider}]`))).toHaveLength(2);
+		expect(modelRows.some((line) => line.includes(longId.slice(0, 30)) && line.includes("..."))).toBe(true);
 
 		for (let i = 0; i < ids.length; i++) {
 			selector.handleInput("\r");
