@@ -483,6 +483,35 @@ describe("terminal monitor tool", () => {
 		}
 	}, 15_000);
 
+	it("fails closed when a missing target is replaced with an external hardlink", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const outside = await mkdtemp(join(process.cwd(), ".native-outside-"));
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			const target = join(root, "artifact");
+			const external = join(outside, "secret");
+			await registry.registerFile({
+				description: "create hardlink",
+				path: target,
+				event: "create",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			const summary = sink.waitFor(
+				(event) => event.type === "summary" && event.description === "create hardlink",
+				"create hardlink summary",
+			);
+			await writeFile(external, "external");
+			await link(external, target);
+			expect(summaryEvent(await summary).summary).toContain("target identity changed");
+			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(0);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	}, 15_000);
+
 	it("fails closed when an existing target is replaced with an external symlink", async () => {
 		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
 		const outside = await mkdtemp(join(process.cwd(), ".native-outside-"));

@@ -171,7 +171,9 @@ export class MonitorRegistry {
 		try {
 			const target = await this.#registrationAwait(pending, lstat(path));
 			if (target.isSymbolicLink()) throw new Error(`Cannot watch file: target is a symbolic link: ${path}`);
-			initialHandle = await this.#registrationAwait(pending, open(path, "r"));
+			initialHandle = await this.#registrationAwait(pending, open(path, "r"), async (handle) => {
+				await handle.close();
+			});
 			initial = await this.#registrationAwait(pending, initialHandle.stat());
 			if (!initial.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${path}`);
 			const resolvedTarget = await this.#registrationAwait(pending, realpath(path));
@@ -233,15 +235,7 @@ export class MonitorRegistry {
 			cleanupRegistration();
 			throw new Error("Cannot create file monitor: monitor registry is disposed.");
 		}
-		let canonicalPath: string;
-		try {
-			canonicalPath = initial
-				? await this.#registrationAwait(pending, realpath(path))
-				: join(approvedParent, basename(path));
-		} catch (error) {
-			cleanupRegistration();
-			throw error;
-		}
+		const canonicalPath = join(approvedParent, basename(path));
 		let digest: string;
 		try {
 			digest =
@@ -384,7 +378,7 @@ export class MonitorRegistry {
 			handle = await open(record.canonicalPath, "r");
 			const opened = await handle.stat();
 			if (!opened.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${record.path}`);
-			if (record.present && (opened.dev !== record.device || opened.ino !== record.inode) && opened.nlink > 1)
+			if ((opened.dev !== record.device || opened.ino !== record.inode) && opened.nlink > 1)
 				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
 			current = opened;
 			const rebound = await lstat(record.canonicalPath);
@@ -506,34 +500,40 @@ export class MonitorRegistry {
 		}
 	}
 
-	async #registrationAwait<T>(pending: PendingFileRegistration, operation: Promise<T>): Promise<T> {
-		if (pending.abort.signal.aborted)
+	async #registrationAwait<T>(
+		pending: PendingFileRegistration,
+		operation: Promise<T>,
+		lateCleanup?: (value: T) => Promise<void>,
+	): Promise<T> {
+		if (pending.abort.signal.aborted) {
+			void operation.then(
+				(value) => lateCleanup?.(value),
+				() => undefined,
+			);
 			throw new Error("Cannot create file monitor: registration timed out or was disposed.");
-		return Promise.race([
-			operation,
-			new Promise<never>((_, reject) =>
-				pending.abort.signal.addEventListener(
-					"abort",
-					() => reject(new Error("Cannot create file monitor: registration timed out or was disposed.")),
-					{ once: true },
-				),
-			),
-		]);
-	}
-
-	async #digest(path: string, signal?: AbortSignal): Promise<string> {
-		try {
-			if (signal?.aborted) throw new Error("file monitor registration cancelled");
-			const handle = await open(path, "r");
-			try {
-				return await this.#digestHandle(handle, signal);
-			} finally {
-				await handle.close();
-			}
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return "";
-			throw error;
 		}
+		let aborted = false;
+		const abort = new Promise<never>((_, reject) =>
+			pending.abort.signal.addEventListener(
+				"abort",
+				() => {
+					aborted = true;
+					reject(new Error("Cannot create file monitor: registration timed out or was disposed."));
+				},
+				{ once: true },
+			),
+		);
+		const guarded = operation.then(
+			(value) => {
+				if (aborted) void lateCleanup?.(value);
+				return value;
+			},
+			(error) => {
+				if (aborted) return undefined as T;
+				throw error;
+			},
+		);
+		return Promise.race([guarded, abort]);
 	}
 
 	async #digestHandle(handle: FileHandle, signal?: AbortSignal): Promise<string> {

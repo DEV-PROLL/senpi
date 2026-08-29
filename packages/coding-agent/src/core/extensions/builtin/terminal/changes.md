@@ -9,7 +9,7 @@
 
 ### Why
 
-- Native monitors must deliver exactly once and remain safe across cancellation, reload, permission boundaries, filesystem timestamp limitations, and terminal capacity churn. A theoretically reusable `(dev, ino)` tuple (inode ABA) cannot be distinguished by this bounded identity check; an observed delete is handled as absence, while an unobserved ABA window is outside the filesystem guarantees of this native monitor.
+- Native monitors must deliver exactly once and remain safe across cancellation, reload, permission boundaries, filesystem timestamp limitations, and terminal capacity churn. Replacements that expose a symlink or a hardlink to an already-unrelated inode fail closed; a regular-file rename with `nlink === 1` is indistinguishable from a safe atomic save under this predicate and may be reported as `modify`. A theoretically reusable `(dev, ino)` tuple (inode ABA) cannot be distinguished by this bounded identity check; an observed delete is handled as absence, while an unobserved ABA window is outside the filesystem guarantees of this native monitor.
 
 ### Why this cannot be expressed externally
 
