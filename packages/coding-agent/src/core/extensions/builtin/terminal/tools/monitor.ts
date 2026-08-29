@@ -1,5 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
+import { APPROVED_MONITOR_PARENT } from "../monitor-permission.ts";
 import { MonitorRegistry } from "../monitor-registry.ts";
 import { DEFAULT_COLS, DEFAULT_ROWS, TERMINAL_MONITOR_TOOL } from "../shared.ts";
 import { errorResult, type TerminalToolContext, type TerminalToolResult, textResult } from "./context.ts";
@@ -169,6 +170,13 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 						event: input.event ?? "create",
 						timeoutMs: resolveTimeoutMs(input.timeout_ms),
 						cwd: execCtx?.cwd ?? ctx.cwd,
+						...((input as Record<string | symbol, unknown>)[APPROVED_MONITOR_PARENT] !== undefined
+							? {
+									approvedParent: (input as Record<string | symbol, unknown>)[
+										APPROVED_MONITOR_PARENT
+									] as string,
+								}
+							: {}),
 					});
 					return textResult(`Monitor started with ID: ${id}`, {
 						details: { bash_id: id, watch_id: id, monitor: true },

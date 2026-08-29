@@ -721,6 +721,38 @@ describe("terminal monitor tool", () => {
 		}
 	}, 15_000);
 
+	it("fails closed when an internal symlink parent is retargeted after permission approval", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const internal = await mkdtemp(join(root, ".internal-"));
+		const external = await mkdtemp(join(process.cwd(), ".native-external-"));
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			const link = join(root, "parent");
+			const requested = join(link, "artifact");
+			await symlink(internal, link, "dir");
+			const input = { description: "approval race", path: requested } as MonitorInput;
+			const requests = createBuiltinParserRegistry().parse("monitor", input, root);
+			expect(requests.map((request) => request.permission)).toEqual(["read"]);
+			await rm(link);
+			await symlink(external, link, "dir");
+			await writeFile(join(external, "artifact"), "external");
+			const result = await createMonitorTool({ ...ctx, monitorRegistry: registry }).execute(
+				"approval-race",
+				input,
+				undefined,
+				undefined,
+				{ cwd: root },
+			);
+			expect(result.isError).toBe(true);
+			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(0);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+			await rm(internal, { recursive: true, force: true });
+			await rm(external, { recursive: true, force: true });
+		}
+	}, 15_000);
+
 	it("adds external-directory approval for native paths", () => {
 		const requests = createBuiltinParserRegistry().parse("monitor", { path: "/tmp/secret/file" }, process.cwd());
 		expect(requests.map((request) => request.permission)).toEqual(["read", "external_directory"]);

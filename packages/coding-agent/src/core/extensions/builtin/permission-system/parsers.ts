@@ -1,7 +1,10 @@
+import { realpathSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { extractPatchedPaths } from "../gpt-apply-patch/index.ts";
 import { BashArity } from "../permission-system/arity.ts";
 import { extractExternalPaths, isExternalPath } from "../permission-system/external-dir.ts";
 import type { Request } from "../permission-system/types.ts";
+import { setApprovedMonitorParent } from "../terminal/monitor-permission.ts";
 
 /** Simplified permission request without ID/session metadata */
 export type PermissionRequest = Pick<Request, "permission" | "patterns" | "always">;
@@ -141,6 +144,11 @@ export function createBuiltinParserRegistry(): ParserRegistry {
 	registry.register("monitor", (toolName, input, cwd) => {
 		const path = getString(input, "path");
 		if (path) {
+			try {
+				setApprovedMonitorParent(input, realpathSync(dirname(resolve(cwd, path))));
+			} catch {
+				// Registration performs the authoritative access and canonical-parent check.
+			}
 			return withExternalDirectoryRequests(
 				[{ permission: "read", patterns: [path], always: [path] }],
 				[path],

@@ -44,6 +44,7 @@ export interface RegisterFileMonitorOptions {
 	readonly event: "create" | "modify";
 	readonly timeoutMs: number;
 	readonly cwd: string;
+	readonly approvedParent?: string;
 }
 
 export interface RegisterMonitorOptions {
@@ -154,6 +155,10 @@ export class MonitorRegistry {
 		try {
 			await this.#registrationAwait(pending, access(parent));
 			approvedParent = await this.#registrationAwait(pending, realpath(parent));
+			const approvedParentAtPermission = options.approvedParent;
+			if (approvedParentAtPermission !== undefined && approvedParent !== approvedParentAtPermission) {
+				throw new Error(`Cannot watch file: parent directory changed during permission approval: ${parent}`);
+			}
 			if (this.#disposed) throw new Error("Cannot create file monitor: monitor registry is disposed.");
 		} catch (error) {
 			this.#finishPending(pending);

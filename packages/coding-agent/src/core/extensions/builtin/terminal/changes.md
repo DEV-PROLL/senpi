@@ -5,7 +5,7 @@
 ### What changed
 
 - `monitor({ path, event: "create" | "modify" })` now watches a file with a `watch_N` identity.
-- Native watches serialize reconciliation and settlement, handle watcher errors, fence registration during teardown/reload, preserve paused transitions, validate regular files and access errors, detect content-preserving rewrites, share promptly reconciled terminal capacity, and use external-directory approval for external paths. Fingerprints sample the first, middle, and last 64 KiB; duplicate hints are coalesced into at most one trailing reconciliation pass per burst, while the 250 ms poll remains the stable-state backstop.
+- Native watches serialize reconciliation and settlement, handle watcher errors, fence registration during teardown/reload, preserve paused transitions, validate regular files and access errors, detect content-preserving rewrites, share promptly reconciled terminal capacity, use external-directory approval for external paths, and revalidate the approved canonical parent before registration to close symlink retargeting races. Fingerprints sample the first, middle, and last 64 KiB; duplicate hints are coalesced into at most one trailing reconciliation pass per burst, while the 250 ms poll remains the stable-state backstop.
 
 ### Why
 
