@@ -190,6 +190,8 @@ import { createAllToolDefinitions, temporarilyDisabledToolNames } from "./tools/
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
+/** Built-in shell tools routed exclusively through eval when experimental.bashEvalOnly is enabled. */
+const EVAL_ONLY_POLICY_TOOL_NAMES: readonly string[] = ["bash", "powershell"];
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 const DEFERRED_RETRY_QUEUE_OWNERS = new WeakSet<object>();
 
@@ -552,6 +554,8 @@ export interface AgentSessionConfig {
 	initialActiveToolNames?: string[];
 	/** Configured built-in defaults; fork-native builtin extension tools outside this set are omitted. */
 	defaultToolNames?: string[];
+	/** Tool names that remain executable only through the registered eval tool. */
+	evalOnlyToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -949,6 +953,13 @@ export class AgentSession {
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _defaultToolNames?: Set<string>;
+	private _evalOnlyToolNames?: ReadonlySet<string>;
+	/** Explicit config override; when supplied it wins over the settings-derived policy across reloads. */
+	private readonly _evalOnlyToolNamesOverride?: ReadonlySet<string>;
+	/** Policy tools withheld from the model, retained so disarming can restore direct access. */
+	private readonly _withheldEvalOnlyToolNames = new Set<string>();
+	/** Active-tool selection as requested by callers, before eval-only filtering. */
+	private _requestedActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -1061,6 +1072,8 @@ export class AgentSession {
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._defaultToolNames = config.defaultToolNames ? new Set(config.defaultToolNames) : undefined;
+		this._evalOnlyToolNamesOverride = config.evalOnlyToolNames ? new Set(config.evalOnlyToolNames) : undefined;
+		this._evalOnlyToolNames = this._resolveEvalOnlyToolNames();
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -2763,6 +2776,9 @@ export class AgentSession {
 	): Promise<AgentToolResult<TDetails>> {
 		let activeTools = this.getActiveToolNames();
 		let tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		if (!tool && this._isEvalOnlyPolicyArmed() && this._evalOnlyToolNames?.has(toolName)) {
+			tool = this._toolRegistry.get(toolName);
+		}
 		if (
 			!tool &&
 			options?.activateInactiveTool === true &&
@@ -2864,6 +2880,28 @@ export class AgentSession {
 		return this._lazyToolActivators.some((activate) => activate(toolName));
 	}
 
+	private _isEvalOnlyPolicyArmed(): boolean {
+		return this._evalOnlyToolNames !== undefined && this._toolRegistry.has("eval");
+	}
+
+	/**
+	 * Resolve the eval-only policy from settings so a reload picks up a flag change.
+	 * An explicitly configured set stays authoritative for SDK embedders and tests.
+	 */
+	private _resolveEvalOnlyToolNames(): ReadonlySet<string> | undefined {
+		if (this._evalOnlyToolNamesOverride !== undefined) return this._evalOnlyToolNamesOverride;
+		return this.settingsManager.getExperimentalBashEvalOnly() ? new Set(EVAL_ONLY_POLICY_TOOL_NAMES) : undefined;
+	}
+
+	/** Publish per-tool eval-only redirect hints so a direct call names its own eval helper. */
+	private _publishEvalOnlyToolHints(): void {
+		if (!this._isEvalOnlyPolicyArmed()) return;
+		for (const name of this._evalOnlyToolNames ?? []) {
+			this.agent.removedToolHints[name] =
+				`Run ${name} inside an eval cell via tool.${name}({ command: "..." }); hooks and permissions still apply.`;
+		}
+	}
+
 	/**
 	 * Set active tools by name.
 	 * Only tools in the registry can be enabled. Unknown tool names are ignored.
@@ -2905,7 +2943,21 @@ export class AgentSession {
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
-		for (const name of toolNames) {
+		const policyArmed = this._isEvalOnlyPolicyArmed();
+		this._publishEvalOnlyToolHints();
+		const policyNames = this._evalOnlyToolNames;
+		let filteredToolNames = toolNames;
+		if (policyArmed && policyNames) {
+			for (const name of toolNames) {
+				if (policyNames.has(name)) this._withheldEvalOnlyToolNames.add(name);
+			}
+			filteredToolNames = toolNames.filter((name) => !policyNames.has(name));
+		} else {
+			this._withheldEvalOnlyToolNames.clear();
+		}
+		// Remember the unfiltered request so a later disarm can restore withheld shell tools.
+		this._requestedActiveToolNames = [...new Set([...toolNames, ...this._withheldEvalOnlyToolNames])];
+		for (const name of filteredToolNames) {
 			const tool = this._toolRegistry.get(name);
 			if (tool) {
 				tools.push(tool);
@@ -3092,9 +3144,13 @@ export class AgentSession {
 			appendSystemPrompt: loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined,
 		};
 		const basePrompt = loaderSystemPrompt ?? buildDynamicSystemPrompt(this._baseSystemPromptOptions);
-		return loaderAppendSystemPrompt.length > 0
-			? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}`
-			: basePrompt;
+		const prompt =
+			loaderAppendSystemPrompt.length > 0 ? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}` : basePrompt;
+		if (!this._isEvalOnlyPolicyArmed()) return prompt;
+		const helpers = [...(this._evalOnlyToolNames ?? [])]
+			.map((name) => `tool.${name}({ command: "..." })`)
+			.join(" or ");
+		return `${prompt}\n\nShell commands run ONLY inside eval cells via ${helpers}; hooks and permissions still apply.`;
 	}
 
 	/**
@@ -6653,6 +6709,7 @@ export class AgentSession {
 			toolRegistry.set(tool.name, tool);
 		}
 		this._toolRegistry = toolRegistry;
+		this._publishEvalOnlyToolHints();
 		const isDirectlyExposed = (name: string): boolean => {
 			const entry = this._toolDefinitions.get(name);
 			return entry !== undefined && normalizeToolExposure(entry.definition).exposure === "direct";
@@ -6663,7 +6720,9 @@ export class AgentSession {
 		// filesystem-policy wiring) still expect it to activate.
 		const hasExplicitActiveToolNames = options?.activeToolNames !== undefined;
 		const nextActiveToolNames = (
-			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
+			options?.activeToolNames
+				? [...options.activeToolNames]
+				: [...(this._requestedActiveToolNames ?? previousActiveToolNames)]
 		).filter((name) => {
 			if (!isAllowedTool(name)) return false;
 			if (!hasExplicitActiveToolNames && temporarilyDisabledToolNames.has(name)) return false;
@@ -6775,7 +6834,9 @@ export class AgentSession {
 		const oldExtensionIdentities = oldExtensionRunner.getExtensionIdentities();
 		const previousFlagValues = oldExtensionRunner.getFlagValues();
 		const previousActiveToolRegistrationIds = new Map<string, string>();
-		for (const name of this.getActiveToolNames()) {
+		// Cover withheld eval-only tools too: the rebuild drops any seeded name missing from this
+		// map, which would strand shell tools when the policy disarms during this reload.
+		for (const name of this._requestedActiveToolNames ?? this.getActiveToolNames()) {
 			const entry = this._toolDefinitions.get(name);
 			if (entry) previousActiveToolRegistrationIds.set(name, deriveExtensionRegistrationId(entry.sourceInfo, name));
 		}
@@ -6786,6 +6847,11 @@ export class AgentSession {
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
 		this._delegatedCompactionKey = undefined;
+		// Capture the unfiltered request BEFORE the rebuild reassigns it, so a policy that
+		// disarms during this reload can still restore its withheld shell tools.
+		const requestedActiveToolNamesBeforeRebuild = [...(this._requestedActiveToolNames ?? this.getActiveToolNames())];
+		// A flag change must take effect on reload, matching documented settings hot-reload behavior.
+		this._evalOnlyToolNames = this._resolveEvalOnlyToolNames();
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		time("settings", "reload");
@@ -6815,7 +6881,7 @@ export class AgentSession {
 		time("resources", "reload");
 		try {
 			this._buildRuntime({
-				activeToolNames: this.getActiveToolNames(),
+				activeToolNames: requestedActiveToolNamesBeforeRebuild,
 				flagValues: previousFlagValues,
 				includeAllExtensionTools: true,
 				previousActiveToolRegistrationIds,
