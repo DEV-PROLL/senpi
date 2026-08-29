@@ -26,9 +26,11 @@ describe("1043 cursor toolResult truncate", () => {
 		expect(changed).toBe(true);
 		if (!next) throw new Error("expected messages");
 		expect(messageText(next[1]).length).toBe(10_000);
+		expect(next[2]).not.toBe(original);
+		expect(messageText(messages[2])).toBe(`${"a".repeat(1998)}😀tail`);
 		const toolText = messageText(next[2]);
-		expect(next[2]).toBe(original);
-		expect(toolText).toBe(`${"a".repeat(1985)}\n...[truncated]`);
+		expect(toolText).toMatch(/^a+\n\.\.\.\[truncated\]$/);
+		expect(toolText.length).toBeLessThanOrEqual(2000);
 		expect([...toolText].length).toBeLessThanOrEqual(2000);
 		expect(toolText).not.toContain("\ud800");
 	});
@@ -37,13 +39,22 @@ describe("1043 cursor toolResult truncate", () => {
 		const messages = Array.from({ length: 100 }, (_, index) =>
 			textMessage("toolResult", `${index}:${"가".repeat(2000)}`),
 		);
-		const original = messages[0];
 		const { messages: next, changed } = truncateToolResultBodies(messages);
 		expect(changed).toBe(true);
-		expect(next?.[0]).toBe(original);
 		if (!next) throw new Error("expected messages");
+		expect(messageText(next[99])).toMatch(/^99:가+\n\.\.\.\[truncated\]$/);
+		expect(messageText(next[0])).toContain("...[truncated]");
 		const bytes = new TextEncoder().encode(next.map(messageText).join("")).byteLength;
 		expect(bytes).toBeLessThanOrEqual(50_000);
+	});
+
+	it("keeps grapheme clusters intact and retains a marker when only marker space remains", () => {
+		const messages = [textMessage("toolResult", "👩‍💻e\u0301".repeat(10))];
+		const { messages: next } = truncateToolResultBodies(messages, 4, 20);
+		const text = next ? messageText(next[0]) : "";
+		expect(text).toContain("...[truncated]");
+		expect(text).not.toMatch(/👩(?:$|[^‍])/u);
+		expect(text).not.toMatch(/e$/u);
 	});
 
 	it("is a no-op when every toolResult is already short", () => {

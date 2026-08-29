@@ -190,6 +190,8 @@ import { createAllToolDefinitions, temporarilyDisabledToolNames } from "./tools/
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
+/** Built-in shell tools routed exclusively through eval when experimental.bashEvalOnly is enabled. */
+const EVAL_ONLY_POLICY_TOOL_NAMES: readonly string[] = ["bash", "powershell"];
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 const DEFERRED_RETRY_QUEUE_OWNERS = new WeakSet<object>();
 
@@ -552,6 +554,8 @@ export interface AgentSessionConfig {
 	initialActiveToolNames?: string[];
 	/** Configured built-in defaults; fork-native builtin extension tools outside this set are omitted. */
 	defaultToolNames?: string[];
+	/** Tool names that remain executable only through the registered eval tool. */
+	evalOnlyToolNames?: string[];
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -833,44 +837,81 @@ export function truncateToolResultBodies(
 	if (!Array.isArray(messages) || messages.length === 0) return { messages, changed: false };
 	const encoder = new TextEncoder();
 	const byteLength = (text: string): number => encoder.encode(text).byteLength;
-	const markerChars = [...CURSOR_TRUNCATION_MARKER].length;
+	const markerBytes = byteLength(CURSOR_TRUNCATION_MARKER);
+	const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+	const markerChars = [...segmenter.segment(CURSOR_TRUNCATION_MARKER)].length;
+	const textPartCount = messages.reduce(
+		(count, message) =>
+			count +
+			(message.role === "toolResult" && Array.isArray(message.content)
+				? message.content.filter((part) => part.type === "text" && typeof part.text === "string").length
+				: 0),
+		0,
+	);
+	const totalBodyBytes = messages.reduce(
+		(total, message) =>
+			total +
+			(message.role === "toolResult" && Array.isArray(message.content)
+				? message.content.reduce(
+						(sum, part) =>
+							sum +
+							(part.type === "text"
+								? byteLength(part.text)
+								: part.type === "image" && typeof part.data === "string"
+									? byteLength(part.data)
+									: 0),
+						0,
+					)
+				: 0),
+		0,
+	);
+	const effectiveMaxBytes = totalBodyBytes > maxBytes ? Math.max(0, maxBytes - textPartCount * markerBytes) : maxBytes;
 	let usedBytes = 0;
 	let changed = false;
+	const result = messages.slice();
 
-	for (const message of messages) {
+	// Walk newest-to-oldest: the next continuation needs the most recent results.
+	for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+		const message = messages[messageIndex];
 		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
-		for (const part of message.content) {
+		let nextContent: typeof message.content | undefined;
+		for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex--) {
+			const part = message.content[partIndex];
+			if (part.type === "image" && typeof part.data === "string") {
+				const fullBytes = byteLength(part.data);
+				if (usedBytes + fullBytes <= effectiveMaxBytes) {
+					usedBytes += fullBytes;
+				} else {
+					nextContent ??= message.content.slice();
+					nextContent[partIndex] = { ...part, data: "" };
+					changed = true;
+				}
+				continue;
+			}
 			if (part.type !== "text" || typeof part.text !== "string") continue;
 			const text = part.text;
-			const codePoints = [...text];
-			const alreadyWithinPartLimit = codePoints.length <= maxChars;
+			const graphemes = [...segmenter.segment(text)].map((segment) => segment.segment);
 			const fullBytes = byteLength(text);
-			if (alreadyWithinPartLimit && usedBytes + fullBytes <= maxBytes) {
+			if (graphemes.length <= maxChars && usedBytes + fullBytes <= maxBytes) {
 				usedBytes += fullBytes;
 				continue;
 			}
 
-			const remainingBytes = Math.max(0, maxBytes - usedBytes);
-			const markerBytes = byteLength(CURSOR_TRUNCATION_MARKER);
-			if (remainingBytes < markerBytes) {
-				part.text = "";
-				changed = true;
-				continue;
-			}
-			const contentLimit = Math.max(0, maxChars - markerChars);
-			const availableBytes = remainingBytes - markerBytes;
+			const availableBytes = Math.max(0, effectiveMaxBytes - usedBytes - markerBytes);
 			let kept = "";
-			for (const codePoint of codePoints.slice(0, contentLimit)) {
-				if (byteLength(kept + codePoint) > availableBytes) break;
-				kept += codePoint;
+			for (const grapheme of graphemes.slice(0, Math.max(0, maxChars - markerChars))) {
+				if (byteLength(kept + grapheme) > availableBytes) break;
+				kept += grapheme;
 			}
 			const nextText = kept + CURSOR_TRUNCATION_MARKER;
-			part.text = nextText;
+			nextContent ??= message.content.slice();
+			nextContent[partIndex] = { ...part, text: nextText };
 			usedBytes += byteLength(nextText);
 			changed = true;
 		}
+		if (nextContent) result[messageIndex] = { ...message, content: nextContent };
 	}
-	return { messages, changed };
+	return { messages: changed ? result : messages, changed };
 }
 
 // ============================================================================
@@ -1002,6 +1043,13 @@ export class AgentSession {
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
 	private _initialActiveToolNames?: string[];
 	private _defaultToolNames?: Set<string>;
+	private _evalOnlyToolNames?: ReadonlySet<string>;
+	/** Explicit config override; when supplied it wins over the settings-derived policy across reloads. */
+	private readonly _evalOnlyToolNamesOverride?: ReadonlySet<string>;
+	/** Policy tools withheld from the model, retained so disarming can restore direct access. */
+	private readonly _withheldEvalOnlyToolNames = new Set<string>();
+	/** Active-tool selection as requested by callers, before eval-only filtering. */
+	private _requestedActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
 	private _baseToolsOverride?: Record<string, AgentTool>;
@@ -1114,6 +1162,8 @@ export class AgentSession {
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._defaultToolNames = config.defaultToolNames ? new Set(config.defaultToolNames) : undefined;
+		this._evalOnlyToolNamesOverride = config.evalOnlyToolNames ? new Set(config.evalOnlyToolNames) : undefined;
+		this._evalOnlyToolNames = this._resolveEvalOnlyToolNames();
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
 		this._baseToolsOverride = config.baseToolsOverride;
@@ -1365,12 +1415,9 @@ export class AgentSession {
 				: undefined);
 		const previousTransformContext = this.agent.transformContext;
 		this.agent.transformContext = async (messages, signal) => {
-			if (this.model?.provider === "cursor" || this.model?.provider === "cursor-cli-oauth") {
-				truncateToolResultBodies(messages);
-			}
 			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
 			if (this.model?.provider === "cursor" || this.model?.provider === "cursor-cli-oauth") {
-				truncateToolResultBodies(transformed);
+				return truncateToolResultBodies(transformed).messages ?? transformed;
 			}
 			return transformed;
 		};
@@ -1386,7 +1433,7 @@ export class AgentSession {
 				// mutates rootPrompt mid-run and poisons conversationId (#984).
 				// Still truncate verbatim toolResult bodies so the skip cannot send MB-scale payloads (#1043).
 				if (provider === "cursor" || provider === "cursor-cli-oauth") {
-					return this._truncateCursorToolResultBodies();
+					return false;
 				}
 				if (turn.toolResults.length === 0 && !this.agent.hasQueuedMessages()) {
 					return false;
@@ -2829,6 +2876,9 @@ export class AgentSession {
 	): Promise<AgentToolResult<TDetails>> {
 		let activeTools = this.getActiveToolNames();
 		let tool = this.agent.state.tools.find((candidate) => candidate.name === toolName);
+		if (!tool && this._isEvalOnlyPolicyArmed() && this._evalOnlyToolNames?.has(toolName)) {
+			tool = this._toolRegistry.get(toolName);
+		}
 		if (
 			!tool &&
 			options?.activateInactiveTool === true &&
@@ -2930,6 +2980,28 @@ export class AgentSession {
 		return this._lazyToolActivators.some((activate) => activate(toolName));
 	}
 
+	private _isEvalOnlyPolicyArmed(): boolean {
+		return this._evalOnlyToolNames !== undefined && this._toolRegistry.has("eval");
+	}
+
+	/**
+	 * Resolve the eval-only policy from settings so a reload picks up a flag change.
+	 * An explicitly configured set stays authoritative for SDK embedders and tests.
+	 */
+	private _resolveEvalOnlyToolNames(): ReadonlySet<string> | undefined {
+		if (this._evalOnlyToolNamesOverride !== undefined) return this._evalOnlyToolNamesOverride;
+		return this.settingsManager.getExperimentalBashEvalOnly() ? new Set(EVAL_ONLY_POLICY_TOOL_NAMES) : undefined;
+	}
+
+	/** Publish per-tool eval-only redirect hints so a direct call names its own eval helper. */
+	private _publishEvalOnlyToolHints(): void {
+		if (!this._isEvalOnlyPolicyArmed()) return;
+		for (const name of this._evalOnlyToolNames ?? []) {
+			this.agent.removedToolHints[name] =
+				`Run ${name} inside an eval cell via tool.${name}({ command: "..." }); hooks and permissions still apply.`;
+		}
+	}
+
 	/**
 	 * Set active tools by name.
 	 * Only tools in the registry can be enabled. Unknown tool names are ignored.
@@ -2971,7 +3043,21 @@ export class AgentSession {
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
-		for (const name of toolNames) {
+		const policyArmed = this._isEvalOnlyPolicyArmed();
+		this._publishEvalOnlyToolHints();
+		const policyNames = this._evalOnlyToolNames;
+		let filteredToolNames = toolNames;
+		if (policyArmed && policyNames) {
+			for (const name of toolNames) {
+				if (policyNames.has(name)) this._withheldEvalOnlyToolNames.add(name);
+			}
+			filteredToolNames = toolNames.filter((name) => !policyNames.has(name));
+		} else {
+			this._withheldEvalOnlyToolNames.clear();
+		}
+		// Remember the unfiltered request so a later disarm can restore withheld shell tools.
+		this._requestedActiveToolNames = [...new Set([...toolNames, ...this._withheldEvalOnlyToolNames])];
+		for (const name of filteredToolNames) {
 			const tool = this._toolRegistry.get(name);
 			if (tool) {
 				tools.push(tool);
@@ -3158,9 +3244,13 @@ export class AgentSession {
 			appendSystemPrompt: loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined,
 		};
 		const basePrompt = loaderSystemPrompt ?? buildDynamicSystemPrompt(this._baseSystemPromptOptions);
-		return loaderAppendSystemPrompt.length > 0
-			? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}`
-			: basePrompt;
+		const prompt =
+			loaderAppendSystemPrompt.length > 0 ? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}` : basePrompt;
+		if (!this._isEvalOnlyPolicyArmed()) return prompt;
+		const helpers = [...(this._evalOnlyToolNames ?? [])]
+			.map((name) => `tool.${name}({ command: "..." })`)
+			.join(" or ");
+		return `${prompt}\n\nShell commands run ONLY inside eval cells via ${helpers}; hooks and permissions still apply.`;
 	}
 
 	/**
@@ -5329,7 +5419,6 @@ export class AgentSession {
 				}
 			}
 			this.agent.state.messages = [...sessionContext.messages, ...preservedPendingMessages];
-			this._truncateCursorToolResultBodies();
 			compactionResult.estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
 			this._incrementMessageRevision();
 			if (
@@ -5446,7 +5535,6 @@ export class AgentSession {
 			pendingMessages.push(message);
 		}
 		this.agent.state.messages = [...sessionMessages, ...pendingMessages];
-		this._truncateCursorToolResultBodies();
 	}
 
 	private async _rejectCompaction(
@@ -6726,6 +6814,7 @@ export class AgentSession {
 			toolRegistry.set(tool.name, tool);
 		}
 		this._toolRegistry = toolRegistry;
+		this._publishEvalOnlyToolHints();
 		const isDirectlyExposed = (name: string): boolean => {
 			const entry = this._toolDefinitions.get(name);
 			return entry !== undefined && normalizeToolExposure(entry.definition).exposure === "direct";
@@ -6736,7 +6825,9 @@ export class AgentSession {
 		// filesystem-policy wiring) still expect it to activate.
 		const hasExplicitActiveToolNames = options?.activeToolNames !== undefined;
 		const nextActiveToolNames = (
-			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
+			options?.activeToolNames
+				? [...options.activeToolNames]
+				: [...(this._requestedActiveToolNames ?? previousActiveToolNames)]
 		).filter((name) => {
 			if (!isAllowedTool(name)) return false;
 			if (!hasExplicitActiveToolNames && temporarilyDisabledToolNames.has(name)) return false;
@@ -6848,7 +6939,9 @@ export class AgentSession {
 		const oldExtensionIdentities = oldExtensionRunner.getExtensionIdentities();
 		const previousFlagValues = oldExtensionRunner.getFlagValues();
 		const previousActiveToolRegistrationIds = new Map<string, string>();
-		for (const name of this.getActiveToolNames()) {
+		// Cover withheld eval-only tools too: the rebuild drops any seeded name missing from this
+		// map, which would strand shell tools when the policy disarms during this reload.
+		for (const name of this._requestedActiveToolNames ?? this.getActiveToolNames()) {
 			const entry = this._toolDefinitions.get(name);
 			if (entry) previousActiveToolRegistrationIds.set(name, deriveExtensionRegistrationId(entry.sourceInfo, name));
 		}
@@ -6859,6 +6952,11 @@ export class AgentSession {
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
 		this._delegatedCompactionKey = undefined;
+		// Capture the unfiltered request BEFORE the rebuild reassigns it, so a policy that
+		// disarms during this reload can still restore its withheld shell tools.
+		const requestedActiveToolNamesBeforeRebuild = [...(this._requestedActiveToolNames ?? this.getActiveToolNames())];
+		// A flag change must take effect on reload, matching documented settings hot-reload behavior.
+		this._evalOnlyToolNames = this._resolveEvalOnlyToolNames();
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		time("settings", "reload");
@@ -6888,7 +6986,7 @@ export class AgentSession {
 		time("resources", "reload");
 		try {
 			this._buildRuntime({
-				activeToolNames: this.getActiveToolNames(),
+				activeToolNames: requestedActiveToolNamesBeforeRebuild,
 				flagValues: previousFlagValues,
 				includeAllExtensionTools: true,
 				previousActiveToolRegistrationIds,
@@ -6982,14 +7080,6 @@ export class AgentSession {
 
 	private _isCursorPayloadOverflow(message: AssistantMessage): boolean {
 		return isCursorPayloadResourceExhausted(message, 0);
-	}
-
-	private _truncateCursorToolResultBodies(maxChars = CURSOR_TOOL_RESULT_MAX_CHARS): boolean {
-		const provider = this.model?.provider;
-		if (provider !== "cursor" && provider !== "cursor-cli-oauth") return false;
-		const { messages: next, changed } = truncateToolResultBodies(this.agent?.state?.messages, maxChars);
-		if (changed && next) this.agent.state.messages = next;
-		return changed;
 	}
 
 	private _truncateAgentMessagesToLastUserTurn(): boolean {
