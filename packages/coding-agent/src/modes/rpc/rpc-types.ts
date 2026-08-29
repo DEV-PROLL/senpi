@@ -33,6 +33,7 @@ type RpcSessionCommand =
 			images?: ImageContent[];
 			streamingBehavior?: "steer" | "followUp";
 			thinkingLevel?: ThinkingLevel;
+			sessionTitlePrompt?: string | false;
 			expandPromptTemplates?: boolean;
 	  }
 	| {
@@ -64,7 +65,9 @@ type RpcSessionCommand =
 
 	// Model
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
-	| { id?: string; type: "cycle_model" }
+	| { id?: string; type: "set_favorite_models"; models: RpcSessionModelEntry[] }
+	| { id?: string; type: "set_scoped_models"; models: RpcSessionModelEntry[] }
+	| { id?: string; type: "cycle_model"; direction?: "forward" | "backward" }
 	| { id?: string; type: "get_available_models" }
 
 	// Thinking
@@ -93,6 +96,8 @@ type RpcSessionCommand =
 			id?: string;
 			type: "bash";
 			command: string;
+			/** Identifies output chunks to the requesting client. */
+			bashId?: string;
 			excludeFromContext?: boolean;
 			operations?: Record<string, unknown>;
 	  }
@@ -111,7 +116,7 @@ type RpcSessionCommand =
 
 	// Session
 	| { id?: string; type: "get_session_stats" }
-	| { id?: string; type: "export_html"; outputPath?: string }
+	| { id?: string; type: "export_html"; outputPath?: string; themeName?: string }
 	| { id?: string; type: "export_jsonl"; outputPath?: string }
 	| { id?: string; type: "switch_session"; sessionPath: string; cwdOverride?: string }
 	| { id?: string; type: "fork"; entryId: string; position?: "before" | "at" }
@@ -257,6 +262,13 @@ export interface RpcLoadedMcpServer {
 // RPC State
 // ============================================================================
 
+export interface RpcSessionModelEntry {
+	model: Model<any>;
+	thinkingLevel?: ThinkingLevel;
+	thinkingSelection?: ThinkingSelection;
+	serviceTier?: ServiceTier;
+}
+
 export interface RpcSessionState {
 	model?: Model<any>;
 	thinkingLevel: ThinkingLevel;
@@ -289,6 +301,8 @@ export interface RpcSessionState {
 	projectTrusted: boolean;
 	/** Authoritative entries for setup-only sessions whose deferred file does not exist yet. */
 	entries?: SessionEntry[];
+	favoriteModels: RpcSessionModelEntry[];
+	scopedModels: RpcSessionModelEntry[];
 	steering: string[];
 	followUp: string[];
 	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
@@ -387,6 +401,8 @@ export type RpcResponse =
 			success: true;
 			data: Model<any> & { systemPromptName?: string };
 	  }
+	| { id?: string; type: "response"; command: "set_favorite_models"; success: true }
+	| { id?: string; type: "response"; command: "set_scoped_models"; success: true }
 	| {
 			id?: string;
 			type: "response";

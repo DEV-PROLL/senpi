@@ -25,6 +25,7 @@ import type {
 	RpcExtensionUIResponse,
 	RpcProviderAccount,
 	RpcResponse,
+	RpcSessionModelEntry,
 	RpcSessionState,
 	RpcSlashCommand,
 } from "./rpc-types.ts";
@@ -70,6 +71,7 @@ type PromptOptions = {
 	thinkingLevel?: ThinkingLevel;
 	promptDisposition?: (disposition: PromptDisposition) => void;
 	preflightResult?: (success: boolean) => void;
+	sessionTitlePrompt?: string | false;
 	expandPromptTemplates?: boolean;
 };
 
@@ -365,6 +367,7 @@ export class RpcClient {
 				...(options.images ? { images: options.images } : {}),
 				...(options.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
 				...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+				...(options.sessionTitlePrompt !== undefined ? { sessionTitlePrompt: options.sessionTitlePrompt } : {}),
 				...(options.expandPromptTemplates !== undefined
 					? { expandPromptTemplates: options.expandPromptTemplates }
 					: {}),
@@ -510,12 +513,20 @@ export class RpcClient {
 	/**
 	 * Cycle to next model.
 	 */
-	async cycleModel(): Promise<{
+	async setFavoriteModels(models: RpcSessionModelEntry[]): Promise<void> {
+		await this.send({ type: "set_favorite_models", models });
+	}
+
+	async setScopedModels(models: RpcSessionModelEntry[]): Promise<void> {
+		await this.send({ type: "set_scoped_models", models });
+	}
+
+	async cycleModel(direction: "forward" | "backward" = "forward"): Promise<{
 		model: { provider: string; id: string };
 		thinkingLevel: ThinkingLevel;
 		isScoped: boolean;
 	} | null> {
-		const response = await this.send({ type: "cycle_model" });
+		const response = await this.send({ type: "cycle_model", direction });
 		return this.getData(response);
 	}
 
@@ -625,11 +636,12 @@ export class RpcClient {
 	 */
 	async bash(
 		command: string,
-		options?: { excludeFromContext?: boolean; operations?: Record<string, unknown> },
+		options?: { excludeFromContext?: boolean; operations?: Record<string, unknown>; bashId?: string },
 	): Promise<BashResult> {
 		const response = await this.send({
 			type: "bash",
 			command,
+			bashId: options?.bashId,
 			excludeFromContext: options?.excludeFromContext,
 			operations: options?.operations,
 		});
@@ -662,8 +674,8 @@ export class RpcClient {
 	/**
 	 * Export session to HTML.
 	 */
-	async exportHtml(outputPath?: string): Promise<{ path: string }> {
-		const response = await this.send({ type: "export_html", outputPath });
+	async exportHtml(outputPath?: string, themeName?: string): Promise<{ path: string }> {
+		const response = await this.send({ type: "export_html", outputPath, themeName });
 		return this.getData(response);
 	}
 

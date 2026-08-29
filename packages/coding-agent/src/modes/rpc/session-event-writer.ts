@@ -154,6 +154,7 @@ export class SessionEventWriter {
 		const record = value as RpcRecord;
 		const isTargeted =
 			record.type === "response" ||
+			record.type === "bash_execution_update" ||
 			(record.type === "extension_ui_request" &&
 				["select", "confirm", "input", "editor"].includes(String(record.method)));
 		const tagged = { ...value, sessionId } as RpcRecord;

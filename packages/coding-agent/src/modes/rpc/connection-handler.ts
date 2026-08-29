@@ -197,6 +197,8 @@ export function buildRpcSessionState(session: AgentSession, lastAbortSource?: Ag
 		pendingMessageCount: session.pendingMessageCount,
 		usageTotals: session.sessionManager.getUsageTotals(),
 		contextUsage: session.getContextUsage(),
+		favoriteModels: session.favoriteModels.map((entry) => ({ ...entry })),
+		scopedModels: session.scopedModels.map((entry) => ({ ...entry })),
 	};
 }
 
@@ -865,6 +867,7 @@ export function createRpcConnectionHandler(
 						images: command.images,
 						streamingBehavior: command.streamingBehavior,
 						thinkingLevel: command.thinkingLevel,
+						sessionTitlePrompt: command.sessionTitlePrompt,
 						expandPromptTemplates: command.expandPromptTemplates,
 						source: "rpc",
 						promptDisposition: (nextDisposition) => {
@@ -990,8 +993,16 @@ export function createRpcConnectionHandler(
 				return success(id, "set_model", { ...model, systemPromptName: systemPromptChange?.systemPromptName });
 			}
 
+			case "set_favorite_models":
+				session.setFavoriteModels(command.models);
+				return success(id, "set_favorite_models");
+
+			case "set_scoped_models":
+				session.setScopedModels(command.models);
+				return success(id, "set_scoped_models");
+
 			case "cycle_model": {
-				const result = await session.cycleModel();
+				const result = await session.cycleModel(command.direction);
 				if (!result) {
 					return success(id, "cycle_model", null);
 				}
@@ -1163,6 +1174,7 @@ export function createRpcConnectionHandler(
 					}
 					const result = await session.executeBash(command.command, undefined, {
 						excludeFromContext: command.excludeFromContext,
+						id: command.bashId,
 						// Functions cannot cross JSONL. Host extensions may still provide the
 						// executable operations object; client-supplied data is only a wire-safe hint.
 						operations: eventResult?.operations,
@@ -1188,7 +1200,7 @@ export function createRpcConnectionHandler(
 			}
 
 			case "export_html": {
-				const path = await session.exportToHtml(command.outputPath);
+				const path = await session.exportToHtml(command.outputPath, { themeName: command.themeName });
 				return success(id, "export_html", { path });
 			}
 

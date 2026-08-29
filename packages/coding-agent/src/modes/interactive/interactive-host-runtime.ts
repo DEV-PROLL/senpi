@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionEvent, AgentSessionEventListener } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
@@ -250,7 +251,7 @@ function createRemoteSessionProxy(
 		});
 	};
 	let state = { ...initialState };
-	let bashChunk: ((chunk: string) => void) | undefined;
+	const bashChunks = new Map<string, (chunk: string) => void>();
 	let hostUiHandler: InteractiveHostUiHandler | undefined;
 	const pendingUiRequests: import("../rpc/rpc-types.ts").RpcExtensionUIRequest[] = [];
 	let localBashAbortController: AbortController | undefined;
@@ -298,7 +299,7 @@ function createRemoteSessionProxy(
 			hostBashRunning = false;
 			updateBashState();
 		}
-		if (wireEvent.type === "bash_execution_update") bashChunk?.(wireEvent.delta);
+		if (wireEvent.type === "bash_execution_update" && wireEvent.id) bashChunks.get(wireEvent.id)?.(wireEvent.delta);
 		if (wireEvent.type === "agent_start") state = { ...state, isStreaming: true };
 		if (wireEvent.type === "compaction_start") state = { ...state, isCompacting: true };
 		if (wireEvent.type === "compaction_end") state = { ...state, isCompacting: false };
@@ -419,6 +420,12 @@ function createRemoteSessionProxy(
 						...(options?.images ? { images: options.images } : {}),
 						...(options?.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
 						...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+						...(options?.sessionTitlePrompt !== undefined
+							? { sessionTitlePrompt: options.sessionTitlePrompt }
+							: {}),
+						...(options?.expandPromptTemplates !== undefined
+							? { expandPromptTemplates: options.expandPromptTemplates }
+							: {}),
 						...(options?.promptDisposition ? { promptDisposition: options.promptDisposition } : {}),
 						...(options?.preflightResult ? { preflightResult: options.preflightResult } : {}),
 					});
@@ -476,7 +483,17 @@ function createRemoteSessionProxy(
 				return (enabled: boolean) =>
 					void client.setAutoRetry(enabled).catch(reportActionFailure("setAutoRetryEnabled"));
 			if (property === "reserveQueuedInputOrder") return () => ++nextQueuedInputOrder;
-			if (property === "cycleModel") return () => client.cycleModel();
+			if (property === "setFavoriteModels")
+				return (models: Parameters<AgentSession["setFavoriteModels"]>[0]) => {
+					state = { ...state, favoriteModels: [...models] };
+					void client.setFavoriteModels(models).catch(reportActionFailure("setFavoriteModels"));
+				};
+			if (property === "setScopedModels")
+				return (models: Parameters<AgentSession["setScopedModels"]>[0]) => {
+					state = { ...state, scopedModels: [...models] };
+					void client.setScopedModels(models).catch(reportActionFailure("setScopedModels"));
+				};
+			if (property === "cycleModel") return (direction?: "forward" | "backward") => client.cycleModel(direction);
 			if (property === "setThinkingLevel")
 				return (level: AgentSession["thinkingLevel"]) =>
 					void client.setThinkingLevel(level).catch(reportActionFailure("setThinkingLevel"));
@@ -524,14 +541,16 @@ function createRemoteSessionProxy(
 							updateBashState();
 						}
 					}
-					bashChunk = onChunk;
+					const bashId = randomUUID();
+					if (onChunk) bashChunks.set(bashId, onChunk);
 					try {
 						return await client.bash(command, {
 							excludeFromContext: options?.excludeFromContext,
 							operations: options?.operations as Record<string, unknown> | undefined,
+							bashId,
 						});
 					} finally {
-						bashChunk = undefined;
+						bashChunks.delete(bashId);
 					}
 				};
 			if (property === "abortBash")
@@ -542,7 +561,8 @@ function createRemoteSessionProxy(
 			if (property === "getContextUsage") return () => state.contextUsage;
 			if (property === "getSessionStats") return () => client.getSessionStats();
 			if (property === "exportToHtml")
-				return (outputPath?: string) => client.exportHtml(outputPath).then((result) => result.path);
+				return (outputPath?: string, options?: { themeName?: string }) =>
+					client.exportHtml(outputPath, options?.themeName).then((result) => result.path);
 			if (property === "setSessionName")
 				return (name: string) => client.setSessionName(name).catch(reportActionFailure("setSessionName"));
 			if (property === "navigateTree")
@@ -619,6 +639,8 @@ function createRemoteSessionProxy(
 			if (property === "sessionManager") return remoteSessionManager;
 			if (property === "settingsManager") return settingsManager;
 			if (property === "messages") return target.messages;
+			if (property === "favoriteModels") return state.favoriteModels;
+			if (property === "scopedModels") return state.scopedModels;
 			if (property === "model") return state.model ?? target.model;
 			if (property === "thinkingLevel") return state.thinkingLevel;
 			return Reflect.get(target, property, receiver);
@@ -719,6 +741,8 @@ function stateFromRpc(state: {
 	followUpMode: AgentSession["followUpMode"];
 	autoCompactionEnabled: boolean;
 	entries?: import("../../core/session-manager.ts").SessionEntry[];
+	favoriteModels: import("../rpc/rpc-types.ts").RpcSessionModelEntry[];
+	scopedModels: import("../rpc/rpc-types.ts").RpcSessionModelEntry[];
 	steering: string[];
 	followUp: string[];
 	ordered: Array<{ text: string; mode: "steer" | "followUp"; enqueueOrder: number }>;
