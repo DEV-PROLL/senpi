@@ -96,7 +96,7 @@ export async function createInteractiveHostRuntime(
 	}
 }
 
-class RemoteInteractiveRuntime {
+export class RemoteInteractiveRuntime {
 	readonly #local: AgentSessionRuntime;
 	readonly #remoteSession: RemoteSessionProxy;
 	readonly #client: RpcClient;
@@ -137,9 +137,19 @@ class RemoteInteractiveRuntime {
 		this.#remoteSession.setHostUiHandler(callback);
 	}
 	async dispose(): Promise<void> {
-		await this.#client.closeSession();
-		await this.#client.stop();
-		await this.#local.dispose();
+		const errors: unknown[] = [];
+		for (const cleanup of [
+			() => this.#client.closeSession(),
+			() => this.#client.stop(),
+			() => this.#local.dispose(),
+		]) {
+			try {
+				await cleanup();
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+		if (errors.length > 0) throw errors[0];
 	}
 	async newSession(options?: {
 		parentSession?: string;

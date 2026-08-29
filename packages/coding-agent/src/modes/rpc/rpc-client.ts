@@ -91,6 +91,13 @@ function isProviderAccountEvent(event: RpcClientEvent): event is RpcProviderAcco
 // RPC Client
 // ============================================================================
 
+function isTransportGoneError(error: unknown): boolean {
+	return (
+		error instanceof Error &&
+		(error.message === "Client not started" || error.message.startsWith("RPC transport is not writable."))
+	);
+}
+
 export class RpcClient {
 	private process: ChildProcess | null = null;
 	private socket: Socket | null = null;
@@ -303,7 +310,11 @@ export class RpcClient {
 
 	async closeSession(sessionId = this.sessionId): Promise<void> {
 		if (!sessionId) return;
-		await this.send({ type: "close_session", sessionId }, false);
+		try {
+			await this.send({ type: "close_session", sessionId }, false);
+		} catch (error) {
+			if (!isTransportGoneError(error)) throw error;
+		}
 		if (this.sessionId === sessionId) this.sessionId = undefined;
 	}
 
@@ -412,7 +423,11 @@ export class RpcClient {
 	 * Abort current operation.
 	 */
 	async abort(): Promise<void> {
-		await this.send({ type: "abort" });
+		try {
+			await this.send({ type: "abort" });
+		} catch (error) {
+			if (!isTransportGoneError(error)) throw error;
+		}
 	}
 
 	async abortCompaction(): Promise<void> {
