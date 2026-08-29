@@ -458,11 +458,23 @@ function createRemoteSessionProxy(
 				};
 			if (property === "waitForIdle") return () => client.waitForIdle();
 			if (property === "getLastAssistantText") return () => target.getLastAssistantText();
-			if (property === "setModel")
+			if (property === "setModel" || property === "setSessionModel")
 				return async (model: NonNullable<AgentSession["model"]>) => {
 					const next = await client.setModel(model.provider, model.id);
 					return { systemPromptName: next.systemPromptName, model: next };
 				};
+			if (property === "setSessionThinkingLevel")
+				return (level: AgentSession["thinkingLevel"]) =>
+					void client
+						.setThinkingLevel(level, { scope: "turn" })
+						.catch(reportActionFailure("setSessionThinkingLevel"));
+			if (property === "setSessionFastMode")
+				return (enabled: boolean) =>
+					void client.setFastMode(enabled).catch(reportActionFailure("setSessionFastMode"));
+			if (property === "abortRetry") return () => void client.abortRetry().catch(reportActionFailure("abortRetry"));
+			if (property === "setAutoRetryEnabled")
+				return (enabled: boolean) =>
+					void client.setAutoRetry(enabled).catch(reportActionFailure("setAutoRetryEnabled"));
 			if (property === "reserveQueuedInputOrder") return () => ++nextQueuedInputOrder;
 			if (property === "cycleModel") return () => client.cycleModel();
 			if (property === "setThinkingLevel")

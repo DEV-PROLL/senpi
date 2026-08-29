@@ -477,6 +477,40 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("routes session-scoped mutations to the host", async () => {
+		const qa = scratch("scoped");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const warnings: unknown[] = [];
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined, onWarning: (warning) => warnings.push(warning) },
+		);
+		try {
+			const settled = new Promise<void>((resolve) => {
+				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type !== "thinking_level_changed") return;
+					unsubscribe();
+					resolve();
+				});
+			});
+			runtime.session.setSessionThinkingLevel("low");
+			await settled;
+			expect(runtime.session.thinkingLevel).toBe("low");
+			expect(warnings).toEqual([]);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("hydrates the session manager when attaching after another client advances the host", async () => {
 		const qa = scratch("attach-hydration");
 		const fake = await startFakeModelServer();
