@@ -27,6 +27,16 @@ describe("AgentSession prompt characterization", () => {
 		}
 	});
 
+	it("publishes durable entries for ordinary prompt messages", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("hello")]);
+
+		await harness.session.prompt("hi");
+
+		expect(harness.eventsOfType("entry_appended").map((event) => event.entry.type)).toEqual(["message", "message"]);
+	});
+
 	it("prompts while idle and records a single text response", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);

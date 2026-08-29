@@ -424,6 +424,12 @@ export type AgentSessionEvent =
 	/** Effective service tier or fast-mode state changed. */
 	| { type: "service_tier_changed"; tier?: ServiceTier; fastMode: boolean }
 	| {
+			type: "session_settings_changed";
+			steeringMode: "all" | "one-at-a-time";
+			followUpMode: "all" | "one-at-a-time";
+			autoCompactionEnabled: boolean;
+	  }
+	| {
 			type: "compaction_end";
 			reason: CompactionReason;
 			result: CompactionResult | undefined;
@@ -1406,6 +1412,11 @@ export class AgentSession {
 	// =========================================================================
 
 	/** Emit an event to all listeners */
+	private _emitEntryAppended(entryId: string): void {
+		const entry = this.sessionManager.getEntry(entryId);
+		if (entry) this._emit({ type: "entry_appended", entry });
+	}
+
 	private _emit(event: AgentSessionEvent): void {
 		this._logSessionEvent(event);
 		for (const l of this._eventListeners) {
@@ -2078,7 +2089,7 @@ export class AgentSession {
 				event.message.role === "toolResult"
 			) {
 				// Regular LLM message - persist as SessionMessageEntry
-				this.sessionManager.appendMessage(event.message);
+				this._emitEntryAppended(this.sessionManager.appendMessage(event.message));
 				this._incrementMessageRevision();
 			}
 			// Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
@@ -3954,11 +3965,13 @@ export class AgentSession {
 
 	private _appendCustomMessage(appMessage: CustomMessage): void {
 		this.agent.state.messages.push(appMessage);
-		this.sessionManager.appendCustomMessageEntry(
-			appMessage.customType,
-			appMessage.content,
-			appMessage.display,
-			appMessage.details,
+		this._emitEntryAppended(
+			this.sessionManager.appendCustomMessageEntry(
+				appMessage.customType,
+				appMessage.content,
+				appMessage.display,
+				appMessage.details,
+			),
 		);
 		this._incrementMessageRevision();
 		this._emit({ type: "message_start", message: appMessage });
@@ -4595,6 +4608,7 @@ export class AgentSession {
 	setSteeringMode(mode: "all" | "one-at-a-time"): void {
 		this.agent.steeringMode = mode;
 		this.settingsManager.setSteeringMode(mode);
+		this._emitSessionSettingsChanged();
 	}
 
 	/**
@@ -4604,6 +4618,7 @@ export class AgentSession {
 	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
 		this.agent.followUpMode = mode;
 		this.settingsManager.setFollowUpMode(mode);
+		this._emitSessionSettingsChanged();
 	}
 
 	// =========================================================================
@@ -6117,6 +6132,16 @@ export class AgentSession {
 	 */
 	setAutoCompactionEnabled(enabled: boolean): void {
 		this.settingsManager.setCompactionEnabled(enabled);
+		this._emitSessionSettingsChanged();
+	}
+
+	private _emitSessionSettingsChanged(): void {
+		this._emit({
+			type: "session_settings_changed",
+			steeringMode: this.steeringMode,
+			followUpMode: this.followUpMode,
+			autoCompactionEnabled: this.autoCompactionEnabled,
+		});
 	}
 
 	/** Whether auto-compaction is enabled */
