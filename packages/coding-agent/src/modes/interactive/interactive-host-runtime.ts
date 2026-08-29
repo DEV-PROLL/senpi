@@ -227,9 +227,23 @@ function createRemoteSessionProxy(
 		});
 	};
 	let state = { ...initialState };
-	let bashChunk: ((chunk: string) => void | PromiseLike<void>) | undefined;
-	let bashCallbackPromises: Promise<void>[] | undefined;
-	let bashCallbackError: unknown;
+	const waitForBashCallbacks = async (promises: Set<Promise<void>>): Promise<void> => {
+		if (promises.size === 0) return;
+		await Promise.race([
+			Promise.allSettled([...promises]).then(() => undefined),
+			new Promise<void>((resolve) => setTimeout(resolve, 100)),
+		]);
+	};
+	let nextBashExecutionId = 0;
+	const bashExecutions = new Map<
+		string,
+		{
+			chunk?: (chunk: string) => void | PromiseLike<void>;
+			promises: Set<Promise<void>>;
+			error: unknown;
+			hasError: boolean;
+		}
+	>();
 	let localBashAbortController: AbortController | undefined;
 	let localBashRunning = false;
 	let hostBashRunning = initialState.isBashRunning;
@@ -264,21 +278,26 @@ function createRemoteSessionProxy(
 			hostBashRunning = false;
 			updateBashState();
 		}
-		if (wireEvent.type === "bash_execution_update" && bashChunk) {
-			try {
-				const callbackPromise = Promise.resolve(bashChunk(wireEvent.delta)).catch((error) => {
-					if (bashCallbackError === undefined) {
-						bashCallbackError = error;
+		if (wireEvent.type === "bash_execution_update" && wireEvent.id) {
+			const execution = bashExecutions.get(wireEvent.id);
+			if (execution?.chunk && !execution.hasError) {
+				try {
+					const callbackPromise = Promise.resolve(execution.chunk(wireEvent.delta)).catch((error) => {
+						if (!execution.hasError) {
+							execution.error = error;
+							execution.hasError = true;
+							void client.abortBash().catch(() => {});
+						}
+						throw error;
+					});
+					execution.promises.add(callbackPromise);
+					void callbackPromise.catch(() => {}).finally(() => execution.promises.delete(callbackPromise));
+				} catch (error) {
+					if (!execution.hasError) {
+						execution.error = error;
+						execution.hasError = true;
 						void client.abortBash().catch(() => {});
 					}
-					throw error;
-				});
-				bashCallbackPromises?.push(callbackPromise);
-				void callbackPromise.catch(() => {});
-			} catch (error) {
-				if (bashCallbackError === undefined) {
-					bashCallbackError = error;
-					void client.abortBash().catch(() => {});
 				}
 			}
 		}
@@ -470,21 +489,25 @@ function createRemoteSessionProxy(
 							updateBashState();
 						}
 					}
-					bashChunk = onChunk;
-					bashCallbackPromises = [];
-					bashCallbackError = undefined;
+					const executionId = `bash-${++nextBashExecutionId}`;
+					const execution = {
+						chunk: onChunk,
+						promises: new Set<Promise<void>>(),
+						error: undefined as unknown,
+						hasError: false,
+					};
+					bashExecutions.set(executionId, execution);
 					try {
 						const result = await client.bash(command, {
 							excludeFromContext: options?.excludeFromContext,
+							executionId,
 							operations: options?.operations as Record<string, unknown> | undefined,
 						});
-						await Promise.all(bashCallbackPromises);
-						if (bashCallbackError !== undefined) throw bashCallbackError;
+						await waitForBashCallbacks(execution.promises);
+						if (execution.hasError) throw execution.error;
 						return result;
 					} finally {
-						bashChunk = undefined;
-						bashCallbackPromises = undefined;
-						bashCallbackError = undefined;
+						bashExecutions.delete(executionId);
 					}
 				};
 			if (property === "abortBash")

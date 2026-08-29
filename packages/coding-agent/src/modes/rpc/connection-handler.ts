@@ -1103,6 +1103,7 @@ export function createRpcConnectionHandler(
 					}
 					const result = await session.executeBash(command.command, undefined, {
 						excludeFromContext: command.excludeFromContext,
+						id: command.executionId,
 						// Functions cannot cross JSONL. Host extensions may still provide the
 						// executable operations object; client-supplied data is only a wire-safe hint.
 						operations: eventResult?.operations,

@@ -92,6 +92,7 @@ type RpcSessionCommand =
 			type: "bash";
 			command: string;
 			excludeFromContext?: boolean;
+			executionId?: string;
 			operations?: Record<string, unknown>;
 	  }
 	| { id?: string; type: "record_bash_result"; command: string; result: BashResult; excludeFromContext?: boolean }

@@ -61,7 +61,14 @@ export async function executeBashWithOperations(
 		: callbackAbortController.signal;
 	let callbackError: unknown;
 	let hasCallbackError = false;
-	const callbackPromises: Promise<void>[] = [];
+	const callbackPromises = new Set<Promise<void>>();
+	const waitForCallbacks = async (): Promise<void> => {
+		if (callbackPromises.size === 0) return;
+		await Promise.race([
+			Promise.allSettled([...callbackPromises]).then(() => undefined),
+			new Promise<void>((resolve) => setTimeout(resolve, 100)),
+		]);
+	};
 	let outputChunkStart = 0;
 	let outputBytes = 0;
 	const maxOutputBytes = DEFAULT_MAX_BYTES * 2;
@@ -226,11 +233,15 @@ export async function executeBashWithOperations(
 							throw error;
 						},
 					);
-					callbackPromises.push(callbackPromise);
-					void callbackPromise.catch(() => {});
+					callbackPromises.add(callbackPromise);
+					void callbackPromise.catch(() => {}).finally(() => callbackPromises.delete(callbackPromise));
 					return callbackPromise;
 				}
 			} catch (error) {
+				if (!hasCallbackError) {
+					callbackError = error;
+					hasCallbackError = true;
+				}
 				callbackAbortController.abort();
 				throw error;
 			}
@@ -265,7 +276,7 @@ export async function executeBashWithOperations(
 			signal: executionSignal,
 		});
 	} catch (err) {
-		await Promise.allSettled(callbackPromises);
+		await waitForCallbacks();
 		// Check if it was an abort
 		if (hasCallbackError) {
 			return await closeTempFileAndCleanup(callbackError);
@@ -277,19 +288,23 @@ export async function executeBashWithOperations(
 			} catch (error) {
 				return await closeTempFileAndCleanup(error);
 			}
+			try {
+				await removeTempFile();
+			} catch (cleanupError) {
+				throw new AggregateError([cleanupError], "Bash output cleanup failed");
+			}
 			return {
 				output: truncationResult.truncated ? truncationResult.content : fullOutput,
 				exitCode: undefined,
 				cancelled: true,
 				truncated: truncationResult.truncated,
-				fullOutputPath: tempFilePath,
 			};
 		}
 
 		return await closeTempFileAndCleanup(err);
 	}
 
-	await Promise.allSettled(callbackPromises);
+	await waitForCallbacks();
 	if (hasCallbackError) {
 		return await closeTempFileAndCleanup(callbackError);
 	}
