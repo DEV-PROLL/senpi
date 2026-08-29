@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
-import { access, lstat, open, realpath, stat, type FileHandle } from "node:fs/promises";
+import { access, type FileHandle, lstat, open, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import { describeExit } from "./tools/spawn.ts";
@@ -167,10 +167,24 @@ export class MonitorRegistry {
 			throw new Error(`Cannot watch file: parent directory does not exist: ${parent}`);
 		}
 		let initial: Awaited<ReturnType<typeof stat>> | null = null;
+		let initialHandle: FileHandle | undefined;
 		try {
-			initial = await this.#registrationAwait(pending, stat(path));
+			const target = await this.#registrationAwait(pending, lstat(path));
+			if (target.isSymbolicLink()) throw new Error(`Cannot watch file: target is a symbolic link: ${path}`);
+			initialHandle = await this.#registrationAwait(pending, open(path, "r"));
+			initial = await this.#registrationAwait(pending, initialHandle.stat());
 			if (!initial.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${path}`);
+			const resolvedTarget = await this.#registrationAwait(pending, realpath(path));
+			if (resolvedTarget !== join(approvedParent, basename(path)))
+				throw new Error(`Cannot watch file: target identity changed: ${path}`);
+			const rebound = await this.#registrationAwait(pending, lstat(path));
+			if (rebound.isSymbolicLink()) throw new Error(`Cannot watch file: target identity changed: ${path}`);
+			const reboundStat = await this.#registrationAwait(pending, stat(path));
+			if (!reboundStat.isFile() || reboundStat.dev !== initial.dev || reboundStat.ino !== initial.ino)
+				throw new Error(`Cannot watch file: target identity changed: ${path}`);
 		} catch (error) {
+			await initialHandle?.close();
+			initialHandle = undefined;
 			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
 				this.#finishPending(pending);
 				this.#pendingRegistrations -= 1;
@@ -230,17 +244,22 @@ export class MonitorRegistry {
 		}
 		let digest: string;
 		try {
-			digest = initial
-				? await this.#registrationAwait(pending, this.#digest(canonicalPath, pending.abort.signal))
-				: "";
+			digest =
+				initial && initialHandle
+					? await this.#registrationAwait(pending, this.#digestHandle(initialHandle, pending.abort.signal))
+					: "";
 		} catch (error) {
 			cleanupRegistration();
+			await initialHandle?.close();
+			initialHandle = undefined;
 			if (registrationError) {
 				this.#emit({ type: "summary", id, description: options.description, summary: registrationError });
 				throw new Error(registrationError);
 			}
 			throw error;
 		}
+		await initialHandle?.close();
+		initialHandle = undefined;
 		if (registrationError) {
 			cleanupRegistration();
 			this.#emit({ type: "summary", id, description: options.description, summary: registrationError });
@@ -362,16 +381,16 @@ export class MonitorRegistry {
 			const resolvedTarget = await realpath(record.canonicalPath);
 			if (resolvedTarget !== record.canonicalPath)
 				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
-			current = await stat(record.canonicalPath);
-			if (!current.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${record.path}`);
-			if (record.present && (current.dev !== record.device || current.ino !== record.inode))
-				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
 			handle = await open(record.canonicalPath, "r");
 			const opened = await handle.stat();
-			if (!opened.isFile() || (record.present && (opened.dev !== record.device || opened.ino !== record.inode)))
+			if (!opened.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${record.path}`);
+			if (record.present && (opened.dev !== record.device || opened.ino !== record.inode) && opened.nlink > 1)
 				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
-			const rebound = await stat(record.canonicalPath);
-			if (!rebound.isFile() || rebound.dev !== opened.dev || rebound.ino !== opened.ino)
+			current = opened;
+			const rebound = await lstat(record.canonicalPath);
+			if (rebound.isSymbolicLink()) throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
+			const reboundPath = await stat(record.canonicalPath);
+			if (!reboundPath.isFile() || reboundPath.dev !== opened.dev || reboundPath.ino !== opened.ino)
 				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
 		} catch (error) {
 			await handle?.close();

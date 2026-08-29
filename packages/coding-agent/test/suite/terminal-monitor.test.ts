@@ -1,4 +1,4 @@
-import { link, mkdtemp, open, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { link, mkdtemp, open, rename, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { vi } from "vitest";
 
 const fsState = vi.hoisted(() => ({
@@ -394,8 +394,17 @@ describe("terminal monitor tool", () => {
 		const registry = new MonitorRegistry((event) => sink.push(event));
 		try {
 			await writeFile(target, "before");
-			await registry.registerFile({ description: "open race", path: target, event: "modify", timeoutMs: 5000, cwd: root });
-			const summary = sink.waitFor((event) => event.type === "summary" && event.description === "open race", "open race summary");
+			await registry.registerFile({
+				description: "open race",
+				path: target,
+				event: "modify",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			const summary = sink.waitFor(
+				(event) => event.type === "summary" && event.description === "open race",
+				"open race summary",
+			);
 			const external = join(outside, "secret");
 			await writeFile(external, "external");
 			let armed = true;
@@ -424,8 +433,17 @@ describe("terminal monitor tool", () => {
 			const replacement = join(root, "replacement");
 			await writeFile(target, "before");
 			await writeFile(replacement, "external");
-			await registry.registerFile({ description: "hardlink swap", path: target, event: "modify", timeoutMs: 5000, cwd: root });
-			const summary = sink.waitFor((event) => event.type === "summary" && event.description === "hardlink swap", "hardlink summary");
+			await registry.registerFile({
+				description: "hardlink swap",
+				path: target,
+				event: "modify",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			const summary = sink.waitFor(
+				(event) => event.type === "summary" && event.description === "hardlink swap",
+				"hardlink summary",
+			);
 			await rm(target);
 			await link(replacement, target);
 			expect(summaryEvent(await summary).summary).toContain("target identity changed");
@@ -489,6 +507,88 @@ describe("terminal monitor tool", () => {
 			await symlink(external, target);
 			expect(summaryEvent(await summary).summary).toContain("target identity changed");
 			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(0);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("delivers modify for an atomic-save replacement", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const file = join(root, "artifact");
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			await writeFile(file, "before");
+			await registry.registerFile({
+				description: "atomic save",
+				path: file,
+				event: "modify",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			const line = sink.waitFor((event) => event.type === "line", "atomic-save modify");
+			const temporary = join(root, ".artifact.tmp");
+			await writeFile(temporary, "after");
+			await rename(temporary, file);
+			expect((await line).type).toBe("line");
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("does not digest an externally retargeted target during registration", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const outside = await mkdtemp(join(process.cwd(), ".native-outside-"));
+		const target = join(root, "artifact");
+		const external = join(outside, "secret");
+		const registry = new MonitorRegistry(() => {});
+		try {
+			await writeFile(target, "internal");
+			await writeFile(external, "SECRET");
+			let armed = true;
+			fsState.onOpen = async () => {
+				if (!armed) return;
+				armed = false;
+				await rm(target);
+				await symlink(external, target);
+			};
+			await expect(
+				registry.registerFile({
+					description: "registration swap",
+					path: target,
+					event: "modify",
+					timeoutMs: 5000,
+					cwd: root,
+				}),
+			).rejects.toThrow(/identity|symbolic/i);
+		} finally {
+			fsState.onOpen = undefined;
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("rejects an initially symlinked target", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const outside = await mkdtemp(join(process.cwd(), ".native-outside-"));
+		const registry = new MonitorRegistry(() => {});
+		try {
+			const external = join(outside, "secret");
+			const target = join(root, "artifact");
+			await writeFile(external, "secret");
+			await symlink(external, target);
+			await expect(
+				registry.registerFile({
+					description: "initial symlink",
+					path: target,
+					event: "modify",
+					timeoutMs: 5000,
+					cwd: root,
+				}),
+			).rejects.toThrow(/symbolic|regular|identity/i);
 		} finally {
 			registry.dispose();
 			await rm(root, { recursive: true, force: true });

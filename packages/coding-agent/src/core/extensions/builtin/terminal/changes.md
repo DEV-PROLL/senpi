@@ -9,7 +9,7 @@
 
 ### Why
 
-- Native monitors must deliver exactly once and remain safe across cancellation, reload, permission boundaries, filesystem timestamp limitations, and terminal capacity churn.
+- Native monitors must deliver exactly once and remain safe across cancellation, reload, permission boundaries, filesystem timestamp limitations, and terminal capacity churn. A theoretically reusable `(dev, ino)` tuple (inode ABA) cannot be distinguished by this bounded identity check; an observed delete is handled as absence, while an unobserved ABA window is outside the filesystem guarantees of this native monitor.
 
 ### Why this cannot be expressed externally
 
