@@ -1,0 +1,159 @@
+import { Container } from "@earendil-works/pi-tui";
+import { beforeAll, describe, expect, test, vi } from "vitest";
+import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
+import { initTheme, theme } from "../src/modes/interactive/theme/theme.ts";
+
+function stripAnsi(value: string): string {
+	return value.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+const EXTERNAL_OWNER_MESSAGE = "Compaction rejected: the Claude Agent SDK owns compaction for this session";
+
+function makeFakeThis() {
+	const chatContainer = new Container();
+	return {
+		isInitialized: true,
+		footer: { invalidate: vi.fn(), setCompactionDelegated: vi.fn() },
+		autoCompactionEscapeHandler: undefined as (() => void) | undefined,
+		autoCompactionLoader: undefined as { stop(): void } | undefined,
+		autoCompactionProgressText: "",
+		defaultEditor: {} as { onEscape?: () => void },
+		session: { abortCompaction: vi.fn() },
+		statusContainer: { clear: vi.fn() },
+		chatContainer,
+		sessionManager: {
+			buildContextEntries: vi.fn().mockReturnValue([
+				{
+					type: "compaction",
+					id: "latest",
+					parentId: null,
+					timestamp: "2025-01-01T00:00:00Z",
+					summary: "summary",
+					firstKeptEntryId: "kept",
+					tokensBefore: 1,
+				},
+			]),
+		},
+		rebuildChatFromMessages: vi.fn(),
+		renderSessionEntries: vi.fn(),
+		addMessageToChat: vi.fn(),
+		addCompactionCostNotice: vi.fn(),
+		showError: vi.fn(),
+		showWarning: vi.fn(),
+		showStatus: vi.fn(),
+		clearStatusIndicator: vi.fn(),
+		compactionQueuedMessages: [] as Array<{ text: string; mode: "steer" | "followUp" }>,
+		getSessionLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }),
+		flushCompactionQueue: vi.fn().mockResolvedValue(undefined),
+		restoreQueuedMessagesToEditor: vi.fn().mockReturnValue(0),
+		settingsManager: { getShowTerminalProgress: () => false },
+		ui: { requestRender: vi.fn(), terminal: { setProgress: vi.fn() } },
+	};
+}
+
+type FakeThis = ReturnType<typeof makeFakeThis>;
+
+const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
+	this: FakeThis,
+	event: Record<string, unknown>,
+) => Promise<void>;
+
+function externalOwnerEvent(reason = "threshold") {
+	return {
+		type: "compaction_end",
+		reason,
+		accepted: false,
+		rejectionCause: "external-owner",
+		errorMessage: EXTERNAL_OWNER_MESSAGE,
+		willRetry: false,
+	};
+}
+
+function renderChat(fakeThis: FakeThis): string {
+	return fakeThis.chatContainer.render(120).join("\n");
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+	return haystack.split(needle).length - 1;
+}
+
+describe("external-owner compaction rejection rendering", () => {
+	beforeAll(() => {
+		initTheme("dark");
+	});
+
+	test("two auto external-owner rejections render exactly one muted notice and no error line", async () => {
+		const fakeThis = makeFakeThis();
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+
+		const raw = renderChat(fakeThis);
+		const plain = stripAnsi(raw);
+		expect(plain).not.toContain(EXTERNAL_OWNER_MESSAGE);
+		expect(countOccurrences(plain, "Claude Agent SDK")).toBe(1);
+		// Muted informational styling, not error styling.
+		const noticeLine = plain
+			.split("\n")
+			.find((line) => line.includes("Claude Agent SDK"))
+			?.trim();
+		expect(noticeLine).toBeTruthy();
+		expect(raw).toContain(theme.fg("muted", noticeLine as string));
+		expect(raw).not.toContain(theme.fg("error", noticeLine as string));
+		expect(fakeThis.showError).not.toHaveBeenCalled();
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenCalledWith(true);
+	});
+
+	test("manual external-owner rejection keeps explicit error feedback", async () => {
+		const fakeThis = makeFakeThis();
+
+		await handleEvent.call(fakeThis, externalOwnerEvent("manual"));
+
+		expect(fakeThis.showError).toHaveBeenCalledWith(EXTERNAL_OWNER_MESSAGE);
+		expect(stripAnsi(renderChat(fakeThis))).not.toContain("Claude Agent SDK");
+	});
+
+	test("a successful compaction re-arms the one-time notice", async () => {
+		const fakeThis = makeFakeThis();
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(1);
+
+		await handleEvent.call(fakeThis, {
+			type: "compaction_end",
+			reason: "threshold",
+			accepted: true,
+			result: { summary: "compacted", tokensBefore: 100 },
+			willRetry: false,
+		});
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(false);
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(1);
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(true);
+	});
+
+	test("a model switch re-arms the one-time notice", async () => {
+		const fakeThis = Object.assign(makeFakeThis(), {
+			session: {
+				abortCompaction: vi.fn(),
+				setModel: vi.fn().mockResolvedValue(undefined),
+			},
+			updateEditorBorderColor: vi.fn(),
+			showRiskyMainModelWarning: vi.fn(),
+			maybeWarnAboutAnthropicSubscriptionAuth: vi.fn().mockResolvedValue(undefined),
+			checkDaxnutsEasterEgg: vi.fn(),
+		});
+		const selectModelFromUi = Reflect.get(InteractiveMode.prototype, "selectModelFromUi") as (
+			this: typeof fakeThis,
+			model: { id: string },
+		) => Promise<void>;
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		await selectModelFromUi.call(fakeThis, { id: "some-model" });
+		expect(fakeThis.footer.setCompactionDelegated).toHaveBeenLastCalledWith(false);
+
+		await handleEvent.call(fakeThis, externalOwnerEvent());
+		expect(countOccurrences(stripAnsi(renderChat(fakeThis)), "Claude Agent SDK")).toBe(2);
+	});
+});
