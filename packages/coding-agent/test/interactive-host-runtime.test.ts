@@ -147,6 +147,7 @@ describe("interactive host runtime", () => {
 		const getState = vi.spyOn(RpcClient.prototype, "getState");
 		let messageUpdates = 0;
 		let assistantUpdatesWithUsage = 0;
+		let assistantMessageEnds = 0;
 		const runtime = await createInteractiveHostRuntime(local, {
 			socket: qa.socket,
 			ensureHost: async () => undefined,
@@ -155,6 +156,7 @@ describe("interactive host runtime", () => {
 		try {
 			const settled = new Promise<void>((resolve) => {
 				const unsubscribe = runtime.session.subscribe((event) => {
+					if (event.type === "message_end" && event.message.role === "assistant") assistantMessageEnds++;
 					if (event.type === "message_update") {
 						messageUpdates++;
 						if (event.message.role === "assistant" && event.message.usage) assistantUpdatesWithUsage++;
@@ -171,6 +173,7 @@ describe("interactive host runtime", () => {
 			expect(assistantUpdatesWithUsage).toBeGreaterThan(1);
 			expect(messageUpdates).toBe(3);
 			expect(assistantUpdatesWithUsage).toBe(3);
+			expect(assistantMessageEnds).toBe(1);
 			expect(runtime.session.sessionManager.getUsageTotals()).toEqual({
 				input: 1,
 				output: 1,
