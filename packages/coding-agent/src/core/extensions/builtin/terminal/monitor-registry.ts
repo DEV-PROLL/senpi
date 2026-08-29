@@ -1,3 +1,6 @@
+import { type FSWatcher, watch } from "node:fs";
+import { access, stat } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import { describeExit } from "./tools/spawn.ts";
 
@@ -30,6 +33,16 @@ export interface MonitorSnapshotEntry {
 export interface MonitorRegistryOptions {
 	/** Observes every registry transition (register/pause/rearm/settle/dispose) with the live snapshot. */
 	readonly onChange?: (snapshot: readonly MonitorSnapshotEntry[]) => void;
+	/** Reserves one shared terminal capacity slot for a native watch. */
+	readonly reserve?: () => (() => void) | null;
+}
+
+export interface RegisterFileMonitorOptions {
+	readonly description: string;
+	readonly path: string;
+	readonly event: "create" | "modify";
+	readonly timeoutMs: number;
+	readonly cwd: string;
 }
 
 export interface RegisterMonitorOptions {
@@ -37,6 +50,22 @@ export interface RegisterMonitorOptions {
 	readonly description: string;
 	readonly runtime: TerminalRuntimeSession;
 	readonly filter?: RegExp;
+}
+
+interface FileMonitorRecord {
+	readonly id: string;
+	readonly description: string;
+	readonly startedAtMs: number;
+	readonly path: string;
+	readonly event: "create" | "modify";
+	readonly watcher: FSWatcher;
+	readonly release: () => void;
+	readonly poll: ReturnType<typeof setInterval>;
+	paused: boolean;
+	settled: boolean;
+	present: boolean;
+	mtimeMs: number;
+	readonly deadline: ReturnType<typeof setTimeout>;
 }
 
 interface MonitorRecord {
@@ -61,19 +90,125 @@ export class MonitorRegistry {
 	readonly #records = new Map<string, MonitorRecord>();
 	readonly #emit: (event: MonitorEvent) => void;
 	readonly #onChange: ((snapshot: readonly MonitorSnapshotEntry[]) => void) | undefined;
+	readonly #reserve: (() => (() => void) | null) | undefined;
+	readonly #files = new Map<string, FileMonitorRecord>();
+	#nextFileId = 1;
 
 	constructor(emit: (event: MonitorEvent) => void, options?: MonitorRegistryOptions) {
 		this.#emit = emit;
 		this.#onChange = options?.onChange;
+		this.#reserve = options?.reserve;
 	}
 
 	snapshot(): readonly MonitorSnapshotEntry[] {
-		return [...this.#records.values()].map((record) => ({
+		return [...this.#records.values(), ...this.#files.values()].map((record) => ({
 			id: record.id,
 			description: record.description,
 			paused: record.paused,
 			startedAtMs: record.startedAtMs,
 		}));
+	}
+
+	async registerFile(options: RegisterFileMonitorOptions): Promise<string> {
+		const release = this.#reserve?.();
+		if (this.#reserve && !release)
+			throw new Error("Cannot create file monitor: terminal capacity is already in use.");
+		const path = resolve(options.cwd, options.path);
+		const parent = dirname(path);
+		try {
+			await access(parent);
+		} catch {
+			release?.();
+			throw new Error(`Cannot watch file: parent directory does not exist: ${parent}`);
+		}
+		let initial: Awaited<ReturnType<typeof stat>> | null = null;
+		try {
+			initial = await stat(path);
+		} catch {
+			initial = null;
+		}
+		const id = `watch_${this.#nextFileId++}`;
+		let watcher: FSWatcher;
+		try {
+			watcher = watch(parent, (_kind, name) => {
+				if (!name || basename(String(name)) === basename(path)) void this.#checkFile(id);
+			});
+		} catch (error) {
+			release?.();
+			throw new Error(`Cannot watch file ${path}: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		const record: FileMonitorRecord = {
+			id,
+			description: options.description,
+			startedAtMs: Date.now(),
+			path,
+			event: options.event,
+			watcher,
+			release: release ?? (() => {}),
+			poll: setInterval(() => void this.#checkFile(id), 250),
+			paused: false,
+			settled: false,
+			present: initial !== null,
+			mtimeMs: initial?.mtimeMs ?? 0,
+			deadline: setTimeout(() => {
+				const current = this.#files.get(id);
+				if (current) this.#settleFile(current, "watcher timed_out");
+			}, options.timeoutMs),
+		};
+		this.#files.set(id, record);
+		this.#notifyChange();
+		return id;
+	}
+
+	async stopFile(id: string): Promise<boolean> {
+		const record = this.#files.get(id);
+		if (!record) return false;
+		this.#settleFile(record, "watcher killed");
+		return true;
+	}
+
+	async stopAllFiles(): Promise<number> {
+		const records = [...this.#files.values()];
+		for (const record of records) this.#settleFile(record, "watcher killed");
+		return records.length;
+	}
+
+	#settleFile(record: FileMonitorRecord, summary: string): void {
+		if (record.settled) return;
+		record.settled = true;
+		clearInterval(record.poll);
+		clearTimeout(record.deadline);
+		record.watcher.close();
+		record.release();
+		this.#files.delete(record.id);
+		this.#notifyChange();
+		this.#emit({ type: "summary", id: record.id, description: record.description, summary });
+	}
+
+	async #checkFile(id: string): Promise<void> {
+		const record = this.#files.get(id);
+		if (!record || record.settled) return;
+		let current: Awaited<ReturnType<typeof stat>> | null = null;
+		try {
+			current = await stat(record.path);
+		} catch {
+			current = null;
+		}
+		const present = current !== null;
+		const changed =
+			record.event === "create"
+				? !record.present && present
+				: record.present && present && current!.mtimeMs !== record.mtimeMs;
+		record.present = present;
+		record.mtimeMs = current?.mtimeMs ?? 0;
+		if (!changed || record.paused) return;
+		this.#emit({
+			type: "line",
+			id: record.id,
+			description: record.description,
+			line: `${record.event} ${record.path}`,
+		});
+		this.#settleFile(record, "watcher completed");
 	}
 
 	register(options: RegisterMonitorOptions): void {
@@ -102,7 +237,7 @@ export class MonitorRegistry {
 
 	pauseAll(): string[] {
 		const paused: string[] = [];
-		for (const record of this.#records.values()) {
+		for (const record of [...this.#records.values(), ...this.#files.values()]) {
 			if (record.paused) continue;
 			record.paused = true;
 			paused.push(record.id);
@@ -112,7 +247,7 @@ export class MonitorRegistry {
 	}
 
 	rearm(id: string): MonitorRearmResult {
-		const record = this.#records.get(id);
+		const record = this.#records.get(id) ?? this.#files.get(id);
 		if (!record) return "not_found";
 		if (!record.paused) return "not_paused";
 		record.paused = false;
@@ -122,6 +257,7 @@ export class MonitorRegistry {
 
 	dispose(): void {
 		for (const record of this.#records.values()) this.#disposeRecord(record);
+		for (const record of this.#files.values()) this.#settleFile(record, "watcher disposed");
 		this.#records.clear();
 		this.#notifyChange();
 	}

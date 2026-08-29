@@ -1,3 +1,5 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBuiltinParserRegistry } from "../../src/core/extensions/builtin/permission-system/parsers.ts";
 import { TerminalManager } from "../../src/core/extensions/builtin/terminal/manager.ts";
@@ -79,7 +81,17 @@ describe("terminal monitor tool", () => {
 		const shape = monitorSchema as unknown as { type?: string; properties?: Record<string, unknown> };
 		expect(shape.type).toBe("object");
 		const properties = Object.keys(shape.properties ?? {});
-		for (const field of ["action", "description", "command", "filter", "timeout_ms", "persistent", "bash_id"]) {
+		for (const field of [
+			"action",
+			"description",
+			"command",
+			"path",
+			"event",
+			"filter",
+			"timeout_ms",
+			"persistent",
+			"bash_id",
+		]) {
 			expect(properties).toContain(field);
 		}
 	});
@@ -227,6 +239,93 @@ describe("terminal monitor tool", () => {
 		});
 
 		expect(summaryEvent(await summary).summary).toContain("completed");
+	});
+
+	it("fires one native create watch event", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		try {
+			const tool = createMonitorTool({ ...ctx, monitorRegistry: new MonitorRegistry((event) => sink.push(event)) });
+			const line = sink.waitFor((event) => event.type === "line", "file create");
+			const started = await tool.execute("file-create", {
+				description: "artifact",
+				path: join(root, "artifact"),
+			} as MonitorInput);
+			const id = /ID: (watch_\d+)/.exec(firstText(started))?.[1];
+			expect(id).toMatch(/^watch_/);
+			await writeFile(join(root, "artifact"), "created");
+			expect((await line).type).toBe("line");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("fires one native modify watch event", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const file = join(root, "artifact");
+		try {
+			await writeFile(file, "before");
+			const tool = createMonitorTool({ ...ctx, monitorRegistry: new MonitorRegistry((event) => sink.push(event)) });
+			const line = sink.waitFor((event) => event.type === "line", "file modify");
+			await tool.execute("file-modify", { description: "artifact", path: file, event: "modify" } as MonitorInput);
+			await writeFile(file, "after");
+			expect((await line).type).toBe("line");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("shares capacity with terminal sessions", async () => {
+		const limited = new TerminalManager({ maxSessions: 1 });
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		try {
+			await limited.create("sh", {
+				command: "sh",
+				args: ["-c", "sleep 30"],
+				cwd: root,
+				cols: 80,
+				rows: 24,
+				env: { ...process.env },
+			});
+			const registry = new MonitorRegistry((event) => sink.push(event), { reserve: () => limited.reserve() });
+			const result = await createMonitorTool({ ...ctx, manager: limited, monitorRegistry: registry }).execute(
+				"full",
+				{ description: "full", path: join(root, "artifact") } as MonitorInput,
+			);
+			expect(result.isError).toBe(true);
+		} finally {
+			await limited.teardown();
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects invalid native watch paths", async () => {
+		const tool = createMonitorTool({ ...ctx, monitorRegistry: new MonitorRegistry((event) => sink.push(event)) });
+		const result = await tool.execute("bad-file", {
+			description: "bad",
+			path: join(process.cwd(), "missing-parent", "x"),
+		} as MonitorInput);
+		expect(result.isError).toBe(true);
+	});
+
+	it("cancels a native watch through kill_bash", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		try {
+			const registry = new MonitorRegistry((event) => sink.push(event));
+			const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
+			const started = await tool.execute("file-kill", {
+				description: "artifact",
+				path: join(root, "artifact"),
+			} as MonitorInput);
+			const id = /ID: (watch_\d+)/.exec(firstText(started))?.[1];
+			expect(id).toBeDefined();
+			const killed = await createKillBashTool({ ...ctx, monitorRegistry: registry }).execute("kill", {
+				bash_id: id,
+			});
+			expect(firstText(killed)).toContain(`Killed ${id}`);
+			expect(registry.snapshot()).toEqual([]);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
 	});
 
 	it("uses the same bash permission class as command execution", () => {

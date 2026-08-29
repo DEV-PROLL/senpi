@@ -1,5 +1,12 @@
 # terminal builtin extension — fork surface
 
+## Add native one-shot file monitors (2026-08-29)
+
+- `monitor({ path, event: "create" | "modify" })` now watches a file with a `watch_N` identity.
+- Native watches share terminal capacity, participate in monitor pause/rearm and reload ownership, and can be cancelled with `kill_bash`.
+- Watches use `fs.watch` with a small stat-polling reconciliation fallback and normal read-path permission checks.
+
+
 ## Monitor snapshots cross the RPC wire (2026-08-28)
 
 ### What changed
