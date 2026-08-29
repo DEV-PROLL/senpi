@@ -1,5 +1,14 @@
 # changes
 
+## 2026-08-30 - Resolve RPC project trust from the current session cwd
+
+- `buildRpcSessionState` now reads the nearest saved project-trust decision from `ProjectTrustStore` for the session's current cwd instead of publishing the construction-time `SettingsManager` verdict from the previous cwd.
+- An absent or false store decision remains untrusted, preserving the project-settings and project-resource gate.
+
+### Why
+
+- A shared RPC session can switch to a replacement cwd while its state is projected through a long-lived connection. Trust must follow the authoritative store entry for that replacement cwd rather than being inherited from the prior runtime.
+
 ## 2026-08-30 - Honor cwd overrides for multi-session switch_session
 
 - `session-binding.ts` now binds the RPC connection handler to a live session runtime host, and `session-registry.ts` exposes the runtime's replacement-aware `switchSession` seam instead of treating the open-time runtime shape as the complete binding contract.
