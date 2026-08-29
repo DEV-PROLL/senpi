@@ -33,13 +33,19 @@ import type {
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { ProviderRetryWatchdogAbortError, prepareAgentToolCall } from "@earendil-works/pi-agent-core";
-import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC, type ThinkingSelection } from "@earendil-works/pi-ai";
+import {
+	contentText,
+	measureCursorHistorySerializedBytes,
+	SERVER_FALLBACK_ABORTED_DIAGNOSTIC,
+	type ThinkingSelection,
+} from "@earendil-works/pi-ai";
 import type {
 	Api,
 	AssistantMessage,
 	AuthResult,
 	Context,
 	ImageContent,
+	Message,
 	Model,
 	ProviderHeaders,
 	SimpleStreamOptions,
@@ -147,7 +153,12 @@ import type {
 } from "./extensions/types.ts";
 import { normalizeToolExposure, RUNTIME_EXTENSION_PATH } from "./extensions/types.ts";
 import { shouldWarnHighReasoning } from "./high-reasoning-warning.ts";
-import { type BashExecutionMessage, type CustomMessage, filterContextExcludedMessages } from "./messages.ts";
+import {
+	type BashExecutionMessage,
+	type CustomMessage,
+	convertToLlm,
+	filterContextExcludedMessages,
+} from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { type AvailableModelsSource, getModelNarrowingPatterns, resolveModelScope } from "./model-resolver.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -825,6 +836,122 @@ const THINKING_LEVELS_WITH_MAX: ThinkingLevel[] = ["off", "minimal", "low", "med
 /** Caps explicit skill expansion so one prompt cannot consume unbounded context. */
 export const MAX_SKILL_EXPANSIONS_PER_PROMPT = 5;
 
+/** Cursor ingest rejects large verbatim tool payloads. The bound is UTF-8 bytes. */
+export const CURSOR_TOOL_RESULT_MAX_CHARS = 2000;
+export const CURSOR_TOOL_RESULT_MAX_BYTES = 50_000;
+const CURSOR_TRUNCATION_MARKER = "\n...[truncated]";
+
+export function truncateToolResultBodies(
+	messages: AgentMessage[] | undefined,
+	maxChars = CURSOR_TOOL_RESULT_MAX_CHARS,
+	maxBytes = CURSOR_TOOL_RESULT_MAX_BYTES,
+	convert = (candidate: AgentMessage[]) => convertToLlm(candidate),
+): { messages: AgentMessage[] | undefined; changed: boolean } {
+	if (!Array.isArray(messages) || messages.length === 0) return { messages, changed: false };
+	const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+	const markerChars = [...segmenter.segment(CURSOR_TRUNCATION_MARKER)].length;
+	const result = messages.slice();
+	let changed = false;
+
+	// Apply the per-result character cap first, independent of the aggregate wire cap.
+	for (let messageIndex = result.length - 1; messageIndex >= 0; messageIndex--) {
+		const message = result[messageIndex];
+		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
+		let content = message.content;
+		for (let partIndex = content.length - 1; partIndex >= 0; partIndex--) {
+			const part = content[partIndex];
+			if (part.type === "image" && typeof part.data === "string") continue;
+			if (part.type !== "text" || typeof part.text !== "string") continue;
+			const graphemes = [...segmenter.segment(part.text)].map((item) => item.segment);
+			if (graphemes.length <= maxChars) continue;
+			const kept = graphemes.slice(0, Math.max(0, maxChars - markerChars)).join("");
+			const nextText = kept + CURSOR_TRUNCATION_MARKER;
+			content = content === message.content ? content.slice() : content;
+			content[partIndex] = { ...part, text: nextText };
+			result[messageIndex] = { ...message, content };
+			changed = true;
+		}
+	}
+
+	const measure = (candidate: AgentMessage[]): number => {
+		const converted = convert(candidate);
+		const activeUserMessageIndex = converted.at(-1)?.role === "user" ? converted.length - 1 : -1;
+		return measureCursorHistorySerializedBytes(converted, activeUserMessageIndex);
+	};
+	const fits = (candidate = result) => measure(candidate) <= maxBytes;
+	if (fits()) return { messages: changed ? result : messages, changed };
+
+	// Empty the oldest result bodies. Search the monotonic prefix of candidates
+	// rather than serializing once for every result (admission must stay bounded).
+	const emptyToolResult = (message: AgentMessage): AgentMessage => {
+		if (message.role !== "toolResult" || !Array.isArray(message.content)) return message;
+		const emptiedContent = message.content.map((part) =>
+			part.type === "text" ? { ...part, text: "" } : part.type === "image" ? { ...part, data: "" } : part,
+		);
+		const content = emptiedContent.filter((part, index) => {
+			if (index === 0) return true;
+			const previous = emptiedContent[index - 1];
+			const empty = part.type === "text" ? part.text === "" : part.type === "image" && part.data === "";
+			const previousEmpty =
+				previous.type === "text" ? previous.text === "" : previous.type === "image" && previous.data === "";
+			return !empty || !previousEmpty;
+		});
+		return { ...message, content };
+	};
+	const toolResultIndexes = result.flatMap((message, index) =>
+		message.role === "toolResult" && Array.isArray(message.content) ? [index] : [],
+	);
+	const withEmptyPrefix = (count: number): AgentMessage[] => {
+		const candidate = result.slice();
+		for (let i = 0; i < count; i++)
+			candidate[toolResultIndexes[i]] = emptyToolResult(candidate[toolResultIndexes[i]]);
+		return candidate;
+	};
+	let low = 0;
+	let high = toolResultIndexes.length;
+	while (low < high) {
+		const middle = Math.floor((low + high) / 2);
+		if (fits(withEmptyPrefix(middle + 1))) high = middle;
+		else low = middle + 1;
+	}
+	const emptyCount = Math.min(low + 1, toolResultIndexes.length);
+	if (emptyCount > 0) {
+		result.splice(0, result.length, ...withEmptyPrefix(emptyCount));
+		changed = true;
+	}
+	if (fits()) return { messages: changed ? result : messages, changed };
+
+	// If metadata alone exceeds the cap, discard the oldest complete turns. This
+	// search is also monotonic and avoids quadratic whole-history reserialization.
+	const turnRanges: Array<[number, number]> = [];
+	const isConvertedUser = (message: AgentMessage): boolean => convert([message])[0]?.role === "user";
+	for (let index = 0; index < result.length; index++) {
+		if (!isConvertedUser(result[index])) continue;
+		const nextUser = result.findIndex((message, nextIndex) => nextIndex > index && isConvertedUser(message));
+		turnRanges.push([index, nextUser < 0 ? result.length : nextUser]);
+	}
+	const withoutTurns = (count: number): AgentMessage[] => {
+		if (count === 0) return result;
+		const start = turnRanges[0]?.[0] ?? 0;
+		const end = turnRanges[count - 1]?.[1] ?? start;
+		return [...result.slice(0, start), ...result.slice(end)];
+	};
+	low = 0;
+	high = turnRanges.length;
+	while (low < high) {
+		const middle = Math.floor((low + high) / 2);
+		if (fits(withoutTurns(middle + 1))) high = middle;
+		else low = middle + 1;
+	}
+	const turnCount = Math.min(low + 1, turnRanges.length);
+	if (turnCount > 0) {
+		const next = withoutTurns(turnCount);
+		result.splice(0, result.length, ...next);
+		changed = true;
+	}
+	return { messages: changed ? result : messages, changed };
+}
+
 // ============================================================================
 // AgentSession Class
 // ============================================================================
@@ -1324,6 +1451,24 @@ export class AgentSession {
 			(this.agent.prepareNextTurn
 				? async (_turn: PrepareNextTurnContext, signal?: AbortSignal) => await this.agent.prepareNextTurn?.(signal)
 				: undefined);
+		const previousTransformContext = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
+			if (this.model?.provider === "cursor" || this.model?.provider === "cursor-cli-oauth") {
+				return (
+					(
+						await truncateToolResultBodies(
+							transformed,
+							CURSOR_TOOL_RESULT_MAX_CHARS,
+							CURSOR_TOOL_RESULT_MAX_BYTES,
+							(candidate) => this.agent.convertToLlm(candidate) as Message[],
+						)
+					).messages ?? transformed
+				);
+			}
+			return transformed;
+		};
+
 		this.agent.prepareNextTurnWithContext = async (turn, signal) => {
 			// Enforce compaction only when this prepare precedes an actual provider
 			// admission: a tool continuation or queued steer/follow-up messages. A
@@ -1332,7 +1477,8 @@ export class AgentSession {
 			const compactBeforeNextAdmission = async (): Promise<boolean> => {
 				const provider = this.model?.provider;
 				// Cursor rebuilds the full conversation each hop. Compacting here
-				// mutates rootPrompt mid-run and poisons conversationId.
+				// mutates rootPrompt mid-run and poisons conversationId (#984).
+				// Still truncate verbatim toolResult bodies so the skip cannot send MB-scale payloads (#1043).
 				if (provider === "cursor" || provider === "cursor-cli-oauth") {
 					return false;
 				}
@@ -5277,7 +5423,7 @@ export class AgentSession {
 				return await this._rejectCompaction(request, requestId, operationId, "stale-revision", false);
 			}
 
-			if (this._wouldCompactionOverflow(pathEntries, compactionResult, fromExtension, model)) {
+			if (await this._wouldCompactionOverflow(pathEntries, compactionResult, fromExtension, model)) {
 				return await this._rejectCompaction(request, requestId, operationId, "would-overflow", false);
 			}
 
@@ -5384,12 +5530,12 @@ export class AgentSession {
 		}
 	}
 
-	private _wouldCompactionOverflow(
+	private async _wouldCompactionOverflow(
 		pathEntries: SessionEntry[],
 		compactionResult: CompactionResult,
 		fromExtension: boolean,
 		model: Model<Api>,
-	): boolean {
+	): Promise<boolean> {
 		const currentLeaf = pathEntries[pathEntries.length - 1];
 		if (!currentLeaf) return false;
 
@@ -5405,10 +5551,15 @@ export class AgentSession {
 			fromHook: fromExtension,
 		};
 
-		const simulatedMessages = buildSessionContext(
+		let simulatedMessages = buildSessionContext(
 			[...pathEntries, simulatedCompactionEntry],
 			simulatedCompactionEntry.id,
 		).messages;
+		// Size the same retained context that will be admitted to Cursor. Persisted JSONL
+		// remains verbatim, but the in-memory request representation is bounded first.
+		if (model.provider === "cursor" || model.provider === "cursor-cli-oauth") {
+			simulatedMessages = truncateToolResultBodies(simulatedMessages).messages ?? simulatedMessages;
+		}
 		const contextTokens = estimateMessagesTokens(filterContextExcludedMessages(simulatedMessages));
 		const settings = this.settingsManager.getCompactionSettings();
 		return contextTokens > model.contextWindow - settings.reserveTokens;

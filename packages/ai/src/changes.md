@@ -1,3 +1,22 @@
+## Measure Cursor history at the wire representation (2026-08-29)
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts` exposes the shared serialized-history measurement used by Cursor admission.
+- `packages/ai/src/index.ts` exports the measurement helper for the coding-agent package.
+
+### Why
+
+- Cursor history admission must measure the complete serialized request representation rather than a fixed envelope estimate.
+
+### Why an extension could not handle it
+
+- The measurement is part of the provider serialization boundary in the AI package.
+
+### Expected merge conflict zones
+
+- LOW: Cursor history measurement exports.
+
 ## 2026-08-28 - Restore Bedrock global GPT-5.6 strict tool sampling
 
 ### What changed

@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-29 - Bound Cursor serialized tool-result admissions
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: Cursor tool-result request views now use a conservative escaped/enveloped serialization bound and never amplify output with markers.
+
+### Why
+
+- Cursor duplicates history across JSON and protobuf envelopes, and JSON escaping makes raw-byte heuristics unsafe.
+
+### Why an extension could not handle it
+
+- AgentSession owns provider admission and the request-only transform boundary.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`
+
 ## 2026-08-29 - Final shared-host bash callback coverage
 
 ### What changed
@@ -69,7 +87,7 @@
 
 ### Why an extension could not handle it
 
-- Provider defaults and model-pattern resolution are core resolver behavior that runs before extension hooks and cannot be replaced by an extension.
+- Provider defaults and model-pattern resolution are core resolver behavior that runs before extension hooks.
 
 ### Expected merge conflict zones
 
