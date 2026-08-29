@@ -1191,10 +1191,7 @@ describe("SettingsManager", () => {
 		});
 
 		it("returns false for a malformed string value without throwing on load", () => {
-			writeFileSync(
-				join(agentDir, "settings.json"),
-				JSON.stringify({ experimental: { bashEvalOnly: "yes" } }),
-			);
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ experimental: { bashEvalOnly: "yes" } }));
 
 			const manager = SettingsManager.create(projectDir, agentDir);
 			expect(manager.getExperimentalBashEvalOnly()).toBe(false);
