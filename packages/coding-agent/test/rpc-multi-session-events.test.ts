@@ -45,6 +45,33 @@ function deferred<T = void>(): {
 }
 
 describe("multi-session RPC event writer", () => {
+	it("does not let a backpressured connection stall another connection", async () => {
+		const slowRelease = deferred();
+		const fastChunks: string[] = [];
+		const slowChunks: string[] = [];
+		const scheduled: Array<() => Promise<void>> = [];
+		const writer = new SessionEventWriter(
+			() => {},
+			(flush) => scheduled.push(flush),
+		);
+		writer.registerConnection("slow", {
+			writeRaw: (chunk) => slowChunks.push(chunk),
+			waitForBackpressure: () => slowRelease.promise,
+		});
+		writer.registerConnection("fast", {
+			writeRaw: (chunk) => fastChunks.push(chunk),
+			waitForBackpressure: async () => {},
+		});
+		writer.withConnection("slow", () => writer.enqueue("session", { type: "event", client: "slow" }));
+		writer.withConnection("fast", () => writer.enqueue("session", { type: "event", client: "fast" }));
+		const draining = scheduled[0]!();
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(records(fastChunks).map((record) => record.client)).toEqual(["fast"]);
+		expect(slowChunks).toHaveLength(1);
+		slowRelease.resolve();
+		await draining;
+	});
 	it("compacts 1000 stalled message snapshots without losing assistant transitions", async () => {
 		const chunks: string[] = [];
 		const scheduled: Array<() => void> = [];

@@ -224,6 +224,47 @@ function normalizeResponse(value: RecordValue): RecordValue {
 }
 
 describe("RPC Unix-socket multi-connection host", () => {
+	it("replays an in-flight assistant message to a newly attached client", async () => {
+		const qa = scratch("attach-mid-stream");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL],
+			qa,
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const a = await connectPeer(qa.socketPath);
+		const path = join(qa.sessionDir, "attach-mid-stream.jsonl");
+		try {
+			const opened = await a.peer.request({ id: "open", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			const sessionId = openedSessionId(opened);
+			const first = a.peer.request({ id: "prompt", type: "prompt", sessionId, message: "hold-open-250 one" });
+			await a.peer.waitFor((value) => value.type === "message_start" && value.sessionId === sessionId);
+			const b = await connectPeer(qa.socketPath);
+			try {
+				const attached = await b.peer.request({
+					id: "attach",
+					type: "open_session",
+					cwd: qa.cwd,
+					sessionPath: path,
+				});
+				expect((attached.data as RecordValue).attached).toBe(true);
+				const replay = await b.peer.waitFor(
+					(value) => value.type === "message_start" && value.sessionId === sessionId,
+				);
+				expect(replay.message).toBeDefined();
+				await first;
+			} finally {
+				b.peer.close();
+				b.socket.destroy();
+			}
+		} finally {
+			a.peer.close();
+			a.socket.destroy();
+			await fake.close();
+			await stopChild(child);
+		}
+	});
 	it("dispatches a reentrant UI response while switch_session is in flight", async () => {
 		const qa = scratch("reent");
 		const fake = await startFakeModelServer();
