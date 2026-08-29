@@ -243,6 +243,16 @@ describe("host watchdog configuration", () => {
 		).toEqual({ fd: 3, ppid: 4242, scratchDir: "/tmp/senpi-rpc-host-internal-abc" });
 	});
 
+	it("ignores an unavailable watchdog fd when the supervisor is still alive", async () => {
+		let fired = false;
+		const disarm = armHostWatchdog({ fd: 999_999, ppid: process.pid }, () => {
+			fired = true;
+		});
+		await delay(300);
+		disarm();
+		expect(fired).toBe(false);
+	});
+
 	it("fires on inherited-pipe EOF and removes the supervisor's private directory", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "senpi-hlc-wd-"));
 		roots.push(dir);
