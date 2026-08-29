@@ -1154,6 +1154,53 @@ describe("SettingsManager", () => {
 			});
 		});
 	});
+
+	describe("experimental.bashEvalOnly", () => {
+		it("returns false when experimental is unset", () => {
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getExperimentalBashEvalOnly()).toBe(false);
+		});
+
+		it("returns true when global experimental.bashEvalOnly is true", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ experimental: { bashEvalOnly: true } }));
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getExperimentalBashEvalOnly()).toBe(true);
+		});
+
+		it("lets project override global true to false via deep merge", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ experimental: { bashEvalOnly: true } }));
+			writeFileSync(
+				join(projectDir, CONFIG_DIR_NAME, "settings.json"),
+				JSON.stringify({ experimental: { bashEvalOnly: false } }),
+			);
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getExperimentalBashEvalOnly()).toBe(false);
+		});
+
+		it("lets project override global false to true via deep merge", () => {
+			writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ experimental: { bashEvalOnly: false } }));
+			writeFileSync(
+				join(projectDir, CONFIG_DIR_NAME, "settings.json"),
+				JSON.stringify({ experimental: { bashEvalOnly: true } }),
+			);
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getExperimentalBashEvalOnly()).toBe(true);
+		});
+
+		it("returns false for a malformed string value without throwing on load", () => {
+			writeFileSync(
+				join(agentDir, "settings.json"),
+				JSON.stringify({ experimental: { bashEvalOnly: "yes" } }),
+			);
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+			expect(manager.getExperimentalBashEvalOnly()).toBe(false);
+			expect(manager.drainErrors()).toEqual([]);
+		});
+	});
 });
 
 describe("routine settings keys", () => {
