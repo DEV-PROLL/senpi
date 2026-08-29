@@ -1036,6 +1036,40 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it("rebinds settingsManager reads to the replacement session", async () => {
+		const qa = scratch("replacement-settings");
+		qa.socket = `/tmp/senpi-replacement-settings-${process.pid}.sock`;
+		const projectB = join(qa.root, "project-b");
+		mkdirSync(join(projectB, CONFIG_DIR_NAME), { recursive: true });
+		writeFileSync(
+			join(projectB, CONFIG_DIR_NAME, "settings.json"),
+			JSON.stringify({ shellCommandPrefix: "replacement-prefix" }),
+		);
+		new ProjectTrustStore(qa.agentDir).set(projectB, true);
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const target = SessionManager.create(projectB, qa.sessionDir);
+		const targetPath = target.getSessionFile()!;
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		try {
+			await runtime.switchSession(targetPath, { cwdOverride: projectB });
+			expect(runtime.session.settingsManager.getShellCommandPrefix()).toBe("replacement-prefix");
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it.each([
 		{ projectTrusted: true, expectedCommand: "prefix-b\necho current" },
 		{ projectTrusted: false, expectedCommand: "echo current" },

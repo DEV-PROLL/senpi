@@ -509,6 +509,7 @@ function createRemoteSessionProxy(
 			if (property === "sessionId") return state.sessionId;
 			if (property === "sessionName") return state.sessionName;
 			if (property === "sessionManager") return remoteSessionManager;
+			if (property === "settingsManager") return settingsManager;
 			if (property === "messages") return target.messages;
 			if (property === "model") return state.model ?? target.model;
 			if (property === "thinkingLevel") return state.thinkingLevel;
