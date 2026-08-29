@@ -1,5 +1,23 @@
 # changes.md — ai
 
+## Anthropic cache checkpoints across tool loops (2026-08-29)
+
+### What changed
+
+- Anthropic message serialization now retains the preceding prompt-cache checkpoint only for a genuine tool-loop continuation, including interrupted turns whose tool result and following user text are coalesced into one user message.
+
+### Why
+
+- Ordinary multi-turn histories must not create additional premium cache writes, while tool loops need a stable rolling checkpoint across appended results.
+
+### Why an extension could not handle it
+
+- Cache markers and Anthropic role coalescing are applied inside the provider wire serializer below extension-visible message handling.
+
+### Expected merge conflict zones
+
+- MEDIUM: `src/api/anthropic-messages.ts` message coalescing and final cache-marker pass.
+
 ## Credential pool export wildcard (2026-08-27)
 
 ### What changed
