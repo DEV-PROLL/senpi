@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer, type ServerResponse } from "node:http";
-import { type AddressInfo, createConnection, type Socket } from "node:net";
+import { type AddressInfo, createConnection, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -202,6 +202,35 @@ describe("ensureHost-spawned host lifecycle", () => {
 		await waitForHostExit(entry);
 	}, 45_000);
 
+	it("preserves a live public socket when supervisor startup cannot bind it", async () => {
+		const qa = scratch("collision");
+		const live = createServer((socket) => socket.resume());
+		await new Promise<void>((resolve) => live.listen(qa.socket, resolve));
+		const childScript =
+			"const {createServer}=require('node:net'); const s=createServer(); s.listen(process.argv.at(-1));";
+		const supervisor = spawn(
+			process.execPath,
+			[
+				"--import",
+				"tsx",
+				hostLifecycleEntry(),
+				"--socket",
+				qa.socket,
+				"--child-command",
+				process.execPath,
+				"--child-args",
+				JSON.stringify(["-e", childScript]),
+			],
+			{ stdio: ["ignore", "ignore", "pipe"] },
+		);
+		const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+			supervisor.once("exit", (code, signal) => resolve({ code, signal })),
+		);
+		expect(exit).toMatchObject({ code: 1 });
+		expect(existsSync(qa.socket)).toBe(true);
+		live.close();
+	}, 45_000);
+
 	it("reaps the internal host when the supervisor is SIGKILLed (no catchable-signal path)", async () => {
 		const qa = scratch("kill9");
 		const internalBefore = listInternalSocketDirs();
@@ -216,7 +245,27 @@ describe("ensureHost-spawned host lifecycle", () => {
 		await waitForPidsGone(internalHosts, 10_000);
 		expect(internalHosts.filter(processAlive)).toEqual([]);
 		expect(leakedDirs.filter((dir) => existsSync(join(tmpdir(), dir)))).toEqual([]);
+		expect(existsSync(qa.socket)).toBe(false);
+		expect(existsSync(qa.pidFilePath)).toBe(false);
+		expect(existsSync(createHostDaemonPaths(qa.agentDir).settingsFile)).toBe(false);
 	}, 60_000);
+
+	it("eventually reaps a transient host after its observer connection is lost", async () => {
+		const qa = scratch("observer-loss");
+		const childScript = [
+			"const {createServer}=require('node:net');",
+			"let connections=0;",
+			"const s=createServer(sock=>{ connections++; if(connections>=2){sock.destroy(); return;} let b=''; sock.on('data',d=>{b+=d; const n=b.indexOf('\\n'); if(n>=0){const q=JSON.parse(b.slice(0,n)); sock.write(JSON.stringify({id:q.id,type:'response',command:'get_protocol_info',success:true,data:{serverVersion:process.env.SENPI_TEST_VERSION,capabilities:['multi_session','extension_events'],mode:'multi'}})+'\\n');}}); });",
+			"s.listen(process.argv.at(-1));",
+		].join(" ");
+		await ensureLifecycleHost(qa, {
+			policy: { idleExitMs: 600 },
+			env: { SENPI_TEST_VERSION: VERSION },
+			spawn: { command: process.execPath, args: ["-e", childScript] },
+		});
+		// The supervisor's first internal connection is the listener probe; the second is the observer, which the child drops.
+		await waitForHostExit(currentManaged(), 12_000);
+	}, 45_000);
 });
 
 describe("host watchdog configuration", () => {
@@ -342,7 +391,12 @@ function hostLifecycleEntry(): string {
 
 async function ensureLifecycleHost(
 	qa: Scratch,
-	options: { policy?: HostLifecyclePolicyInput; hostArgs?: string[]; env?: Record<string, string> } = {},
+	options: {
+		policy?: HostLifecyclePolicyInput;
+		hostArgs?: string[];
+		env?: Record<string, string>;
+		spawn?: { command: string; args: string[] };
+	} = {},
 ) {
 	const hostArgs = options.hostArgs ?? [];
 	try {
@@ -361,7 +415,20 @@ async function ensureLifecycleHost(
 					...(options.env ?? {}),
 				},
 				hostArgs,
-				spawn: { command: process.execPath, args: [hostLifecycleEntry(), "--socket", qa.socket, ...hostArgs] },
+				spawn: options.spawn
+					? {
+							command: process.execPath,
+							args: [
+								hostLifecycleEntry(),
+								"--socket",
+								qa.socket,
+								"--child-command",
+								options.spawn.command,
+								"--child-args",
+								JSON.stringify(options.spawn.args),
+							],
+						}
+					: { command: process.execPath, args: [hostLifecycleEntry(), "--socket", qa.socket, ...hostArgs] },
 			},
 		});
 		managed.push({
