@@ -41,9 +41,9 @@ vi.mock("openai", () => {
 	return { default: FakeOpenAI };
 });
 
-function glm53OnZai(): Model<"openai-completions"> {
+function glm53OnZai(id = "glm-5.3"): Model<"openai-completions"> {
 	return {
-		id: "glm-5.3",
+		id,
 		name: "GLM-5.3",
 		api: "openai-completions",
 		provider: "zai",
@@ -81,6 +81,21 @@ describe("GLM 5.3 openai-completions reasoning effort", () => {
 		mockState.lastParams = undefined;
 	});
 
+	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])(
+		"maps low effort for the %s through the zai thinking-level map (not raw)",
+		async (id) => {
+			const params = await captureParams(glm53OnZai(id), "low");
+			expect(params.reasoning_effort).toBe("low");
+		},
+	);
+
+	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])(
+		"maps high and max effort for the %s", async (id) => {
+			await expect(captureParams(glm53OnZai(id), "high")).resolves.toMatchObject({ reasoning_effort: "high" });
+			await expect(captureParams(glm53OnZai(id), "max")).resolves.toMatchObject({ reasoning_effort: "max" });
+		},
+	);
+
 	it("maps low effort through the zai thinking-level map (not raw)", async () => {
 		const params = await captureParams(glm53OnZai(), "low");
 		expect(params.reasoning_effort).toBe("high");
@@ -90,6 +105,13 @@ describe("GLM 5.3 openai-completions reasoning effort", () => {
 		const params = await captureParams(glm53OnZai(), "medium");
 		expect(params.reasoning_effort).toBe("high");
 	});
+
+	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])(
+		"keeps thinking enabled for %s when reasoning is off", async (id) => {
+			const params = await captureParams(glm53OnZai(id), "off");
+			expect(params.thinking?.type).toBe("enabled");
+		},
+	);
 
 	it("keeps thinking enabled even when no reasoning effort is set", async () => {
 		const params = await captureParams(glm53OnZai());

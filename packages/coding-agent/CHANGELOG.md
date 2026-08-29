@@ -6,6 +6,12 @@
 
 ### Added
 
+- New experimental setting `experimental.bashEvalOnly` (default `false`). When enabled, the `bash` and
+  `powershell` tools are withheld from the model-facing tool surface and run only inside eval cells via
+  `tool.bash({ command: "..." })`, with system-prompt guidance and a redirect hint if the model calls them
+  directly. Hooks and permission checks still apply to those commands. The policy is inert whenever the
+  `eval` tool is unavailable, so shell access is never lost, and it follows the flag across a reload.
+
 ### Changed
 
 - `grep` is temporarily withheld from the model-facing tool surface. It no longer appears in the
@@ -14,6 +20,8 @@
   and restoring it is removing its entry from `temporarilyDisabledToolNames`.
 
 ### Fixed
+
+- `cursor-cli-oauth` no longer mixes Cursor's internal tool-call protocol, arguments, and results into assistant text; Cursor still owns execution, while Senpi now stores and renders only the model's actual prose ([OmO #7169](https://github.com/code-yeongyu/oh-my-openagent/issues/7169)).
 
 - On the `claude-sdk-oauth` lane, the "Compaction rejected: the Claude Agent SDK owns compaction for
   this session" notice now renders at most once per delegation episode as a muted informational line
