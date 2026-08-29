@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { CONFIG_DIR_NAME } from "../src/config.ts";
 import {
 	type AgentSessionRuntime,
@@ -12,13 +12,16 @@ import {
 	createAgentSessionServices,
 } from "../src/core/agent-session-runtime.ts";
 import { createGoal, updateGoal } from "../src/core/extensions/builtin/goal/store.ts";
+import { FooterDataProvider } from "../src/core/footer-data-provider.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import { ProjectTrustStore } from "../src/core/trust-manager.ts";
+import { FooterComponent } from "../src/modes/interactive/components/footer.ts";
 import {
 	createInteractiveHostRuntime,
 	INTERACTIVE_HOST_FALLBACK_WARNING,
 } from "../src/modes/interactive/interactive-host-runtime.ts";
+import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { RpcClient } from "../src/modes/rpc/rpc-client.ts";
 import { startFakeModelServer } from "./helpers/rpc-fake-model.ts";
 import { hermeticProviderEnv, MOCK_MODEL, MOCK_PROVIDER, writeRpcModelsJson } from "./helpers/rpc-hermetic.ts";
@@ -26,6 +29,12 @@ import { hermeticProviderEnv, MOCK_MODEL, MOCK_PROVIDER, writeRpcModelsJson } fr
 const roots: string[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
 const runtimes: AgentSessionRuntime[] = [];
+
+beforeAll(() => initTheme("dark"));
+
+function stripAnsi(text: string): string {
+	return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
 
 afterEach(async () => {
 	await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
@@ -135,6 +144,39 @@ async function waitForHost(child: ChildProcessWithoutNullStreams, socket: string
 }
 
 describe("interactive host runtime", () => {
+	it("renders host-authoritative footer context, cwd, and session name", async () => {
+		const qa = scratch("footer-values");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+			onWarning: vi.fn(),
+		});
+		try {
+			await runtime.session.setSessionName("host-footer-name");
+			await runtime.session.prompt("footer context");
+			const footer = new FooterComponent(runtime.session, new FooterDataProvider(qa.cwd));
+			const rendered = stripAnsi(footer.render(240).join("\n"));
+			expect(runtime.session.sessionManager.getCwd()).toBe(qa.cwd);
+			expect(runtime.session.sessionManager.getSessionName()).toBe("host-footer-name");
+			expect(runtime.session.getContextUsage()).toEqual(expect.objectContaining({ contextWindow: 1000000 }));
+			expect(rendered).toContain(`${qa.cwd} • host-footer-name`);
+			expect(rendered).toMatch(/\d+\/1M \([0-9.]+%\)/);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("does not issue getState per streamed delta while mirroring usage totals", async () => {
 		const qa = scratch("usage-deltas");
 		const fake = await startFakeModelServer({ multiDelta: true });
