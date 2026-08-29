@@ -283,6 +283,16 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		if (!isResumeOfStoppedGoal(ctx, sessionStartReason, goal)) {
 			return false;
 		}
+		// RPC switch_session cannot service a nested interactive UI request until the
+		// switch response completes. Keep the goal stopped and let the user resume it
+		// explicitly after the new session finishes binding.
+		if (ctx.mode === "rpc") {
+			ctx.ui.notify(
+				`Goal remains ${goal.status} after session resume. Resume it explicitly after the session finishes loading.`,
+				"info",
+			);
+			return true;
+		}
 
 		const choice = await ctx.ui.select(`Resume ${goal.status} goal?\nGoal: ${goal.objective}`, [
 			RESUME_GOAL_CHOICE,

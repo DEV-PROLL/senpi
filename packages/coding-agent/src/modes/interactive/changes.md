@@ -1,5 +1,189 @@
 # changes
 
+## 2026-08-29 - Render external-owner compaction delegation once, as state (#1174 UX half)
+
+### What changed
+
+- `interactive-mode.ts`: auto compaction rejections with `rejectionCause: "external-owner"` now render a
+  single muted informational line ("The Claude Agent SDK manages and compacts this session's context
+  natively.") at most once per delegation episode, instead of repainting a red error line on every
+  rejected attempt. Manual `/compact` rejections keep their explicit error feedback. The episode is
+  tracked entirely in the interactive layer from observed `compaction_end` events: it starts on an
+  external-owner rejection and the one-time notice re-arms on a successful compaction, a model switch
+  (selector, keyboard/favorite `cycleModel`, or retry provider failover via `retry_fallback_applied`),
+  a session rebind, a session reload, tree/branch navigation rerenders
+  (`renderInitialMessages`), a `model_changed` event (including shared-host/other-client
+  switches), or retry provider failover via `retry_fallback_applied`; cosmetic transcript
+  rebuilds (hide-thinking, cache-notice visibility, output padding via
+  `rebuildChatFromMessages`) deliberately preserve the episode, because post-#1188 core
+  emits no repeat rejection event to restore cleared state. The logic does not depend on
+  repeat rejection events arriving (the core attempt-suppression half of #1174 landed in
+  #1188). The
+  external-owner branch is checked before the `aborted` branch because production rejections are
+  emitted via `_rejectCompaction(..., true, reason)` and carry `aborted: true`.
+- `components/footer.ts`: the context meter appends an ` (SDK)` marker while a delegation episode is
+  active, so a saturated meter reads as "compacted natively by the SDK" rather than a stall. The marker
+  rides the existing tail segment and respects the footer width ladder; when head elision would leave a
+  chopped fragment (e.g. "…SDK)"), the layout is re-planned without the marker so it renders complete or
+  not at all. The marker stays muted even when the >90% meter is error-tinted — delegation is expected
+  state, not alarm.
+- `grok/chrome.ts`: `InteractiveFooter` gains the optional `setCompactionDelegated` seam that feeds the
+  marker.
+
+### Why
+
+- Issue #1174: once the local context estimate crossed the compaction threshold on the claude-sdk-oauth
+  lane, every turn repainted the same red error line (twice per tool-call turn), presenting a designed
+  stand-down as a recurring failure, and the saturated context meter looked like a stall instead of
+  SDK-owned state.
+
+### Why an extension could not handle it
+
+- The `compaction_end` rendering branch, the chat container, and the footer meter segments are private
+  `InteractiveMode`/footer render state; extensions observe compaction events but cannot restyle or
+  dedupe the built-in error rendering.
+
+### Expected merge conflict zones
+
+- LOW: the `compaction_end` error branch in `interactive-mode.ts`; the context segment composition in
+  `components/footer.ts`; the footer seam in `grok/chrome.ts`.
+
+## 2026-08-28 - Hydrate setup-only proxy mirrors from host state
+
+- Proxy refresh now hydrates the explicit session path with authoritative host entries when deferred persistence has not created the file yet, so setup entries are visible immediately in replacement contexts.
+
+- Shared-host setup callbacks now run against a detached capture and transport appended custom/user messages to the authoritative host before proxy refresh and rebind.
+
+- Shared-host proxy refresh now carries the host's project trust state into local settings, preventing untrusted project-scoped shell prefixes from leaking into client-local bash (NF-3).
+- Shared-host setup callbacks refresh the replacement proxy's mirrored agent messages after setup mutations.
+- Replacement callback contexts route sendMessage/sendUserMessage through the shared host prompt path instead of retaining bootstrap-session closures.
+- The RPC surface has no host-honored project-trust command or replacement trust payload. Shared-host trust is host-authoritative: the client-side projectTrustContextFactory remains a compatibility callback but cannot override host trust; no new wire protocol is introduced (N4-B9).
+
+- Shared-host bash lifecycle now composes client-local and host-owned running state, so another client's bash events cannot clear a local operation (NF-1).
+- Shared-host replacement wrappers preserve client-side `setup`, `withSession`, and `projectTrustContextFactory` callbacks after host confirmation and proxy refresh, matching beta.22 callback ordering (N4-B9).
+- Successful shared-host session replacements abort in-flight client-local custom bash and guard result persistence against the replacement session (NF-2).
+- Proxy refresh rebuilds the client-local settings surface for the host-effective session cwd, so custom bash uses the current project's shell prefix (NF-3).
+
+- Shared-host replacement and name readback closure: refreshed session managers retain the host-effective cwd (including a differing override when the stored cwd is unavailable), and all `getSessionName()` consumers read the mirrored `session_info_changed` name.
+
+## Shared-host interactive parity regressions (2026-08-28)
+
+- Shared-host session replacement now refreshes the client proxy after /new, /fork, /import, and /resume; tree navigation, reload/veto, compaction abort, queue recovery ordering, bash options/output, model prompt metadata, and JSONL export route to the authoritative host session.
+- RPC state mirrors host compaction, retry, bash, and pending-queue lifecycle fields so TUI interrupt and reload guards do not consult the bootstrap session. Queue reads/clear, branch-summary abort, extension-handled bash persistence, and tree labels also route to the host.
+- Extension binding remains client-local under the shared host by design: extension UI callbacks and context objects contain local TUI resources that cannot be serialized over JSONL. Session replacement refreshes the proxy identity before rebinding, while no RPC binding route is introduced.
+- Bash `operations` are not serialized as executable callbacks. Shared-host interactive execution keeps client-local operations on the client, streams their output to the TUI, and sends only the resulting `record_bash_result` mutation to the host; client-local execution preserves shell prefixes, abort-controller lifecycle, and proxy `isBashRunning` state. Serializable or absent operations continue through the host bash route. Host-side extension dispatch remains unchanged.
+- Shared-host queue state now hydrates on attach/refresh, mirrors ordered chronology on every host `queue_update`, preserves the host's ordered clear result as the proxy's non-enumerable `ordered` property, carries the host-effective cwd through replacement refreshes, and routes `getSessionName()` consumers through mirrored host state.
+
+## Shared-host session replacement refreshes the interactive proxy (2026-08-28)
+
+### What changed
+
+- `interactive-host-runtime.ts` refreshes the shared host's state and messages after a successful `switch_session`,
+  then updates the interactive proxy's session manager, identity, cwd, and message history before rebinding the TUI.
+- `test/interactive-host-runtime.test.ts` switches to a second persisted session carrying a blocked Goal and pins
+  that the RPC request completes while the proxy exposes the target session file, ID, manager, and historical user
+  message.
+
+### Why
+
+- The shared RPC host changed its authoritative session, but the interactive proxy remained permanently bound to the
+  local bootstrap session. `/resume` therefore reported success while the TUI returned to an empty composer with the
+  old `0/1M` footer and no target history.
+
+### Why an extension could not handle it
+
+- The proxy owns transport state and the `AgentSessionRuntime` seam before extension events reach the TUI. Extensions
+  cannot replace the proxy's session identity, manager, or message mirror after an RPC session replacement.
+
+### Expected merge conflict zones
+
+- LOW in `interactive-host-runtime.ts` around remote session replacement and proxy property routing.
+
+## Shared-host compaction context synchronization and resilient transcript rebuild (2026-08-28)
+
+### What changed
+
+- `interactive-host-runtime.ts`: on `compaction_end` wire events from the host, the remote session proxy calls `reloadFromDisk()` on `local.sessionManager` and updates `local.agent.state.messages` to the refreshed context messages.
+- `interactive-mode.ts`: `compaction_end` handler no longer throws a fatal error when `entries[0]?.type !== "compaction"`; instead, it attempts `sessionManager.reloadFromDisk()` and gracefully renders the remaining context entries with the compaction summary card and usage billing notice. `rebuildChatFromMessages()` also attempts `reloadFromDisk()` before querying `buildContextEntries()`.
+- `session-manager.ts`: added `reloadFromDisk()` to reload `fileEntries` and rebuild the index from the session file on disk when modified externally.
+
+### Why
+
+- When running with the shared interactive host, a successful compaction committed by the host was not immediately present in the client-side `sessionManager` memory, causing `entries[0]?.type !== "compaction"` to throw `Completed compaction is missing from the session context` and crash the TUI (issue #1173). Full transcript rebuilds also suffered from stale local session state (issue #1172).
+
+### Why an extension could not handle it
+
+- `InteractiveMode`'s compaction handler and `interactive-host-runtime.ts` proxy event pipeline are internal to the interactive runtime and cannot be overridden by extensions.
+
+### Expected merge conflict zones
+
+- LOW: `interactive-mode.ts` `compaction_end` case and `interactive-host-runtime.ts` wire event handling.
+||||||| 84a19a642
+## Explain disk-capacity failures during uncaught interactive shutdown (2026-08-29)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: after restoring a live
+  terminal and recording the redacted crash log, `uncaughtCrash` now identifies `EDQUOT` and
+  `ENOSPC` errors and prints a stable disk-quota or disk-full remedy before the existing fatal
+  banner and original error.
+
+### Why
+
+- A filesystem spill write can still reach the last-resort crash path. The generic banner preserved
+  the original error but did not tell the operator that local storage or quota was exhausted or
+  that freeing filesystem capacity before retrying is the recovery action.
+
+### Why an extension could not handle it
+
+- `uncaughtCrash` is the process-level listener installed by interactive mode and exits
+  synchronously after terminal restoration. An extension cannot insert guidance between that
+  restoration and `process.exit(1)`, and its own listener would run after the prepended core
+  listener has already exited.
+
+### Expected merge conflict zones
+
+- LOW: the final live-terminal output sequence in `InteractiveMode.uncaughtCrash` and the adjacent
+  error-code classifier.
+
+## Shared-host sessions await async session reads and render thinking level from the event (2026-08-28)
+
+### What changed
+
+- `interactive-host-runtime.ts`: new `InteractiveSession` type — the TUI-facing session contract that widens `cycleThinkingLevel`, `getAvailableThinkingLevels`, `getSessionStats`, and `getUserMessagesForForking` to `T | Promise<T>` so the shared-host proxy is honestly typed. The proxy's `prompt` now forwards `streamingBehavior`, `thinkingLevel`, and the optimistic-echo `promptDisposition`/`preflightResult` callbacks across the wire, and fire-and-forget setters report RPC failures through a new `interactive_host_action_failed` warning instead of swallowing them.
+- `interactive-mode.ts`: the Shift+Tab handler awaits the cycle and only renders the unsupported-model branch; the level status/footer render from the `thinking_level_changed` event (single path for local, remote, and other attached clients). `/settings` thinking levels, `/fork` message list, and `/session` stats await their reads. No more `Thinking level: [object Promise]`.
+- `components/footer.ts`, `grok/chrome.ts`, `grok/footer.ts`: session parameters accept `InteractiveSession`.
+
+### Why
+
+- Since the shared RPC host became the default for interactive sessions, the proxy answered these four reads with Promises while the TUI consumed them synchronously: Shift+Tab printed `[object Promise]`, the settings selector lost low/med/high options, and `/fork` + `/session` broke. Event-driven level rendering also fixes multi-client convergence (desktop + terminal on one host session).
+
+### Why an extension could not handle it
+
+- The session contract and key-dispatch handlers are core interactive wiring; extensions cannot retype or resequence them.
+
+### Expected merge conflict zones
+
+- MEDIUM: `interactive-mode.ts` handler/event-case edits and the session getter type.
+- LOW: proxy setter overrides in `interactive-host-runtime.ts`.
+## Footer shows the active credential account (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/footer.ts`: when the active provider pools more than one credential slot, the footer's provider prefix becomes `(provider@account)` - the pinned slot when present, else the session's HRW winner computed with the same sha256 hash the rotation engine uses. Flat single credentials render exactly as before, and a credential-storage read failure never breaks footer rendering. Exported `accountFooterSuffix` keeps the logic unit-testable.
+
+### Why
+
+- With rotation on by default, the operator needs to see WHICH account a session is riding without opening /account; mirroring the provider-only-when->1 rule keeps single-account setups noise-free.
+
+### Why an extension could not handle it
+
+- The footer is a core interactive component; extensions cannot compose its right-side segments.
+
+### Expected merge conflict zones
+
+- LOW: right-side prefix composition in `formatSegments`.
+
 ## 2026-08-26 - Record uncaught crashes in the brand debug log
 
 ### What changed
@@ -2713,3 +2897,29 @@ The tip line was teaching a small slice of the product while most of the surface
 ### Expected merge conflict zones
 
 - NONE: the upstream-only Radius session-share artifact remains excluded from the fork tree.
+
+## 2026-08-27 - render JSON tool results as a styled key-value fallback
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/components/tool-execution-fallback.ts`: `createToolResultFallback()` now inspects the rendered text output before styling it. When the trimmed text starts with `{` or `[`, parses as JSON, and yields a non-null object or array, the fallback renders a bounded `key: value` view (keys in `muted`, string values in `toolOutput`, numbers/booleans in `accent`, `null` in `dim`) with 2-space indentation per nesting level. Anything else — prose, logs, malformed JSON — keeps the previous `theme.fg("toolOutput", output)` path byte for byte.
+- The view is bounded so a large payload cannot flood the transcript: max nesting depth 3 (deeper containers collapse to a truncated compact `JSON.stringify`), max 24 rendered rows followed by a single dim `… N more` line, and string values truncated to 100 characters with a trailing ellipsis. The function still returns the same `Text` component type as before.
+- `packages/coding-agent/test/tool-execution-fallback-json.test.ts`: new regression suite covering nested objects, prose passthrough, malformed-JSON passthrough, row/string bounds, and top-level primitive arrays.
+
+### Why
+
+- Tools without a `renderResult` hook — MCP-wrapped tools and third-party extensions in particular — commonly return their payload as a JSON string. The fallback dumped that raw string into the transcript, so a single call could paste an unreadable one-line blob across the viewport. A bounded key-value view keeps the same information scannable without asking every tool author to ship a renderer.
+
+### Why an extension could not handle it
+
+- This is the renderer of last resort inside `ToolExecutionComponent` for tools that have no renderer. An extension can only supply `renderResult` for its own tools; it has no hook covering results produced by other extensions or by MCP-bridged tools, which is exactly the population that hits this path.
+
+### Expected merge conflict zones
+
+- LOW: `createToolResultFallback()` in `packages/coding-agent/src/modes/interactive/components/tool-execution-fallback.ts` (additive helpers plus a two-line branch in one small function).
+
+- NF-1 RED: HEAD rejected setup-state custom entries with "Shared-host setup cannot transport custom entries" (binding test before implementation).
+- NF-1 GREEN: setup now transports every captured SessionEntry verbatim through append_session_entry; custom and session_info entries are persisted and observable by a second RPC client.
+
+- NF-2 RED: replacement string sendUserMessage dropped expandPromptTemplates, so the binding host trace did not preserve explicit false.
+- NF-2 GREEN: string replacement messages now forward expandPromptTemplates exactly like array messages; explicit false leaves /help as provider content.

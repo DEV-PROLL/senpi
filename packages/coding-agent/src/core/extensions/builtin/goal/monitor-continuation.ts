@@ -148,7 +148,8 @@ export class MonitorAwareGoalContinuation {
 					return goal;
 				case "cap":
 				case "repetition":
-				case "length-exhausted": {
+				case "length-exhausted":
+				case "unattended": {
 					const admission = await this.#admitAndQueue(options.ctx, goal, "immediate", options.messages);
 					return admission.goal;
 				}

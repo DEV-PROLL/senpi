@@ -67,7 +67,12 @@ export function createEvalTool(options: CreateEvalToolOptions): ToolDefinition<E
 					`Unsupported eval language "${request.language}". Enabled languages: ${languages.join(", ")}`,
 				);
 			const busy = cellManager.busyFor(request.language);
-			if (busy !== undefined) throw detachedKernelBusyError(busy);
+			if (busy !== undefined) {
+				const idleLanguages = languages.filter(
+					(language) => language !== request.language && cellManager.busyFor(language) === undefined,
+				);
+				throw detachedKernelBusyError(busy, idleLanguages);
+			}
 			options.executionTracker?.assertEvalExecutionAllowed();
 			const lifecycleController = new AbortController();
 			const combinedSignal = signal

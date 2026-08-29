@@ -62,7 +62,7 @@ import {
 	getShareViewerUrl,
 	VERSION,
 } from "../../config.ts";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
+import { type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import { isApiKeyLoginProvider } from "../../core/auth-providers.ts";
 import { envValue } from "../../core/brand.ts";
@@ -196,6 +196,7 @@ import { expandEditorSubmission, expandSubmittedText, transferEditorContent } fr
 import { formatExtensionErrorHeadline, sanitizeTuiErrorMessage } from "./extension-error-format.ts";
 import { editFileInExternalEditor, editInExternalEditor } from "./external-editor.ts";
 import { GrokChrome, type InteractiveChrome, type InteractiveFooter } from "./grok/chrome.ts";
+import type { InteractiveSession } from "./interactive-host-runtime.ts";
 import { restoreInteractiveStderr, takeOverInteractiveStderr } from "./interactive-stderr-guard.ts";
 import { applyKeybindingsFileEdit, seedKeybindingsFile } from "./keybindings-command.ts";
 import { refreshModelCatalogs } from "./model-catalog-refresh.ts";
@@ -401,6 +402,20 @@ function isDeadTerminalError(error: unknown): boolean {
 		return errno === EIO_ERRNO || errno === -EIO_ERRNO;
 	}
 	return false;
+}
+
+function storageWriteCrashMessage(error: unknown): string | undefined {
+	if (!error || typeof error !== "object" || !("code" in error)) {
+		return undefined;
+	}
+	const code = (error as NodeJS.ErrnoException).code;
+	if (code === "EDQUOT") {
+		return "Disk quota exceeded (EDQUOT). Free space or quota on the filesystem, then retry.";
+	}
+	if (code === "ENOSPC") {
+		return "Disk full (ENOSPC). Free space on the filesystem, then retry.";
+	}
+	return undefined;
 }
 
 const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
@@ -905,6 +920,12 @@ export class InteractiveMode {
 	// Auto-compaction state
 	private autoCompactionEscapeHandler?: () => void;
 	private compactionEscapeOverrideActive = false;
+	/**
+	 * One-time notice guard for the external-owner compaction delegation episode
+	 * (e.g. the Claude Agent SDK owning compaction). Armed while true; re-armed by
+	 * a successful compaction, a model switch, or a session rebind.
+	 */
+	private externalOwnerCompactionNoticeShown = false;
 	private autoCompactionProgressText = "";
 
 	// Auto-retry state
@@ -956,7 +977,9 @@ export class InteractiveMode {
 	private themeController: InteractiveThemeController;
 
 	// Convenience accessors
-	private get session(): AgentSession {
+	// The session may be the local AgentSession or the shared-host RPC proxy; the
+	// four reads widened on InteractiveSession must be awaited at every call site.
+	private get session(): InteractiveSession {
 		return this.runtimeHost.session;
 	}
 	private get sessionManager() {
@@ -2580,6 +2603,9 @@ export class InteractiveMode {
 
 	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
 		InteractiveMode.restoreCompactionEscapeOverride(this);
+		// A session switch/reset ends any external-owner delegation episode.
+		this.externalOwnerCompactionNoticeShown = false;
+		this.footer?.setCompactionDelegated?.(false);
 		const session = this.session;
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -3798,7 +3824,9 @@ export class InteractiveMode {
 						if (action === "tree") {
 							this.showTreeSelector();
 						} else {
-							this.showUserMessageSelector();
+							void this.showUserMessageSelector().catch((error) =>
+								this.showError(error instanceof Error ? error.message : String(error)),
+							);
 						}
 						this.lastEscapeTime = 0;
 					} else {
@@ -3812,7 +3840,11 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.clear", () => this.handleCtrlC());
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
-		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
+		this.defaultEditor.onAction("app.thinking.cycle", () => {
+			void this.cycleThinkingLevel().catch((error) =>
+				this.showError(error instanceof Error ? error.message : String(error)),
+			);
+		});
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
 
@@ -3834,7 +3866,13 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
 		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
-		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
+		this.defaultEditor.onAction(
+			"app.session.fork",
+			() =>
+				void this.showUserMessageSelector().catch((error) =>
+					this.showError(error instanceof Error ? error.message : String(error)),
+				),
+		);
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
 
 		this.defaultEditor.onChange = (text: string) => {
@@ -3996,199 +4034,159 @@ export class InteractiveMode {
 
 	private setupEditorSubmitHandler(): void {
 		this.defaultEditor.onSubmit = async (text: string) => {
-			// Capture-then-clear BEFORE any branch: handleFollowUp's non-streaming
-			// path pre-resolves images and hands off here, but slash / extension /
-			// bash submissions return before the consuming branches below. Clearing
-			// only after use would leak a stale array into a later ordinary
-			// submission whose text never references it.
-			const preResolvedImages = this.preResolvedSubmissionImages;
-			this.preResolvedSubmissionImages = undefined;
+			try {
+				// Capture-then-clear BEFORE any branch: handleFollowUp's non-streaming
+				// path pre-resolves images and hands off here, but slash / extension /
+				// bash submissions return before the consuming branches below. Clearing
+				// only after use would leak a stale array into a later ordinary
+				// submission whose text never references it.
+				const preResolvedImages = this.preResolvedSubmissionImages;
+				this.preResolvedSubmissionImages = undefined;
 
-			this.hideShortcutOverlay();
-			this.lastEditorText = "";
-			text = text.trim();
-			if (!text) return;
+				this.hideShortcutOverlay();
+				this.lastEditorText = "";
+				text = text.trim();
+				if (!text) return;
 
-			// Handle commands
-			if (text === "/settings") {
-				this.showSettingsSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/favorite-models") {
-				this.editor.setText("");
-				await this.showFavoriteModelsSelector();
-				return;
-			}
-			if (text === "/scoped-models") {
-				this.editor.setText("");
-				this.showScopedModelsSelector();
-				return;
-			}
-			if (text === "/model" || text.startsWith("/model ")) {
-				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
-				this.editor.setText("");
-				await this.handleModelCommand(searchTerm);
-				return;
-			}
-			if (text === "/export" || text.startsWith("/export ")) {
-				await this.handleExportCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/import" || text.startsWith("/import ")) {
-				await this.handleImportCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/share") {
-				await this.handleShareCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/copy") {
-				await this.handleCopyCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/name" || text.startsWith("/name ")) {
-				this.handleNameCommand(text);
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/session") {
-				this.handleSessionCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/changelog") {
-				this.handleChangelogCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/keybindings") {
-				this.editor.setText("");
-				await this.handleKeybindingsCommand();
-				return;
-			}
-			if (text === "/hotkeys") {
-				this.handleHotkeysCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/fork") {
-				this.showUserMessageSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/clone") {
-				this.editor.setText("");
-				await this.handleCloneCommand();
-				return;
-			}
-			if (text === "/tree") {
-				this.showTreeSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/trust") {
-				this.showTrustSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/login" || text.startsWith("/login ")) {
-				const providerRef = text.startsWith("/login ") ? text.slice(7).trim() : undefined;
-				this.editor.setText("");
-				await this.handleLoginCommand(providerRef);
-				return;
-			}
-			if (text === "/logout") {
-				this.showOAuthSelector("logout");
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/new") {
-				this.editor.setText("");
-				await this.handleClearCommand();
-				return;
-			}
-			if (text === "/compact" || text.startsWith("/compact ")) {
-				const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
-				this.editor.setText("");
-				await this.handleCompactCommand(customInstructions);
-				return;
-			}
-			if (text === "/reload") {
-				this.editor.setText("");
-				await this.handleReloadCommand();
-				return;
-			}
-			if (text === "/debug") {
-				this.handleDebugCommand();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/arminsayshi") {
-				this.handleArminSaysHi();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/dementedelves") {
-				this.handleDementedDelves();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/resume") {
-				this.showSessionSelector();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/quit" || text === "/exit") {
-				this.editor.setText("");
-				await this.shutdown();
-				return;
-			}
-			if (this.isExtensionCommand(text)) {
-				this.editor.addToHistory?.(text);
-				this.editor.setText("");
-				const pendingEchoId = this.optimisticUserEchoes.begin(text);
-				try {
-					await this.session.prompt(text, this.optimisticUserEchoes.promptOptions(pendingEchoId));
-				} catch (error) {
-					this.optimisticUserEchoes.reject(pendingEchoId);
-					throw error;
-				}
-				return;
-			}
-
-			// Handle bash command (! for normal, !! for excluded from context)
-			if (text.startsWith("!")) {
-				const isExcluded = text.startsWith("!!");
-				const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
-				if (command) {
-					if (this.session.isBashRunning) {
-						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
-						this.editor.setText(text);
-						return;
-					}
-					this.editor.addToHistory?.(text);
-					await this.handleBashCommand(command, isExcluded);
-					this.isBashMode = false;
-					this.updateEditorBorderColor();
+				// Handle commands
+				if (text === "/settings") {
+					await this.showSettingsSelector();
+					this.editor.setText("");
 					return;
 				}
-			}
-
-			// Queue non-command input during compaction.
-			// Extension commands short-circuit at the isExtensionCommand branch above and
-			// dispatch immediately inside AgentSession.prompt(), so the only text that
-			// reaches this compaction branch is non-command user input, which is queued
-			// for delivery after compaction settles.
-			//
-			// Note: the isExtensionCommand re-check below is already unreachable today
-			// (the branch above returns first) and stays harmless after the
-			// immediate-dispatch hoist in prompt().
-			if (this.session.isCompacting) {
+				if (text === "/favorite-models") {
+					this.editor.setText("");
+					await this.showFavoriteModelsSelector();
+					return;
+				}
+				if (text === "/scoped-models") {
+					this.editor.setText("");
+					this.showScopedModelsSelector();
+					return;
+				}
+				if (text === "/model" || text.startsWith("/model ")) {
+					const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
+					this.editor.setText("");
+					await this.handleModelCommand(searchTerm);
+					return;
+				}
+				if (text === "/export" || text.startsWith("/export ")) {
+					await this.handleExportCommand(text);
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/import" || text.startsWith("/import ")) {
+					await this.handleImportCommand(text);
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/share") {
+					await this.handleShareCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/copy") {
+					await this.handleCopyCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/name" || text.startsWith("/name ")) {
+					await this.handleNameCommand(text);
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/session") {
+					await this.handleSessionCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/changelog") {
+					this.handleChangelogCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/keybindings") {
+					this.editor.setText("");
+					await this.handleKeybindingsCommand();
+					return;
+				}
+				if (text === "/hotkeys") {
+					this.handleHotkeysCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/fork") {
+					await this.showUserMessageSelector();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/clone") {
+					this.editor.setText("");
+					await this.handleCloneCommand();
+					return;
+				}
+				if (text === "/tree") {
+					this.showTreeSelector();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/trust") {
+					this.showTrustSelector();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/login" || text.startsWith("/login ")) {
+					const providerRef = text.startsWith("/login ") ? text.slice(7).trim() : undefined;
+					this.editor.setText("");
+					await this.handleLoginCommand(providerRef);
+					return;
+				}
+				if (text === "/logout") {
+					this.showOAuthSelector("logout");
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/new") {
+					this.editor.setText("");
+					await this.handleClearCommand();
+					return;
+				}
+				if (text === "/compact" || text.startsWith("/compact ")) {
+					const customInstructions = text.startsWith("/compact ") ? text.slice(9).trim() : undefined;
+					this.editor.setText("");
+					await this.handleCompactCommand(customInstructions);
+					return;
+				}
+				if (text === "/reload") {
+					this.editor.setText("");
+					await this.handleReloadCommand();
+					return;
+				}
+				if (text === "/debug") {
+					this.handleDebugCommand();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/arminsayshi") {
+					this.handleArminSaysHi();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/dementedelves") {
+					this.handleDementedDelves();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/resume") {
+					this.showSessionSelector();
+					this.editor.setText("");
+					return;
+				}
+				if (text === "/quit" || text === "/exit") {
+					this.editor.setText("");
+					await this.shutdown();
+					return;
+				}
 				if (this.isExtensionCommand(text)) {
 					this.editor.addToHistory?.(text);
 					this.editor.setText("");
@@ -4199,53 +4197,97 @@ export class InteractiveMode {
 						this.optimisticUserEchoes.reject(pendingEchoId);
 						throw error;
 					}
-				} else {
-					this.queueCompactionSubmission(text, "steer");
+					return;
 				}
-				return;
-			}
 
-			// If streaming, use prompt() with steer behavior.
-			// Extension commands are dispatched immediately by AgentSession.prompt()
-			// (short-circuited at the isExtensionCommand branch above); the steer
-			// behavior here applies only to ordinary text, prompt template expansion,
-			// and queueing.
-			if (this.session.isStreaming) {
-				// Resolve BEFORE setText(""): the editor's prune chain fires
-				// onImageMarkersChanged([]) and destroys pendingImages.
+				// Handle bash command (! for normal, !! for excluded from context)
+				if (text.startsWith("!")) {
+					const isExcluded = text.startsWith("!!");
+					const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
+					if (command) {
+						if (this.session.isBashRunning) {
+							this.showWarning("A bash command is already running. Press Esc to cancel it first.");
+							this.editor.setText(text);
+							return;
+						}
+						this.editor.addToHistory?.(text);
+						await this.handleBashCommand(command, isExcluded);
+						this.isBashMode = false;
+						this.updateEditorBorderColor();
+						return;
+					}
+				}
+
+				// Queue non-command input during compaction.
+				// Extension commands short-circuit at the isExtensionCommand branch above and
+				// dispatch immediately inside AgentSession.prompt(), so the only text that
+				// reaches this compaction branch is non-command user input, which is queued
+				// for delivery after compaction settles.
+				//
+				// Note: the isExtensionCommand re-check below is already unreachable today
+				// (the branch above returns first) and stays harmless after the
+				// immediate-dispatch hoist in prompt().
+				if (this.session.isCompacting) {
+					if (this.isExtensionCommand(text)) {
+						this.editor.addToHistory?.(text);
+						this.editor.setText("");
+						const pendingEchoId = this.optimisticUserEchoes.begin(text);
+						try {
+							await this.session.prompt(text, this.optimisticUserEchoes.promptOptions(pendingEchoId));
+						} catch (error) {
+							this.optimisticUserEchoes.reject(pendingEchoId);
+							throw error;
+						}
+					} else {
+						this.queueCompactionSubmission(text, "steer");
+					}
+					return;
+				}
+
+				// If streaming, use prompt() with steer behavior.
+				// Extension commands are dispatched immediately by AgentSession.prompt()
+				// (short-circuited at the isExtensionCommand branch above); the steer
+				// behavior here applies only to ordinary text, prompt template expansion,
+				// and queueing.
+				if (this.session.isStreaming) {
+					// Resolve BEFORE setText(""): the editor's prune chain fires
+					// onImageMarkersChanged([]) and destroys pendingImages.
+					const images = preResolvedImages ?? this.takeSubmissionImages(text);
+					this.editor.addToHistory?.(text);
+					this.editor.setText("");
+					const pendingEchoId = this.optimisticUserEchoes.begin(text);
+					try {
+						await this.session.prompt(text, {
+							streamingBehavior: "steer",
+							...(images.length > 0 ? { images } : {}),
+							...this.optimisticUserEchoes.promptOptions(pendingEchoId),
+						});
+					} catch (error) {
+						this.optimisticUserEchoes.reject(pendingEchoId);
+						throw error;
+					}
+					this.updatePendingMessagesDisplay();
+					this.ui.requestRender();
+					return;
+				}
+
+				// Normal message submission
+				// First, move any pending bash components to chat
+				this.flushPendingBashComponents();
+
 				const images = preResolvedImages ?? this.takeSubmissionImages(text);
-				this.editor.addToHistory?.(text);
-				this.editor.setText("");
 				const pendingEchoId = this.optimisticUserEchoes.begin(text);
-				try {
-					await this.session.prompt(text, {
-						streamingBehavior: "steer",
-						...(images.length > 0 ? { images } : {}),
-						...this.optimisticUserEchoes.promptOptions(pendingEchoId),
-					});
-				} catch (error) {
-					this.optimisticUserEchoes.reject(pendingEchoId);
-					throw error;
+				const submission: InteractiveUserInput =
+					images.length > 0 ? { text, images, pendingEchoId } : { text, pendingEchoId };
+				if (this.onInputCallback) {
+					this.onInputCallback(submission);
+				} else {
+					this.pendingUserInputs.push(submission);
 				}
-				this.updatePendingMessagesDisplay();
-				this.ui.requestRender();
-				return;
+				this.editor.addToHistory?.(text);
+			} catch (error) {
+				this.showError(error instanceof Error ? error.message : String(error));
 			}
-
-			// Normal message submission
-			// First, move any pending bash components to chat
-			this.flushPendingBashComponents();
-
-			const images = preResolvedImages ?? this.takeSubmissionImages(text);
-			const pendingEchoId = this.optimisticUserEchoes.begin(text);
-			const submission: InteractiveUserInput =
-				images.length > 0 ? { text, images, pendingEchoId } : { text, pendingEchoId };
-			if (this.onInputCallback) {
-				this.onInputCallback(submission);
-			} else {
-				this.pendingUserInputs.push(submission);
-			}
-			this.editor.addToHistory?.(text);
 		};
 	}
 
@@ -4326,6 +4368,7 @@ export class InteractiveMode {
 			case "thinking_level_changed":
 				this.footer.invalidate();
 				this.updateEditorBorderColor();
+				this.showStatus(`Thinking level: ${event.level}`);
 				break;
 
 			case "high_reasoning_warning":
@@ -4580,7 +4623,28 @@ export class InteractiveMode {
 				InteractiveMode.restoreCompactionEscapeOverride(this);
 				this.clearStatusIndicator("compaction");
 				this.autoCompactionProgressText = "";
-				if (event.aborted) {
+				// Checked before `aborted`: production external-owner rejections are
+				// emitted via `_rejectCompaction(..., true, reason)` and carry
+				// `aborted: true`, so this branch must win for auto reasons or the
+				// delegation state renders as a per-turn red error.
+				if (event.rejectionCause === "external-owner" && event.reason !== "manual") {
+					// Auto compaction is delegated to an external owner (Claude Agent SDK).
+					// This is expected state, not an error: surface it at most once per
+					// delegation episode as a muted informational line and mark the footer
+					// so the saturated context meter reads as "handled natively".
+					if (!this.externalOwnerCompactionNoticeShown) {
+						this.externalOwnerCompactionNoticeShown = true;
+						this.chatContainer.addChild(new Spacer(1));
+						this.chatContainer.addChild(
+							new Text(
+								theme.fg("muted", "The Claude Agent SDK manages and compacts this session's context natively."),
+								1,
+								0,
+							),
+						);
+					}
+					this.footer?.setCompactionDelegated?.(true);
+				} else if (event.aborted) {
 					// Prefer the extension-provided reason over the generic "cancelled"
 					// label so per-turn-cap / circuit-breaker / provider-error cancels are
 					// no longer indistinguishable from a user-triggered abort.
@@ -4599,9 +4663,14 @@ export class InteractiveMode {
 					// Keep the structural fallback for focused handler consumers while using
 					// the session-owned manager on the real TUI path.
 					const sessionManager = this.session.sessionManager ?? this.sessionManager;
-					const entries = sessionManager.buildContextEntries();
+					let entries = sessionManager?.buildContextEntries?.() ?? [];
 					if (entries[0]?.type !== "compaction") {
-						throw new Error("Completed compaction is missing from the session context");
+						try {
+							sessionManager?.reloadFromDisk?.();
+							entries = sessionManager?.buildContextEntries?.() ?? entries;
+						} catch {
+							// Retain existing entries on reload error
+						}
 					}
 					this.chatContainer.clear();
 					const summaryMessage = createCompactionSummaryMessage(
@@ -4612,7 +4681,11 @@ export class InteractiveMode {
 					);
 					if (typeof this.renderSessionEntries === "function") {
 						// The latest compaction is prepended for model context; append it below at its chronological position.
-						this.renderSessionEntries(entries.slice(1));
+						const entriesToRender =
+							entries[0]?.type === "compaction"
+								? entries.slice(1)
+								: entries.filter((e) => e.type !== "compaction");
+						this.renderSessionEntries(entriesToRender);
 						this.addMessageToChat(summaryMessage);
 						if (event.result.usage) {
 							this.addCompactionCostNotice({
@@ -4628,6 +4701,9 @@ export class InteractiveMode {
 						this.addMessageToChat(summaryMessage);
 					}
 					this.footer.invalidate();
+					// A real compaction landed: the delegation episode (if any) is over.
+					this.externalOwnerCompactionNoticeShown = false;
+					this.footer?.setCompactionDelegated?.(false);
 				} else if (event.errorMessage) {
 					const errorMessage = sanitizeTerminalLabel(event.errorMessage);
 					if (event.reason === "manual") {
@@ -4697,6 +4773,15 @@ export class InteractiveMode {
 				break;
 			}
 
+			case "model_changed":
+				// Shared-host/other-client model switches arrive as model_changed wire
+				// events; the new model must not inherit the previous model's
+				// SDK-delegation episode (post-#1188 core emits no repeat rejection to
+				// self-heal a stale marker).
+				this.externalOwnerCompactionNoticeShown = false;
+				this.footer?.setCompactionDelegated?.(false);
+				break;
+
 			case "retry_fallback_applied": {
 				if (this.pendingZeroDelayRetryIndicator) {
 					this.pendingZeroDelayRetryIndicator.fallbackApplied = true;
@@ -4709,6 +4794,10 @@ export class InteractiveMode {
 					why: `Retry switched models (${event.reason}); the turn continues on ${event.to}.`,
 				});
 				this.setExtensionStatus(FALLBACK_STATUS_KEY, `fallback: ${event.to}`);
+				// Provider/model failover ends any external-owner delegation episode:
+				// the fallback model does not inherit SDK-owned compaction state.
+				this.externalOwnerCompactionNoticeShown = false;
+				this.footer?.setCompactionDelegated?.(false);
 				break;
 			}
 
@@ -5347,6 +5436,11 @@ export class InteractiveMode {
 	}
 
 	renderInitialMessages(): void {
+		// Any full transcript rerender ends the external-owner delegation episode:
+		// the rendered notice is gone, so the guard must re-arm and the footer
+		// marker must not persist as stale state.
+		this.externalOwnerCompactionNoticeShown = false;
+		this.footer?.setCompactionDelegated?.(false);
 		const entries = this.sessionManager.buildContextEntries();
 		this.renderSessionEntries(entries, {
 			updateFooter: true,
@@ -5426,6 +5520,11 @@ export class InteractiveMode {
 	}
 
 	private rebuildChatFromMessages(): void {
+		try {
+			this.sessionManager?.reloadFromDisk?.();
+		} catch {
+			// Keep in-memory entries if file reload is unavailable
+		}
 		this.chatContainer.clear();
 		this.renderSessionEntries(this.sessionManager.buildContextEntries());
 	}
@@ -5557,6 +5656,10 @@ export class InteractiveMode {
 			appendUncaughtCrashLog(origin, error);
 		} catch {}
 		restoreInteractiveStderr();
+		const storageMessage = storageWriteCrashMessage(error);
+		if (storageMessage !== undefined) {
+			console.error(storageMessage);
+		}
 		console.error(`${APP_NAME} exiting due to uncaughtException:`);
 		console.error(error);
 		process.exit(1);
@@ -5751,14 +5854,14 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private cycleThinkingLevel(): void {
-		const newLevel = this.session.cycleThinkingLevel();
+	private async cycleThinkingLevel(): Promise<void> {
+		// The shared-host proxy answers this over RPC. The level itself is rendered
+		// from the thinking_level_changed event (single path for local and remote,
+		// and for changes made by OTHER attached clients); the awaited value only
+		// distinguishes "model does not support thinking".
+		const newLevel = await this.session.cycleThinkingLevel();
 		if (newLevel === undefined) {
 			this.showStatus("Current model does not support thinking");
-		} else {
-			this.footer.invalidate();
-			this.updateEditorBorderColor();
-			this.showStatus(`Thinking level: ${newLevel}`);
 		}
 	}
 
@@ -5773,6 +5876,9 @@ export class InteractiveMode {
 				this.showStatus(msg);
 			} else {
 				this.footer.invalidate();
+				// A model switch ends any external-owner delegation episode.
+				this.externalOwnerCompactionNoticeShown = false;
+				this.footer?.setCompactionDelegated?.(false);
 				this.updateEditorBorderColor();
 				const thinkingStr =
 					result.model.reasoning && result.thinkingLevel !== "off" ? ` (thinking: ${result.thinkingLevel})` : "";
@@ -6308,7 +6414,9 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private showSettingsSelector(): void {
+	private async showSettingsSelector(): Promise<void> {
+		// Awaited at the boundary: the shared-host proxy answers this over RPC.
+		const availableThinkingLevels = await this.session.getAvailableThinkingLevels();
 		this.showSelector((done) => {
 			let selector: SettingsSelectorComponent | undefined;
 			selector = new SettingsSelectorComponent(
@@ -6324,7 +6432,7 @@ export class InteractiveMode {
 					transport: this.settingsManager.getTransport(),
 					httpIdleTimeoutMs: this.settingsManager.getHttpIdleTimeoutMs(),
 					thinkingLevel: this.session.thinkingLevel,
-					availableThinkingLevels: this.session.getAvailableThinkingLevels(),
+					availableThinkingLevels,
 					currentTheme: this.themeController.getThemeSelection() || "dark",
 					terminalTheme: this.themeController.getTerminalTheme(),
 					availableThemes: getAvailableThemes(),
@@ -6610,6 +6718,9 @@ export class InteractiveMode {
 		try {
 			const systemPromptChange = await this.session.setModel(model);
 			this.footer.invalidate();
+			// A model switch ends any external-owner delegation episode.
+			this.externalOwnerCompactionNoticeShown = false;
+			this.footer?.setCompactionDelegated?.(false);
 			this.updateEditorBorderColor();
 			const systemPromptStr = systemPromptChange?.systemPromptName
 				? ` (optimized system prompt applied: ${systemPromptChange.systemPromptName})`
@@ -6977,8 +7088,9 @@ export class InteractiveMode {
 		});
 	}
 
-	private showUserMessageSelector(): void {
-		const userMessages = this.session.getUserMessagesForForking();
+	private async showUserMessageSelector(): Promise<void> {
+		// Awaited at the boundary: the shared-host proxy answers this over RPC.
+		const userMessages = await this.session.getUserMessagesForForking();
 
 		if (userMessages.length === 0) {
 			this.showStatus("No messages to fork from");
@@ -7846,6 +7958,12 @@ export class InteractiveMode {
 			this.resetExtensionUI();
 			this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 			this.outputPad = this.settingsManager.getOutputPad();
+			// Reload replaces the session runner: a genuine ownership boundary, so the
+			// external-owner delegation episode ends here (settings-only rebuilds below
+			// go through rebuildChatFromMessages and must NOT reset it — post-#1188 core
+			// emits no repeat rejection event to restore cleared state).
+			this.externalOwnerCompactionNoticeShown = false;
+			this.footer?.setCompactionDelegated?.(false);
 			this.rebuildChatFromMessages();
 			time("chatRebuild", "reload");
 			chatRestoredBeforeSessionStart = true;
@@ -7904,7 +8022,7 @@ export class InteractiveMode {
 
 		try {
 			if (outputPath?.endsWith(".jsonl")) {
-				const filePath = this.session.exportToJsonl(outputPath);
+				const filePath = await this.session.exportToJsonl(outputPath);
 				this.showStatus(`Session exported to: ${filePath}`);
 			} else {
 				const filePath = await this.session.exportToHtml(outputPath, {
@@ -8109,7 +8227,7 @@ export class InteractiveMode {
 		}
 	}
 
-	private handleNameCommand(text: string): void {
+	private async handleNameCommand(text: string): Promise<void> {
 		const name = text.replace(/^\/name\s*/, "").trim();
 		if (!name) {
 			const currentName = this.sessionManager.getSessionName();
@@ -8123,8 +8241,8 @@ export class InteractiveMode {
 			return;
 		}
 
-		this.session.setSessionName(name);
-		const sessionName = this.sessionManager.getSessionName();
+		await this.session.setSessionName(name);
+		const sessionName = this.session.sessionName;
 		if (sessionName !== name) {
 			this.showWarning(`Session name was normalized from ${JSON.stringify(name)} to ${JSON.stringify(sessionName)}`);
 		}
@@ -8133,9 +8251,10 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	private handleSessionCommand(): void {
-		const stats = this.session.getSessionStats();
-		const sessionName = this.sessionManager.getSessionName();
+	private async handleSessionCommand(): Promise<void> {
+		// Awaited at the boundary: the shared-host proxy answers this over RPC.
+		const stats = await this.session.getSessionStats();
+		const sessionName = this.session.sessionName;
 		const entries = this.sessionManager.getEntries();
 		const cacheWaste = computeCacheWaste(entries, this.session.modelRuntime);
 
@@ -8452,7 +8571,7 @@ export class InteractiveMode {
 			);
 
 			// Record the result in session
-			this.session.recordBashResult(command, result, { excludeFromContext });
+			void this.session.recordBashResult(command, result, { excludeFromContext });
 			this.bashComponent = undefined;
 			this.ui.requestRender();
 			return;

@@ -1,3 +1,115 @@
+## 2026-08-28 - Restore Bedrock global GPT-5.6 strict tool sampling
+
+### What changed
+
+- `packages/ai/src/providers/data/amazon-bedrock.json`: `global.openai.gpt-5.6-luna`, `global.openai.gpt-5.6-sol`, and `global.openai.gpt-5.6-terra` carry `compat.supportsStrictMode: true` again (plus the matching `.manifest.json` hash). A catalog regeneration had dropped the field, so `bedrock-converse-stream.ts` read `model.compat?.supportsStrictMode ?? false` and rejected `constrainedSampling.strict: "require"` as unsupported while silently downgrading `"prefer"` to an unconstrained schema.
+- `packages/ai/scripts/generate-models.ts`: `applyStrictToolCompatMetadata()` now re-stamps `supportsStrictMode` on those three Bedrock global inference profiles, so the capability survives future regenerations instead of depending on models.dev reporting `structured_output` (it reports it only for the regional `openai.gpt-5.6-*` IDs).
+- `packages/ai/test/bedrock-strict-tool-compat.test.ts`: asserts the shipped catalog data and re-runs the generator offline against an upstream payload with no `structured_output` to prove the override survives regeneration.
+
+### Why
+
+- Strict JSON-schema tool sampling is a wire-visible provider capability. Losing it turned working `strict: "require"` requests into unsupported-capability failures on the global Bedrock GPT-5.6 profiles.
+
+### Why an extension could not handle it
+
+- The capability is read from the generated model catalog inside the Bedrock adapter; there is no extension-visible hook between the catalog and `convertToolConfig()`.
+
+### Expected merge conflict zones
+
+- LOW: three generated entries in `amazon-bedrock.json` plus its manifest hash line during catalog regeneration syncs.
+- LOW: one `else if` branch in `applyStrictToolCompatMetadata()`.
+
+## 2026-08-27 - Default retry policy phase-2 close-out (docs)
+
+### What changed
+
+- `packages/ai/src/utils/retry-profile/profiles.ts`: the senpi-default turn stage ships an 8s `perAttemptCapMs` and +0..25% additive jitter on locally computed exponential backoffs (provider-derived `Retry-After` hints stay exact). `classifyErrorMessage` remains tri-state (non-retryable / retryable / unknown) with non-retryable outranking retryable.
+- The default same-model turn retry budget stays at 3 retries. This is an intentional non-change: the budget was reviewed during phase-2 close and kept at its existing value for all providers that don't declare their own profile.
+- No new kimi-code observability or telemetry surface was adopted. The `provider_retry_failure` diagnostic added in phase 1 is the only retry-specific emission, and no additional counters, traces, or structured events were introduced.
+- Regression coverage: `packages/coding-agent/test/suite/regressions/retry-default-no-kimi-leak.test.ts` guards senpi-default against kimi semantics leaking in (no-hint 429 first-failure fallback, 1258000ms hint tier routing, billing 429 pinned fallback, abort during backoff single `auto_retry_end`).
+- Tracked in `packages/ai/src/changes.md` and `packages/coding-agent/src/core/changes.md`.
+
+### Why
+
+- Phase-2 close needs an explicit record that the 3-retry budget and the absence of new telemetry were deliberate decisions, not oversights. The profile defaults recap documents the shipped values in one place for reviewers who don't read `profiles.ts`.
+
+### Why an extension could not handle it
+
+- The profile constants and classifier live inside this package's retry-profile tree, below any extension-visible hook.
+
+### Expected merge conflict zones
+
+- NONE: doc-only section append; no code files touched.
+
+## 2026-08-27 - Storage docs describe pooled entries
+
+### What changed
+
+- `packages/ai/src/auth/types.ts`, `packages/ai/src/auth/credential-store.ts`: the "one credential per provider" doc comments now say one ENTRY per provider, where an entry may pool sibling slots under `accounts` while its flat fields remain a valid credential (matching `auth/AGENTS.md`).
+
+### Why
+
+- The old sentence contradicted the shipped pooled-entry contract; stale invariants misdirect future changes into destroying sibling slots.
+
+### Why an extension could not handle it
+
+- Doc comments live in the module source.
+
+### Expected merge conflict zones
+
+- LOW: comment-only hunks.
+
+## 2026-08-27 - Export the canonical provider API-key env-var mapping
+
+### What changed
+
+- `packages/ai/src/env-api-keys.ts`: `getApiKeyEnvVars` is now exported (previously module-private and reachable only through `findEnvKeys`/`getEnvApiKey`).
+
+### Why
+
+- Numbered environment credential slots (`OPENAI_API_KEY_2`, ...) must generalize over the same provider-id-to-env-var mapping the resolver already uses. Re-deriving that table in `packages/coding-agent` would let the two drift, and a drifted table silently discovers the wrong variable for a provider.
+
+### Why an extension could not handle it
+
+- The mapping is data owned by this module and reachable only from inside it; an extension can neither read it nor keep a copy in step with upstream catalog changes.
+
+### Expected merge conflict zones
+
+- LOW: one `export` keyword on an existing function declaration.
+
+## 2026-08-27 - Credential pool engine: HRW selection, failure taxonomy, slot failover, slot-scoped resolution
+
+### What changed
+
+- `packages/ai/src/auth/pool/select.ts` (new): browser-safe HRW slot selection over an injected `SlotHasher` - `rendezvousOrder` hashes `key\0slot.name` exactly like the claude-sdk-oauth affinity oracle, `selectSlot` honors a pinned slot, skips blocked slots (auth blocks persist, elapsed rate blocks clear), and throws `AllSlotsBlockedError` with the soonest unblock time.
+- `packages/ai/src/auth/pool/classify.ts` (new): three-way in-lane failure taxonomy (`rotate`/`retry`/`fail`) with `retryAfterMs` extraction; unknown errors default-deny to `fail` so the model fallback chain keeps owning them.
+- `packages/ai/src/auth/pool/failover.ts` (new): `runSlotFailover` runs at most one attempt per slot, blocks failed slots (exponential rate-limit windows capped at 48h, expiry-free auth blocks), and reuses the `senpi:no-turn-retry:` suppression marker; `isCommittedOutput` is default-DENY, so absent an explicit bookkeeping filter any yielded event makes rotation non-transparent.
+- `packages/ai/src/auth/pool/slots.ts`: added `projectSlot` (named-slot flat projection with pool fields stripped) and `mergeRefreshedSlot` (named-slot refresh merge that rotates the flat downgrade projection only when it mirrored that slot).
+- `packages/ai/src/auth/resolve.ts`: `AuthResolutionOverrides.slotName` resolves one named slot of a pooled credential; a missing entry or slot resolves to undefined instead of falling back to another account or ambient env, and the locked OAuth refresh path refreshes exactly the named slot via `mergeRefreshedSlot`.
+
+### Why
+
+- Generic multi-credential rotation needs a provider-neutral engine: session-affine slot choice that provably never remaps existing claude-sdk-oauth sessions (golden-oracle test), failover that can rotate accounts mid-lane without replaying committed output, and an auth resolution path that can address a specific slot without disturbing siblings or the flat projection older binaries read.
+
+### Why an extension could not handle it
+
+- Slot-scoped resolution must run inside `resolveProviderAuth`'s locked OAuth refresh path, which is the cross-provider choke point in `packages/ai`; extensions cannot enter that lock or the credential-store modify transaction.
+
+### Expected merge conflict zones
+
+- LOW: `resolve.ts` stored-credential branch and the refresh modify callback; new pool files have no upstream counterpart.
+
+## 2026-08-27 - Duplicate cursor exec tool-call ids no longer brick Anthropic resumes
+
+### What changed
+
+- `packages/ai/src/api/cursor-agent.ts` uniquifies exec-frame tool-call ids before synthesizing blocks (`ensureUniqueCursorExecToolCallId`): Cursor reuses one parent id across the exec sub-frames of a compound tool (observed: `StrReplace` → `read` + `write` both carrying `StrReplace_0_<hash>-<n>`), so the persisted assistant message carried duplicate `toolCall` ids.
+- `packages/ai/src/api/anthropic-tool-pairs.ts` now also repairs duplicate `tool_use` ids payload-wide at the final pre-submit pass: later duplicates are renamed (`<id>__dedup<n>`) and the following user message's `tool_result` blocks are remapped in call order, so transcripts already corrupted by the cursor bug (or any other source) resume instead of failing every request with `tool_use ids must be unique` (invalid_request_error), which permanently bricked sessions.
+
+### Why
+
+- Field incident 2026-08-27: two omo-desktop threads could never resume — every turn errored with `messages.1.content.27: tool_use ids must be unique`. Forensics showed cursor/kimi StrReplace frames sharing one id for their read+write pair; 2 of 59 session transcripts on the host carried such duplicates (6 pairs total). The sanitizer heals existing transcripts; the cursor-agent guard stops new corruption at the source.
+
 ## 2026-08-25 - Preserve same-model redacted thinking during message transforms
 
 ### What changed

@@ -1,5 +1,200 @@
 # changes
 
+## 2026-08-29 - Make externally owned compaction delegation sticky
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: remember the provider and model id after an automatic compaction is rejected by an external owner, suppressing repeated automatic attempts until that key changes, compaction is accepted, or runtime ownership is reconfigured by reload/registry refresh. Manual compaction remains admitted.
+- Added `test/suite/regressions/1174-sticky-delegated-compaction.test.ts` covering repeated turns, manual compaction, and model changes.
+
+### Why
+
+- A provider-owned compaction lane previously caused the core to emit a new automatic compaction attempt on every turn, repeatedly producing rejection events and repainting the same error.
+
+### Why an extension could not handle it
+
+- Automatic compaction admission and lifecycle state are private `AgentSession` control flow that runs before extension hooks are emitted.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: compaction state, automatic admission methods, rejection handling, model selection invalidation, and tree navigation.
+
+## 2026-08-29 - Withheld tools are filtered at the advertisement seam
+
+### What changed
+
+- `agent-session.ts`: names in `temporarilyDisabledToolNames` are dropped from `definitionRegistry`
+  (which becomes `_toolDefinitions`, and therefore the prompt snippets and guidelines) and from the
+  DEFAULT `nextActiveToolNames` selection. `_baseToolDefinitions` stays unfiltered, so
+  `_toolRegistry` remains whole, and an explicit `activeToolNames` request still activates the tool.
+
+### Why
+
+- Filtering `_baseToolDefinitions` also emptied `_toolRegistry`, which `getRegisteredTool` serves.
+  That method is documented to resolve "from the full registry ... independent of the active set"
+  precisely because the Cursor exec bridge drives its own native read/bash/grep/ls frames regardless
+  of what the request advertised, so every Cursor grep frame would have answered
+  `Tool "grep" is not available in this session`. Withholding now happens only where the
+  model-facing surface is derived, leaving programmatic name-based resolution working.
+- The active-name filter applies to the default selection only. A caller that passes
+  `activeToolNames` has named the tool deliberately; overriding that would have broken
+  `filesystem-policy`'s contract that policies reach all six built-in file tools, and the
+  `defaultTools` explicit-precedence guard.
+
+### Why an extension could not handle it
+
+- `_toolDefinitions`, `_toolRegistry`, and the active tool names are private session state built in
+  one pass inside `AgentSession`; no extension hook runs between their construction and first use,
+  so the split between the advertised surface and the resolvable registry can only be made here.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: the `definitionRegistry` construction and the `nextActiveToolNames` filter
+  both gained a `temporarilyDisabledToolNames` guard alongside the existing `isAllowedTool` call.
+  Upstream edits to either filter will conflict; keep the upstream predicate change and re-apply
+  the withheld-name guard next to it.
+
+- Model runtime credential admission counts the combined canonical environment and policy slot lane, admitting rotation for more than one live slot without acquiring leases during preflight.
+
+## 2026-08-28 - Credential pool parity follow-ups
+
+- Half-open leases now admit their holder exactly once for stored and environment probes.
+- Named `models.json` credential slots participate in rotation, policy cooldown bases drive initial backoff,
+  full streams preserve session affinity, and account health follows the auth storage directory.
+- Bare-family fallback opt-outs normalize provider namespaces, and the shipped `"*"` lane is accepted by validation.
+
+## 2026-08-28 - Wildcard fallback lane for chainless models
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/chains.ts`: added the `WILDCARD_CHAIN_KEY` (`"*"`),
+  taught `canonicalizeFallbackChains` to expand and tombstone it (both existing loops skip it because
+  it is not a model selector), gave `resolveChainKey` an opt-in `allowWildcard` fallthrough, and added
+  `hasExplicitFallbackOptOut` so a `[]` tombstone on the current model's exact/base/bare-family key
+  suppresses the lane.
+- `packages/coding-agent/src/core/retry-fallback/settings.ts`: `DEFAULT_FALLBACK_CHAINS` ships a `"*"`
+  lane mirroring the Fable default rungs.
+- `packages/coding-agent/src/core/retry-fallback/controller.ts`: `nextCandidate` resolves in the order
+  own chain -> active episode's `chainKey` -> wildcard (gated on the opt-out check).
+
+### Why
+
+- Desktop thread 487d7c29 (2026-08-28) burned nine consecutive turns on upstream 500s from
+  `apitopia/kimi-k3-unlocked` with zero fallback attempts and wedged terminal `error`; a manual model
+  switch recovered it instantly. `DEFAULT_FALLBACK_CHAINS` only keyed `claude-fable-5`, so the
+  manually selected model resolved no chain and `canTryFallback()` was permanently false.
+- Ordering is load-bearing: an unconditional wildcard fallthrough hijacked sessions already walking a
+  configured chain (their last rung usually has no key either), which the engine suite caught as a
+  7 -> 5 call-count regression.
+- The opt-out gate exists because canonicalization deletes tombstoned keys, which would otherwise let
+  the shipped wildcard silently resurrect fallback for a user who explicitly disabled it.
+
+### Why an extension could not handle it
+
+- Chain resolution and candidate selection are private `RetryFallbackController` state; extensions see
+  fallback events only after the core has already decided not to rotate.
+
+### Expected merge conflict zones
+
+- LOW: the `resolveChainKey` tail and the `canonicalizeFallbackChains` return block in `chains.ts`.
+- LOW: the `chainKey` resolution expression in `controller.ts`.
+
+## 2026-08-28 - Credential pool runtime wiring
+
+- Normal simple agent streams now use credential rotation, session ids provide affinity, pinned accounts win selection, expired cooldowns use one half-open probe, successful probes persist health, and custom agent directories scope sidecar state.
+
+## 2026-08-28 - Credential pool final-account removal
+
+- Removing the last stored account now deletes the provider credential instead of leaving stale auth.json data.
+
+## 2026-08-28 - SessionManager reloadFromDisk for external/shared-host mutations
+
+### What changed
+
+- `packages/coding-agent/src/core/session-manager.ts`: added `reloadFromDisk()` to reload `fileEntries`, update internal maps/caches, and rebuild index from `this.sessionFile` if it exists.
+- Enables in-process mirrors (such as interactive host proxy) to synchronize with external changes like host-committed compactions.
+## 2026-08-27 - Default retry policy phase-2 close-out (docs)
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/profile-override.ts`: the `retry.providers.<providerId>` override surface accepts per-provider scheduling-knob overrides validated against `RetryStageOverride` (fields: `enabled`, `maxRetries`, `baseDelayMs`, `growthFactor`, `perAttemptCapMs`, `jitter`, `serverHintMaxDelayMs`). An entire provider entry is rejected atomically when any knob is invalid.
+- Recommended settings snippet for users who configure no fallback chain and want a larger same-model budget:
+  ```jsonc
+  {
+    // Raise the turn retry budget for a single-provider setup.
+    // maxRetries must be a non-negative safe integer.
+    "retry": {
+      "providers": {
+        "<providerId>": {
+          "turn": {
+            "maxRetries": 5
+          }
+        }
+      }
+    }
+  }
+  ```
+- The default same-model turn retry budget stays at 3 retries. This is an intentional non-change: the budget was reviewed during phase-2 close and kept at its existing value for all providers that don't declare their own profile.
+- No new kimi-code observability or telemetry surface was adopted.
+- Regression coverage: `packages/coding-agent/test/suite/regressions/retry-default-no-kimi-leak.test.ts` guards senpi-default against kimi semantics leaking in (no-hint 429 first-failure fallback, 1258000ms hint tier routing, billing 429 pinned fallback, abort during backoff single `auto_retry_end`).
+- Tracked in `packages/ai/src/changes.md` and `packages/coding-agent/src/core/changes.md`.
+
+### Why
+
+- Users running a single provider without a fallback chain benefit from a higher retry budget, but the default stays conservative (3) to avoid masking persistent failures when fallback providers are available. The snippet documents the exact override path so users don't have to read the validation source.
+
+### Why an extension could not handle it
+
+- `retry.providers` overrides are resolved inside `resolveRetryProfile` in `packages/coding-agent/src/core/settings-manager.ts`, before any extension hook. The validation and merge happen at settings load time.
+
+### Expected merge conflict zones
+
+- NONE: doc-only section append; no code files touched.
+
+## Provider-neutral credential accounts (2026-08-27)
+
+### What changed
+
+- `packages/coding-agent/src/core/credential-accounts.ts` (new): provider-neutral account surface over the pool slot algebra - `getCredentialAccounts`/`summarizeCredentialAccounts` list stored slots (env slots only when nothing is stored, mirroring resolution precedence), `pinCredentialAccount` pins/unpins, `removeCredentialAccount` removes a stored slot and drops its sidecar health (env-backed accounts refuse removal). Blocked state reads BOTH sources: a slot's own persisted `blockedUntil`/`blockReason` and the pool sidecar. Mutations emit `emitProviderAccountsChanged` so subscribed clients re-read. Summaries carry names and health only, never key material.
+- `packages/coding-agent/src/main.ts`: `auth check --json` now includes a non-secret `accounts` array (name/source/blocked/pinned) for the checked provider; enrichment failures never turn a readable auth state into an error.
+
+### Why
+
+- Account management was confined to the claude-sdk-oauth lane (`assertManagedProvider` hard-rejected every other provider). Generic multi-credential pools need one surface that works for every provider, and scripts consuming `auth check --json` need account visibility without parsing auth.json.
+
+### Why an extension could not handle it
+
+- The RPC and app-server consumers dispatch these operations inside core connection handling; an extension cannot replace their imports, and account listing needs the auth storage and pool sidecar wiring that live in core.
+
+### Expected merge conflict zones
+
+- LOW: `main.ts` auth-check output composition (one enrichment block); `credential-accounts.ts` is fork-new.
+
+## 2026-08-27 - Credential pool: health sidecar, policy schema, env slots, in-lane rotation
+
+### What changed
+
+- `packages/coding-agent/src/core/credential-pool/state-store.ts` (new): file-locked health sidecar at `<agent-dir>/credential-pool-state.json` (mode 0600, `FILE_STORAGE_LOCK_OPTIONS`) holding ONLY health - absolute cooldown deadlines, permanent auth/billing blocks, half-open probe leases, `lastSuccessAt`, and HMAC-derived env-slot revisions. `CredentialSlotRepository.mutateSlotState` is an atomic read-modify-write with a `stateVersion` increment; `acquireHalfOpenLease` transitions an elapsed cooldown to half-open for exactly one probing caller. An unreadable or schema-invalid document resets to fresh state rather than failing auth resolution.
+- `packages/coding-agent/src/core/credential-pool/classify.ts` (new): concrete provider-error taxonomy over `normalizeProviderError` and the existing 429 retry-hint parser. 401/invalid-key and account-scoped 403 block permanently and fail over; bare 403 fails the request; 429 fails over with a per-slot exponential cooldown floored (never overridden) by the server hint and capped at 48h; billing/quota-exhausted disables the account; 5xx/529/overload/network retry the SAME slot without blocking it; overflow, invalid model, 400, 404, malformed stream, and abort fail the request.
+- `packages/coding-agent/src/core/credential-pool/failover.ts` (new): `runCredentialFailover` re-reads slots before each distinct-credential attempt (so a newly added slot participates), runs at most one failover attempt per slot per request, settles a failed stream before starting the next, persists the block BEFORE selecting a replacement, and requires an `isCommittedOutput` predicate whose contract is default-DENY. Committed output bars rotation and the rethrow carries the existing `senpi:no-turn-retry:` marker.
+- `packages/coding-agent/src/core/credential-pool/env-slots.ts` (new): numbered env credential slots for any provider (`<VAR>`, `<VAR>_2` .. `<VAR>_16`), gap-tolerant, over the canonical `getApiKeyEnvVars` mapping.
+- `packages/coding-agent/src/core/credential-pool/rotation-stream.ts` (new): lists a provider's rotation slots with sidecar health overlaid (stored lane when a credential exists, env lane otherwise), selects by sha256 HRW over the request affinity key, and persists blocks per lane. An env slot's persisted health applies only while its HMAC revision still matches the current value.
+- `packages/coding-agent/src/core/model-runtime.ts`: `ModelRuntime.stream` engages that rotation only when the provider actually holds more than one slot and nothing pins the request to a single credential (runtime key, explicit per-request `apiKey`, or `credentials.rotation: false`); `prepareRequest` accepts a per-attempt slot override, and `ModelRuntimeAuthOverrides.slotName` plumbs slot-scoped resolution.
+- `packages/coding-agent/src/core/model-config-schema.ts`: per-provider `credentials` policy block (`additionalProperties: false`) with `rotation`/`affinity` toggles, cooldown bounds, and named slot references to env vars or command values; `CREDENTIAL_POLICY_DEFAULTS` re-exports the engine constants so schema and runtime cannot drift.
+
+### Why
+
+- Multi-credential rotation needs durable per-slot health that survives restart with absolute deadlines, a taxonomy that distinguishes credential-scoped from provider-scoped faults (blocking a healthy credential for a provider outage only destroys prompt-cache locality), and a request-level runner that exhausts a lane's slots before the model fallback chain above it is consulted. Health cannot live in `auth.json`: that file is credential material under its own lock, and mixing volatile block state into it would rewrite user credentials on every rate limit.
+
+### Why an extension could not handle it
+
+- `ModelRuntime.stream` is the one place where a request's provider auth is resolved and the provider stream is constructed; per-attempt credential selection has to happen inside it. The sidecar likewise needs `getAgentDir()` and the shared file-storage lock policy, neither of which is reachable through the extension API.
+
+### Expected merge conflict zones
+
+- MEDIUM: `model-runtime.ts` `prepareRequest`/`stream` (upstream-owned request construction; the rotation branch is additive and the single-credential path is unchanged).
+- LOW: `model-config-schema.ts` provider block (one optional property); the `credential-pool/` directory is fork-new with no upstream counterpart.
+
 ## 2026-08-26 - Capture bash spill-file errors before the first write
 
 ### What changed

@@ -12,6 +12,56 @@
 
 ### Removed
 
+## [2026.8.29] - 2026-08-29
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.28-2] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.28] - 2026-08-28
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.8.27] - 2026-08-27
+
+### Breaking Changes
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Fixed Windows Terminal/ConPTY resize redraws erasing terminal scrollback with `ESC[3J` ([#1145](https://github.com/code-yeongyu/senpi/issues/1145)).
+
+### Removed
+
 ## [2026.8.26-2] - 2026-08-26
 
 ### Breaking Changes

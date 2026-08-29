@@ -186,7 +186,7 @@ import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinki
 import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { composeFilesystemPolicies } from "./tools/filesystem-policy.ts";
-import { createAllToolDefinitions } from "./tools/index.ts";
+import { createAllToolDefinitions, temporarilyDisabledToolNames } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
@@ -393,6 +393,7 @@ export type AgentSessionEvent =
 			type: "queue_update";
 			steering: readonly string[];
 			followUp: readonly string[];
+			ordered: readonly { text: string; mode: "steer" | "followUp"; enqueueOrder: number }[];
 	  }
 	| { type: "compaction_start"; reason: CompactionReason; requestId?: string }
 	| {
@@ -889,6 +890,7 @@ export class AgentSession {
 	// response must not retrigger threshold compaction from stale provider usage.
 	private _skipNextPostRetryCompactionCheck = false;
 	private _blockedPostCompactionAssistant: { assistant: AssistantMessage; revision: number } | undefined;
+	private _delegatedCompactionKey: { provider: string; id: string } | undefined;
 	private _skipNextPostCompactionAssistantCheck = false;
 	private _scheduledContinuationRecompacted = false;
 	private readonly _assistantsPendingAtCompaction = new WeakSet<AssistantMessage>();
@@ -1525,6 +1527,7 @@ export class AgentSession {
 			type: "queue_update",
 			steering: [...this._steeringMessages],
 			followUp: [...this._followUpMessages],
+			ordered: [...this._queuedInputOrder].sort((a, b) => a.enqueueOrder - b.enqueueOrder),
 		});
 	}
 
@@ -1572,6 +1575,7 @@ export class AgentSession {
 	private _invalidateCompactionForModelSelection(): void {
 		this.abortCompaction();
 		this.abortBranchSummary();
+		this._delegatedCompactionKey = undefined;
 		this._incrementMessageRevision();
 	}
 
@@ -4276,7 +4280,12 @@ export class AgentSession {
 		},
 	): Promise<SystemPromptChangeEvent | undefined> {
 		const previousModel = this.model;
-		if (opts.invalidateCompaction && this._modelSelectionChangesContext(previousModel, model)) {
+		if (
+			opts.invalidateCompaction &&
+			(this._modelSelectionChangesContext(previousModel, model) ||
+				previousModel?.provider !== model.provider ||
+				previousModel?.id !== model.id)
+		) {
 			this._invalidateCompactionForModelSelection();
 		}
 		const thinking = this._getThinkingForModelSwitch(model, opts.ephemeralThinkingLevel);
@@ -4362,7 +4371,10 @@ export class AgentSession {
 			nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		}
 		const next = favoriteModels[nextIndex];
-		const invalidatesCompaction = this._modelSelectionChangesContext(currentModel, next.model);
+		const invalidatesCompaction =
+			this._modelSelectionChangesContext(currentModel, next.model) ||
+			currentModel?.provider !== next.model.provider ||
+			currentModel?.id !== next.model.id;
 		if (invalidatesCompaction) {
 			this._invalidateCompactionForModelSelection();
 		}
@@ -5262,6 +5274,7 @@ export class AgentSession {
 			) {
 				throw new CompactionCancelledError();
 			}
+			this._delegatedCompactionKey = undefined;
 			if (request.owner === "compaction" && this._compactionAbortController === request.controller) {
 				this._compactionAbortController = undefined;
 			}
@@ -5377,6 +5390,9 @@ export class AgentSession {
 		// also emitted with accepted:false so the compaction extension's circuit-breaker
 		// bookkeeping stops being dead code; other builtin session_compact handlers guard
 		// on event.accepted.
+		if (rejectionCause === "external-owner" && this.model) {
+			this._delegatedCompactionKey = { provider: this.model.provider, id: this.model.id };
+		}
 		const trimmedExtensionReason = extensionReason?.trim();
 		const detailedMessage = trimmedExtensionReason
 			? `Compaction rejected: ${trimmedExtensionReason}`
@@ -5768,14 +5784,12 @@ export class AgentSession {
 	}
 
 	private _isCompactionDelegated(): boolean {
-		const state = this._compactionLifecycle.state;
 		const model = this.model;
 		return (
-			state.status === "failed" &&
-			state.rejectionCause === "external-owner" &&
-			state.model !== undefined &&
+			this._delegatedCompactionKey !== undefined &&
 			model !== undefined &&
-			state.model.provider === model.provider
+			this._delegatedCompactionKey.provider === model.provider &&
+			this._delegatedCompactionKey.id === model.id
 		);
 	}
 
@@ -5786,6 +5800,7 @@ export class AgentSession {
 		willRetry = false,
 		allowSummaryOnly = false,
 	): Promise<boolean> {
+		if (this._isCompactionDelegated()) return false;
 		const controller = new AbortController();
 		const requestId = randomUUID();
 		this._claimCompactionController(controller, "compaction");
@@ -5975,6 +5990,7 @@ export class AgentSession {
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+		if (this._isCompactionDelegated()) return false;
 		const finishCompactionWork = this._sessionWorkBarrier.begin();
 		const agentMessagesAtStart = this.agent.state.messages.slice();
 		const autoCompactionController = new AbortController();
@@ -6235,6 +6251,7 @@ export class AgentSession {
 	}
 
 	private _refreshCurrentModelFromRegistry(): void {
+		this._delegatedCompactionKey = undefined;
 		const currentModel = this.model;
 		if (!currentModel) {
 			return;
@@ -6580,9 +6597,12 @@ export class AgentSession {
 				}),
 			})),
 		].filter((tool) => isAllowedTool(tool.definition.name));
+		// Withheld tools stay in _baseToolDefinitions (and therefore in _toolRegistry, which
+		// getRegisteredTool serves to the Cursor exec bridge) but are dropped from the model-facing
+		// definitions so they never reach the prompt. See temporarilyDisabledToolNames.
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
-				.filter(([name]) => isAllowedTool(name))
+				.filter(([name]) => isAllowedTool(name) && !temporarilyDisabledToolNames.has(name))
 				.map(([name, definition]) => [
 					name,
 					{
@@ -6638,10 +6658,15 @@ export class AgentSession {
 			return entry !== undefined && normalizeToolExposure(entry.definition).exposure === "direct";
 		};
 
+		// A withheld tool is dropped from the DEFAULT selection only. An explicit activeToolNames
+		// request names the tool deliberately, and callers that do so (tests, SDK embedders,
+		// filesystem-policy wiring) still expect it to activate.
+		const hasExplicitActiveToolNames = options?.activeToolNames !== undefined;
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
 		).filter((name) => {
 			if (!isAllowedTool(name)) return false;
+			if (!hasExplicitActiveToolNames && temporarilyDisabledToolNames.has(name)) return false;
 			const previousRegistrationIds = options?.previousActiveToolRegistrationIds;
 			if (!previousRegistrationIds) return true;
 			const current = this._toolDefinitions.get(name);
@@ -6678,6 +6703,7 @@ export class AgentSession {
 		includeAllExtensionTools?: boolean;
 		previousActiveToolRegistrationIds?: ReadonlyMap<string, string>;
 	}): void {
+		this._delegatedCompactionKey = undefined;
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
@@ -6759,6 +6785,7 @@ export class AgentSession {
 		});
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
+		this._delegatedCompactionKey = undefined;
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		time("settings", "reload");
@@ -7872,6 +7899,7 @@ export class AgentSession {
 
 			// Update agent state (preserving exact messages still awaiting persistence)
 			this._restoreAgentMessagesFromSession();
+			this._delegatedCompactionKey = undefined;
 			this._incrementMessageRevision();
 
 			// Emit session_tree event
