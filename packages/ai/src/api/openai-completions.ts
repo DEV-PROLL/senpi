@@ -1094,7 +1094,7 @@ function buildParams(
 	const thinkingBudget = resolveClampedThinkingBudget(model, options, params);
 
 	if (compat.thinkingFormat === "zai" && model.reasoning) {
-		const isGlm53 = /(?:^|[/:-])glm-5\.3(?:$|[/.:_-])/.test(model.id.toLowerCase());
+		const isGlm53 = /(?:^|[/:-])glm-5\.3(?:-(?:flash|highspeed))?(?:$|[/.:_])/.test(model.id.toLowerCase());
 		const zaiParams = params as Omit<typeof params, "reasoning_effort"> & {
 			thinking?: { type: "enabled" | "disabled"; clear_thinking?: boolean };
 			reasoning_effort?: string;

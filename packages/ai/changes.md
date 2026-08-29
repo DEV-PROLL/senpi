@@ -1,5 +1,65 @@
 # changes.md — ai
 
+## 2026-08-29 - Narrow GLM-5.3 serializer matching
+
+### What changed
+
+- `src/api/openai-completions.ts`
+
+### Why
+
+- Unsupported GLM-5.3 suffixes must not inherit validated model reasoning controls.
+
+### Why an extension could not handle it
+
+- Z.AI request serialization is implemented inside the AI package provider adapter.
+
+### Expected merge conflict zones
+
+- `src/api/openai-completions.ts`
+
+## 2026-08-29 - Preserve GLM-5.3 variant reasoning controls
+
+### What changed
+
+- `packages/ai/scripts/generate-models.ts`: recognize `glm-5.3` Flash and Highspeed variants as part of the Z.AI GLM-5.3 family so generated metadata retains low/high/max reasoning effort mappings and wire support.
+- `packages/ai/src/api/openai-completions.ts`; `src/api/openai-completions.ts`: Z.AI GLM-5.3 thinking serialization.
+- src/api/openai-completions.ts
+- `src/api/openai-completions.ts`: Z.AI GLM-5.3 thinking serialization.
+
+### Why
+
+- Without family matching, explicit reasoning effort selections were dropped for the Flash and Highspeed models and their model controls exposed incorrect levels.
+
+### Why an extension could not handle it
+
+- Model-family metadata and request serialization are built into the AI package generator and provider adapter before extension code can intervene.
+
+### Expected merge conflict zones
+
+- `packages/ai/scripts/generate-models.ts`: Z.AI model-family detection and generated capability metadata.
+- `packages/ai/src/api/openai-completions.ts`; `src/api/openai-completions.ts`: Z.AI GLM-5.3 thinking serialization.
+- src/api/openai-completions.ts
+
+## 2026-08-29 - Z.AI GLM-5.3 request and catalog fixes
+
+### What changed
+
+- `src/api/openai-completions.ts`: narrow GLM-5.3 thinking serialization to validated variants.
+- GLM-5.3 reasoning-off requests now use the provider's lowest enabled effort instead of sending the rejected disabled-thinking payload; regenerated Z.AI catalogs retain the separate global and China sources and published model metadata.
+
+### Why
+
+- Unsupported GLM-5.3 suffixes must not inherit validated model reasoning controls.
+
+### Why an extension could not handle it
+
+- Z.AI request serialization is implemented inside the AI package provider adapter.
+
+### Expected merge conflict zones
+
+- `src/api/openai-completions.ts`.
+
 ## Anthropic cache checkpoints across tool loops (2026-08-29)
 
 ### What changed
@@ -17,7 +77,6 @@
 ### Expected merge conflict zones
 
 - MEDIUM: `src/api/anthropic-messages.ts` message coalescing and final cache-marker pass.
-
 ## Credential pool export wildcard (2026-08-27)
 
 ### What changed
