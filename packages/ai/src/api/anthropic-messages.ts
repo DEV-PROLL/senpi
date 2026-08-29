@@ -2266,7 +2266,12 @@ function convertMessages(
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				if (msg.content.trim().length > 0) {
-					appendUserBlocks(params, [{ type: "text", text: sanitizeSurrogates(msg.content) }]);
+					const content = sanitizeSurrogates(msg.content);
+					if (params[params.length - 1]?.role === "user") {
+						appendUserBlocks(params, [{ type: "text", text: content }]);
+					} else {
+						params.push({ role: "user", content });
+					}
 				}
 			} else {
 				const blocks: ContentBlockParam[] = msg.content.map((item) => {

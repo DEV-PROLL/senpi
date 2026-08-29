@@ -227,6 +227,17 @@ describe("Anthropic cache checkpoints", () => {
 		expect(cacheBreakpointCount(params)).toBe(1);
 	});
 
+	it("preserves standalone string user content when cache retention is none", () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		const params = buildAnthropicWarmPromptCacheParams(
+			model,
+			{ messages: [{ role: "user", content: "standalone", timestamp: 1 }] },
+			{ cacheRetention: "none" },
+		);
+
+		expect(params.messages).toEqual([{ role: "user", content: "standalone" }]);
+	});
+
 	it("handles empty history without creating checkpoints", () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5");
 		expect(cacheBreakpointCount(buildAnthropicWarmPromptCacheParams(model, { messages: [] }))).toBe(0);
