@@ -1,4 +1,24 @@
 import { mkdtemp, open, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { vi } from "vitest";
+
+const fsState = vi.hoisted(() => ({
+	hangOpen: false,
+	openStarted: undefined as (() => void) | undefined,
+}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs/promises")>();
+	return {
+		...actual,
+		open: async (...args: Parameters<typeof actual.open>) => {
+			if (fsState.hangOpen) {
+				fsState.openStarted?.();
+				return await new Promise<never>(() => {});
+			}
+			return actual.open(...args);
+		},
+	};
+});
+
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createBuiltinParserRegistry } from "../../src/core/extensions/builtin/permission-system/parsers.ts";
@@ -270,8 +290,17 @@ describe("terminal monitor tool", () => {
 			const link = join(root, "parent");
 			const requested = join(link, "artifact");
 			await symlink(internal, link, "dir");
-			await registry.registerFile({ description: "drift", path: requested, event: "create", timeoutMs: 5000, cwd: root });
-			const summary = sink.waitFor((event) => event.type === "summary" && event.description === "drift", "drift summary");
+			await registry.registerFile({
+				description: "drift",
+				path: requested,
+				event: "create",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			const summary = sink.waitFor(
+				(event) => event.type === "summary" && event.description === "drift",
+				"drift summary",
+			);
 			await rm(link);
 			await symlink(external, link, "dir");
 			await writeFile(join(external, "artifact"), "external");
@@ -282,6 +311,130 @@ describe("terminal monitor tool", () => {
 			await rm(root, { recursive: true, force: true });
 			await rm(internal, { recursive: true, force: true });
 			await rm(external, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("aborts a pending registration when disposed and releases capacity", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const file = join(root, "artifact");
+		const limited = new TerminalManager({ maxSessions: 1 });
+		const registry = new MonitorRegistry(() => {}, { reserve: () => limited.reserve() });
+		const openStarted = Promise.withResolvers<void>();
+		fsState.hangOpen = true;
+		fsState.openStarted = openStarted.resolve;
+		try {
+			await writeFile(file, "before");
+			const registration = registry.registerFile({
+				description: "pending",
+				path: file,
+				event: "modify",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			await openStarted.promise;
+			registry.dispose();
+			await expect(registration).rejects.toThrow(/cancelled|disposed/);
+			const release = limited.reserve();
+			expect(release).not.toBeNull();
+			release?.();
+		} finally {
+			fsState.hangOpen = false;
+			fsState.openStarted = undefined;
+			registry.dispose();
+			await limited.teardown();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("aborts all pending registrations when stopAllFiles is called", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const file = join(root, "artifact");
+		const limited = new TerminalManager({ maxSessions: 1 });
+		const registry = new MonitorRegistry(() => {}, { reserve: () => limited.reserve() });
+		const openStarted = Promise.withResolvers<void>();
+		fsState.hangOpen = true;
+		fsState.openStarted = openStarted.resolve;
+		try {
+			await writeFile(file, "before");
+			const registration = registry.registerFile({
+				description: "pending all",
+				path: file,
+				event: "modify",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			await openStarted.promise;
+			await registry.stopAllFiles();
+			await expect(registration).rejects.toThrow(/cancelled|disposed/);
+			const release = limited.reserve();
+			expect(release).not.toBeNull();
+			release?.();
+		} finally {
+			fsState.hangOpen = false;
+			fsState.openStarted = undefined;
+			registry.dispose();
+			await limited.teardown();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("fails closed when a missing target is replaced with an external symlink", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const outside = await mkdtemp(join(process.cwd(), ".native-outside-"));
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			const target = join(root, "artifact");
+			await registry.registerFile({
+				description: "create symlink",
+				path: target,
+				event: "create",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			const summary = sink.waitFor(
+				(event) => event.type === "summary" && event.description === "create symlink",
+				"create symlink summary",
+			);
+			const external = join(outside, "secret");
+			await writeFile(external, "external");
+			await symlink(external, target);
+			expect(summaryEvent(await summary).summary).toContain("target identity changed");
+			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(0);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("fails closed when an existing target is replaced with an external symlink", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const outside = await mkdtemp(join(process.cwd(), ".native-outside-"));
+		const target = join(root, "artifact");
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			await writeFile(target, "before");
+			await registry.registerFile({
+				description: "modify symlink",
+				path: target,
+				event: "modify",
+				timeoutMs: 5000,
+				cwd: root,
+			});
+			const summary = sink.waitFor(
+				(event) => event.type === "summary" && event.description === "modify symlink",
+				"modify symlink summary",
+			);
+			const external = join(outside, "secret");
+			await writeFile(external, "external");
+			await rm(target);
+			await symlink(external, target);
+			expect(summaryEvent(await summary).summary).toContain("target identity changed");
+			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(0);
+		} finally {
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
 		}
 	}, 15_000);
 

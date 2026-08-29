@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
-import { access, open, realpath, stat } from "node:fs/promises";
+import { access, lstat, open, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import { describeExit } from "./tools/spawn.ts";
@@ -219,14 +219,18 @@ export class MonitorRegistry {
 		}
 		let canonicalPath: string;
 		try {
-			canonicalPath = initial ? await this.#registrationAwait(pending, realpath(path)) : join(approvedParent, basename(path));
+			canonicalPath = initial
+				? await this.#registrationAwait(pending, realpath(path))
+				: join(approvedParent, basename(path));
 		} catch (error) {
 			cleanupRegistration();
 			throw error;
 		}
 		let digest: string;
 		try {
-			digest = initial ? await this.#registrationAwait(pending, this.#digest(canonicalPath, pending.abort.signal)) : "";
+			digest = initial
+				? await this.#registrationAwait(pending, this.#digest(canonicalPath, pending.abort.signal))
+				: "";
 		} catch (error) {
 			cleanupRegistration();
 			if (registrationError) {
@@ -347,6 +351,11 @@ export class MonitorRegistry {
 				this.#settleFile(record, `watcher error: monitored parent changed: ${dirname(record.path)}`);
 				return;
 			}
+			const target = await lstat(record.canonicalPath);
+			if (target.isSymbolicLink()) throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
+			const resolvedTarget = await realpath(record.canonicalPath);
+			if (resolvedTarget !== record.canonicalPath)
+				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
 			current = await stat(record.canonicalPath);
 			if (!current.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${record.path}`);
 		} catch (error) {
@@ -441,14 +450,24 @@ export class MonitorRegistry {
 		clearTimeout(pending.deadline);
 		this.#pending.delete(pending);
 		if (transfer) pending.release = undefined;
-		else pending.release?.();
+		else {
+			pending.abort.abort();
+			pending.release?.();
+		}
 	}
 
 	async #registrationAwait<T>(pending: PendingFileRegistration, operation: Promise<T>): Promise<T> {
-		if (pending.abort.signal.aborted) throw new Error("Cannot create file monitor: registration timed out or was disposed.");
+		if (pending.abort.signal.aborted)
+			throw new Error("Cannot create file monitor: registration timed out or was disposed.");
 		return Promise.race([
 			operation,
-			new Promise<never>((_, reject) => pending.abort.signal.addEventListener("abort", () => reject(new Error("Cannot create file monitor: registration timed out or was disposed.")), { once: true })),
+			new Promise<never>((_, reject) =>
+				pending.abort.signal.addEventListener(
+					"abort",
+					() => reject(new Error("Cannot create file monitor: registration timed out or was disposed.")),
+					{ once: true },
+				),
+			),
 		]);
 	}
 
