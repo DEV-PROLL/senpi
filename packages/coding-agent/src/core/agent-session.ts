@@ -832,6 +832,8 @@ const CURSOR_TRUNCATION_MARKER = "\n...[truncated]";
 // bounds worst-case JSON escaping (control characters) plus framing and duplication.
 const CURSOR_SERIALIZED_BYTES_PER_RAW_BYTE = 16;
 const CURSOR_CONTENT_ITEM_OVERHEAD_BYTES = 64;
+// Charge the root/turn/message envelopes emitted for every retained tool result.
+const CURSOR_TOOL_RESULT_ENVELOPE_OVERHEAD_BYTES = 512;
 
 export function truncateToolResultBodies(
 	messages: AgentMessage[] | undefined,
@@ -854,7 +856,8 @@ export function truncateToolResultBodies(
 		const message: AgentMessage = messages[messageIndex];
 		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
 		let nextContent: typeof message.content | undefined;
-		const emptiedTextIndexes = new Set<number>();
+		const emptiedPartIndexes = new Set<number>();
+		usedBytes += CURSOR_TOOL_RESULT_ENVELOPE_OVERHEAD_BYTES;
 		for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex--) {
 			const part = message.content[partIndex];
 			if (part.type === "image" && typeof part.data === "string") {
@@ -863,6 +866,7 @@ export function truncateToolResultBodies(
 				} else {
 					nextContent ??= message.content.slice();
 					nextContent[partIndex] = { ...part, data: "" };
+					emptiedPartIndexes.add(partIndex);
 					changed = true;
 				}
 				continue;
@@ -894,18 +898,18 @@ export function truncateToolResultBodies(
 			const nextText = markerFits ? kept + CURSOR_TRUNCATION_MARKER : "";
 			nextContent ??= message.content.slice();
 			nextContent[partIndex] = { ...part, text: nextText };
-			if (!markerFits) emptiedTextIndexes.add(partIndex);
+			if (!markerFits) emptiedPartIndexes.add(partIndex);
 			usedBytes += markerFits ? serializedCost(nextText) : serializedCost("");
 			changed = true;
 		}
-		// Empty text items still carry a Cursor content-item envelope. Keep one
+		// Empty content items still carry a Cursor content-item envelope. Keep one
 		// placeholder for each consecutive run so the tool result remains paired
 		// without allowing rejected items to consume unbounded wire space.
-		if (nextContent && emptiedTextIndexes.size > 1) {
+		if (nextContent && emptiedPartIndexes.size > 1) {
 			const compactedContent: Array<TextContent | ImageContent> = [];
 			let previousWasEmptied = false;
 			for (const [partIndex, part] of nextContent.entries()) {
-				const isEmptied = emptiedTextIndexes.has(partIndex);
+				const isEmptied = emptiedPartIndexes.has(partIndex);
 				if (isEmptied && previousWasEmptied) continue;
 				compactedContent.push(part);
 				previousWasEmptied = isEmptied;

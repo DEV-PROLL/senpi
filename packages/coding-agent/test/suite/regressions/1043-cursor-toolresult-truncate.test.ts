@@ -33,6 +33,21 @@ function toolResult(text: string, id: string): AgentMessage {
 	} as AgentMessage;
 }
 
+function imageToolResult(partCount: number, id = "image-heavy"): AgentMessage {
+	return {
+		role: "toolResult",
+		toolCallId: id,
+		toolName: "read",
+		content: Array.from({ length: partCount }, () => ({
+			type: "image" as const,
+			data: "AA==",
+			mimeType: "image/png",
+		})),
+		isError: false,
+		timestamp: 0,
+	} as AgentMessage;
+}
+
 function cursorPairedMessages(resultTexts: string[]): AgentMessage[] {
 	const messages: AgentMessage[] = [];
 	for (const [index, text] of resultTexts.entries()) {
@@ -197,6 +212,41 @@ describe("1043 cursor toolResult truncate", () => {
 		expect(changed).toBe(true);
 		if (!next) throw new Error("expected messages");
 		expect(serializedCursorHistoryBytes(next)).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+	});
+
+	it("bounds 1,450 emptied image parts including their envelopes", () => {
+		const messages = cursorPairedMessages([""]);
+		const result = messages.find((message) => message.role === "toolResult");
+		if (result?.role !== "toolResult") throw new Error("expected tool result");
+		result.content = (imageToolResult(1450) as Extract<AgentMessage, { role: "toolResult" }>).content;
+		const before = buildCursorHistoryWireBytesForTest(messages as never).reduce(
+			(total, bytes) => total + bytes.byteLength,
+			0,
+		);
+		expect(before).toBeGreaterThan(CURSOR_TOOL_RESULT_MAX_BYTES);
+
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		if (!next) throw new Error("expected messages");
+		expect(
+			buildCursorHistoryWireBytesForTest(next as never).reduce((total, bytes) => total + bytes.byteLength, 0),
+		).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
+	});
+
+	it("bounds aggregate envelopes across 98 paired tool turns", () => {
+		const messages = cursorPairedMessages(Array.from({ length: 98 }, () => "1234567890"));
+		const before = buildCursorHistoryWireBytesForTest(messages as never).reduce(
+			(total, bytes) => total + bytes.byteLength,
+			0,
+		);
+		expect(before).toBeGreaterThan(CURSOR_TOOL_RESULT_MAX_BYTES);
+
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		if (!next) throw new Error("expected messages");
+		expect(
+			buildCursorHistoryWireBytesForTest(next as never).reduce((total, bytes) => total + bytes.byteLength, 0),
+		).toBeLessThanOrEqual(CURSOR_TOOL_RESULT_MAX_BYTES);
 	});
 
 	for (const partCount of [7424, 7500]) {
