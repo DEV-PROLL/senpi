@@ -27,7 +27,6 @@ export type {
 	CursorShellStreamCallbacks,
 	CursorToolResultHandler,
 } from "./api/cursor-agent/types.ts";
-export { measureCursorHistorySerializedBytes } from "./api/cursor-agent.ts";
 export type { GoogleOptions } from "./api/google-generative-ai.ts";
 export type { GoogleApiThinkingLevel, ResolvedGoogleThinkingLevel } from "./api/google-shared.ts";
 export type { GoogleVertexOptions } from "./api/google-vertex.ts";

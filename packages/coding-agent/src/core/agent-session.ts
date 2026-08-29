@@ -33,12 +33,8 @@ import type {
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { ProviderRetryWatchdogAbortError, prepareAgentToolCall } from "@earendil-works/pi-agent-core";
-import {
-	contentText,
-	measureCursorHistorySerializedBytes,
-	SERVER_FALLBACK_ABORTED_DIAGNOSTIC,
-	type ThinkingSelection,
-} from "@earendil-works/pi-ai";
+import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC, type ThinkingSelection } from "@earendil-works/pi-ai";
+import { measureCursorHistorySerializedBytes } from "@earendil-works/pi-ai/api/cursor-agent";
 import type {
 	Api,
 	AssistantMessage,
