@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
-import { access, lstat, open, realpath, stat } from "node:fs/promises";
+import { access, lstat, open, realpath, stat, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import { describeExit } from "./tools/spawn.ts";
@@ -77,6 +77,8 @@ interface FileMonitorRecord {
 	mtimeMs: number;
 	size: number;
 	digest: string;
+	device: number;
+	inode: number;
 	pendingChange: boolean;
 	dirty: boolean;
 	dirtyPasses: number;
@@ -265,6 +267,8 @@ export class MonitorRegistry {
 			mtimeMs: initial?.mtimeMs ?? 0,
 			size: initial?.size ?? 0,
 			digest,
+			device: initial?.dev ?? 0,
+			inode: initial?.ino ?? 0,
 			pendingChange: false,
 			dirty: false,
 			dirtyPasses: 0,
@@ -297,6 +301,7 @@ export class MonitorRegistry {
 		this.#lifecycle += 1;
 		const records = [...this.#files.values()];
 		for (const record of records) this.#settleFile(record, "watcher killed");
+		for (const pending of [...this.#pending]) this.#finishPending(pending);
 		return records.length;
 	}
 
@@ -345,6 +350,7 @@ export class MonitorRegistry {
 	async #checkFileImpl(record: FileMonitorRecord): Promise<void> {
 		if (record.settled) return;
 		let current: Awaited<ReturnType<typeof stat>> | null = null;
+		let handle: FileHandle | undefined;
 		try {
 			const currentParent = await realpath(dirname(record.path));
 			if (currentParent !== record.canonicalParent) {
@@ -358,14 +364,35 @@ export class MonitorRegistry {
 				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
 			current = await stat(record.canonicalPath);
 			if (!current.isFile()) throw new Error(`Cannot watch file: target is not a regular file: ${record.path}`);
+			if (record.present && (current.dev !== record.device || current.ino !== record.inode))
+				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
+			handle = await open(record.canonicalPath, "r");
+			const opened = await handle.stat();
+			if (!opened.isFile() || (record.present && (opened.dev !== record.device || opened.ino !== record.inode)))
+				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
+			const rebound = await stat(record.canonicalPath);
+			if (!rebound.isFile() || rebound.dev !== opened.dev || rebound.ino !== opened.ino)
+				throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
 		} catch (error) {
+			await handle?.close();
 			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
 				this.#settleFile(record, `watcher error: ${error instanceof Error ? error.message : String(error)}`);
 				return;
 			}
 		}
 		const present = current !== null;
-		const digest = present ? await this.#digest(record.canonicalPath) : "";
+		let digest = "";
+		try {
+			digest = present && handle ? await this.#digestHandle(handle) : "";
+			if (present && handle) {
+				const afterDigest = await stat(record.canonicalPath);
+				const opened = await handle.stat();
+				if (afterDigest.dev !== opened.dev || afterDigest.ino !== opened.ino)
+					throw new Error(`Cannot watch file: target identity changed: ${record.path}`);
+			}
+		} finally {
+			await handle?.close();
+		}
 		const changed =
 			record.event === "create"
 				? !record.present && present
@@ -373,6 +400,10 @@ export class MonitorRegistry {
 					present &&
 					(current!.mtimeMs !== record.mtimeMs || current!.size !== record.size || digest !== record.digest);
 		record.pendingChange ||= changed;
+		if (!record.present && current) {
+			record.device = current.dev;
+			record.inode = current.ino;
+		}
 		record.present = present;
 		record.mtimeMs = current?.mtimeMs ?? 0;
 		record.size = current?.size ?? 0;
@@ -472,28 +503,11 @@ export class MonitorRegistry {
 	}
 
 	async #digest(path: string, signal?: AbortSignal): Promise<string> {
-		const SAMPLE_SIZE = 64 * 1024;
 		try {
 			if (signal?.aborted) throw new Error("file monitor registration cancelled");
 			const handle = await open(path, "r");
 			try {
-				if (signal?.aborted) throw new Error("file monitor registration cancelled");
-				const metadata = await handle.stat();
-				const hash = createHash("sha256");
-				const first = Buffer.alloc(Math.min(SAMPLE_SIZE, metadata.size));
-				if (first.length > 0) {
-					await handle.read(first, 0, first.length, 0);
-					hash.update(first);
-				}
-				if (metadata.size > SAMPLE_SIZE) {
-					const middle = Buffer.alloc(SAMPLE_SIZE);
-					await handle.read(middle, 0, middle.length, Math.floor((metadata.size - middle.length) / 2));
-					hash.update(middle);
-					const last = Buffer.alloc(SAMPLE_SIZE);
-					await handle.read(last, 0, last.length, metadata.size - last.length);
-					hash.update(last);
-				}
-				return `${metadata.size}:${hash.digest("hex")}`;
+				return await this.#digestHandle(handle, signal);
 			} finally {
 				await handle.close();
 			}
@@ -501,6 +515,27 @@ export class MonitorRegistry {
 			if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return "";
 			throw error;
 		}
+	}
+
+	async #digestHandle(handle: FileHandle, signal?: AbortSignal): Promise<string> {
+		const SAMPLE_SIZE = 64 * 1024;
+		if (signal?.aborted) throw new Error("file monitor registration cancelled");
+		const metadata = await handle.stat();
+		const hash = createHash("sha256");
+		const first = Buffer.alloc(Math.min(SAMPLE_SIZE, metadata.size));
+		if (first.length > 0) {
+			await handle.read(first, 0, first.length, 0);
+			hash.update(first);
+		}
+		if (metadata.size > SAMPLE_SIZE) {
+			const middle = Buffer.alloc(SAMPLE_SIZE);
+			await handle.read(middle, 0, middle.length, Math.floor((metadata.size - middle.length) / 2));
+			hash.update(middle);
+			const last = Buffer.alloc(SAMPLE_SIZE);
+			await handle.read(last, 0, last.length, metadata.size - last.length);
+			hash.update(last);
+		}
+		return `${metadata.size}:${hash.digest("hex")}`;
 	}
 
 	#notifyChange(): void {

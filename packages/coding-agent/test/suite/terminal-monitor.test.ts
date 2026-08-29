@@ -1,9 +1,10 @@
-import { mkdtemp, open, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { link, mkdtemp, open, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { vi } from "vitest";
 
 const fsState = vi.hoisted(() => ({
 	hangOpen: false,
 	openStarted: undefined as (() => void) | undefined,
+	onOpen: undefined as (() => Promise<void>) | undefined,
 }));
 vi.mock("node:fs/promises", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -14,7 +15,9 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 				fsState.openStarted?.();
 				return await new Promise<never>(() => {});
 			}
-			return actual.open(...args);
+			const handle = await actual.open(...args);
+			await fsState.onOpen?.();
+			return handle;
 		},
 	};
 });
@@ -365,15 +368,70 @@ describe("terminal monitor tool", () => {
 			});
 			await openStarted.promise;
 			await registry.stopAllFiles();
-			await expect(registration).rejects.toThrow(/cancelled|disposed/);
+			await expect(
+				Promise.race([
+					registration,
+					new Promise<never>((_, reject) => setTimeout(() => reject(new Error("stop-all watchdog")), 100)),
+				]),
+			).rejects.toThrow(/cancelled|disposed/);
 			const release = limited.reserve();
 			expect(release).not.toBeNull();
 			release?.();
 		} finally {
 			fsState.hangOpen = false;
 			fsState.openStarted = undefined;
+			fsState.onOpen = undefined;
 			registry.dispose();
 			await limited.teardown();
+			await rm(root, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("fails closed when the target is replaced after opening but before digest", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const outside = await mkdtemp(join(process.cwd(), ".native-outside-"));
+		const target = join(root, "artifact");
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			await writeFile(target, "before");
+			await registry.registerFile({ description: "open race", path: target, event: "modify", timeoutMs: 5000, cwd: root });
+			const summary = sink.waitFor((event) => event.type === "summary" && event.description === "open race", "open race summary");
+			const external = join(outside, "secret");
+			await writeFile(external, "external");
+			let armed = true;
+			fsState.onOpen = async () => {
+				if (!armed) return;
+				armed = false;
+				await rm(target);
+				await symlink(external, target);
+			};
+			await writeFile(target, "trigger");
+			expect(summaryEvent(await summary).summary).toContain("target identity changed");
+			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(0);
+		} finally {
+			fsState.onOpen = undefined;
+			registry.dispose();
+			await rm(root, { recursive: true, force: true });
+			await rm(outside, { recursive: true, force: true });
+		}
+	}, 15_000);
+
+	it("fails closed when an existing target is replaced by a different hardlink inode", async () => {
+		const root = await mkdtemp(join(process.cwd(), ".native-watch-"));
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		try {
+			const target = join(root, "artifact");
+			const replacement = join(root, "replacement");
+			await writeFile(target, "before");
+			await writeFile(replacement, "external");
+			await registry.registerFile({ description: "hardlink swap", path: target, event: "modify", timeoutMs: 5000, cwd: root });
+			const summary = sink.waitFor((event) => event.type === "summary" && event.description === "hardlink swap", "hardlink summary");
+			await rm(target);
+			await link(replacement, target);
+			expect(summaryEvent(await summary).summary).toContain("target identity changed");
+			expect(sink.events.filter((event) => event.type === "line")).toHaveLength(0);
+		} finally {
+			registry.dispose();
 			await rm(root, { recursive: true, force: true });
 		}
 	}, 15_000);
