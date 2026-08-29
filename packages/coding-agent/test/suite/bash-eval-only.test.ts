@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, getModel } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { describe, expect, it, vi } from "vitest";
@@ -230,6 +232,84 @@ describe("experimental bash eval-only policy", () => {
 			expect(harness.agent.removedToolHints.bash).toContain('tool.bash({ command: "..." })');
 			expect(harness.agent.removedToolHints.powershell).toContain('tool.powershell({ command: "..." })');
 			expect(harness.agent.removedToolHints.powershell).not.toContain("tool.bash(");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("names every hidden tool in the system-prompt guidance", async () => {
+		const { harness } = await createEvalHarness();
+		try {
+			arm(harness);
+			harness.session.setActiveToolsByName(["read", "edit", "write"]);
+			expect(harness.session.systemPrompt).toContain("tool.bash(");
+			expect(harness.session.systemPrompt).toContain("tool.powershell(");
+		} finally {
+			harness.cleanup();
+		}
+	});
+});
+
+describe("experimental bash eval-only policy across reload", () => {
+	async function createReloadHarness(options: { flagOn: boolean; evalRegistered?: () => boolean }): Promise<Harness> {
+		const evalRegistered = options.evalRegistered ?? (() => true);
+		const extensionFactory: ExtensionFactory = (pi) => {
+			if (!evalRegistered()) return;
+			pi.registerTool({
+				name: "eval",
+				label: "Eval",
+				description: "Evaluate code",
+				parameters: Type.Object({}),
+				execute: async () => ({ content: [{ type: "text", text: "eval" }], details: {} }),
+			});
+		};
+		return await createHarness({
+			fileSettings: true,
+			...(options.flagOn ? { settings: { experimental: { bashEvalOnly: true } } } : {}),
+			initialActiveToolNames: ["read", "bash", "edit", "write"],
+			extensionFactories: [extensionFactory],
+		});
+	}
+
+	function writeSettings(harness: Harness, contents: Record<string, unknown>): void {
+		writeFileSync(join(harness.tempDir, "agent", "settings.json"), JSON.stringify(contents));
+	}
+
+	it("arms the policy when the flag is turned on and the session reloads", async () => {
+		const harness = await createReloadHarness({ flagOn: false });
+		try {
+			expect(harness.session.getActiveToolNames()).toContain("bash");
+			writeSettings(harness, { experimental: { bashEvalOnly: true } });
+			await harness.session.reload();
+			expect(harness.session.getActiveToolNames()).not.toContain("bash");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("disarms the policy when the flag is turned off and the session reloads", async () => {
+		const harness = await createReloadHarness({ flagOn: true });
+		try {
+			expect(harness.session.getActiveToolNames()).not.toContain("bash");
+			writeSettings(harness, {});
+			await harness.session.reload();
+			expect(harness.session.getActiveToolNames()).toContain("bash");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("retains withheld shell tools across a reload so disarming can restore them", async () => {
+		const harness = await createReloadHarness({ flagOn: true });
+		try {
+			expect(harness.session.getActiveToolNames()).not.toContain("bash");
+			await harness.session.reload();
+			// Still armed, so bash stays hidden - but the unfiltered request must keep carrying it,
+			// otherwise a later disarm has nothing to restore (see the flag-off reload test above).
+			expect(harness.session.getActiveToolNames()).not.toContain("bash");
+			const retained = (harness.session as unknown as { _requestedActiveToolNames?: string[] })
+				._requestedActiveToolNames;
+			expect(retained).toContain("bash");
 		} finally {
 			harness.cleanup();
 		}

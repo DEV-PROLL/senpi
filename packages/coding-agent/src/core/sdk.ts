@@ -367,7 +367,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
-	const evalOnlyToolNames = settingsManager.getExperimentalBashEvalOnly() ? ["bash", "powershell"] : undefined;
 	const initialActiveToolNames = (
 		options.tools ?? (options.noTools ? [] : (configuredDefaultToolNames ?? defaultActiveToolNames))
 	).filter((name) => !excludedToolNameSet?.has(name));
@@ -510,7 +509,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		modelRegistry,
 		initialActiveToolNames,
 		defaultToolNames: sessionDefaultToolNames,
-		evalOnlyToolNames,
 		allowedToolNames,
 		excludedToolNames,
 		extensionRunnerRef,
