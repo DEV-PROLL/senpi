@@ -4,7 +4,7 @@
 
 ### What changed
 
-- `packages/coding-agent/src/core/agent-session.ts`: remember the provider and model id after an automatic compaction is rejected by an external owner, suppressing repeated automatic attempts until that key changes or compaction is accepted. Manual compaction remains admitted.
+- `packages/coding-agent/src/core/agent-session.ts`: remember the provider and model id after an automatic compaction is rejected by an external owner, suppressing repeated automatic attempts until that key changes, compaction is accepted, or runtime ownership is reconfigured by reload/registry refresh. Manual compaction remains admitted.
 - Added `test/suite/regressions/1174-sticky-delegated-compaction.test.ts` covering repeated turns, manual compaction, and model changes.
 
 ### Why

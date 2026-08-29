@@ -6251,6 +6251,7 @@ export class AgentSession {
 	}
 
 	private _refreshCurrentModelFromRegistry(): void {
+		this._delegatedCompactionKey = undefined;
 		const currentModel = this.model;
 		if (!currentModel) {
 			return;
@@ -6702,6 +6703,7 @@ export class AgentSession {
 		includeAllExtensionTools?: boolean;
 		previousActiveToolRegistrationIds?: ReadonlyMap<string, string>;
 	}): void {
+		this._delegatedCompactionKey = undefined;
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
@@ -6783,6 +6785,7 @@ export class AgentSession {
 		});
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
+		this._delegatedCompactionKey = undefined;
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		time("settings", "reload");
