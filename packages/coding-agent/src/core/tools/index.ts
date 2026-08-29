@@ -104,6 +104,11 @@ export const allToolNames: Set<ToolName> = new Set([
 	"ls",
 ]);
 
+// TEMPORARY: tools listed here are built as usual but withheld from the agent's tool surface.
+// `grep` is withheld while search routing is evaluated; every grep code path stays intact, so
+// restoring it is deleting the entry from this set. Keep this set empty in the steady state.
+export const temporarilyDisabledToolNames: ReadonlySet<string> = new Set<ToolName>(["grep"]);
+
 export interface ToolsOptions {
 	read?: ReadToolOptions;
 	bash?: BashToolOptions;

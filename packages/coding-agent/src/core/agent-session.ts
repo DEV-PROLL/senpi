@@ -186,7 +186,7 @@ import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinki
 import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { composeFilesystemPolicies } from "./tools/filesystem-policy.ts";
-import { createAllToolDefinitions } from "./tools/index.ts";
+import { createAllToolDefinitions, temporarilyDisabledToolNames } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
@@ -6704,8 +6704,12 @@ export class AgentSession {
 					ls: { filesystemPolicy },
 				});
 
+		// Withheld tools are still constructed above; they are dropped here so no downstream surface
+		// (prompt, registry, or renderer) ever sees them. See temporarilyDisabledToolNames.
 		this._baseToolDefinitions = new Map(
-			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
+			Object.entries(baseToolDefinitions)
+				.filter(([name]) => !temporarilyDisabledToolNames.has(name))
+				.map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
 		if (options.flagValues) {
 			for (const [name, value] of options.flagValues) {
