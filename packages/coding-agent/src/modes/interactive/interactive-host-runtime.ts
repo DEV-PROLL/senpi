@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionEvent, AgentSessionEventListener } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
@@ -78,6 +79,12 @@ export async function createInteractiveHostRuntime(
 			opened.state,
 			options.onWarning,
 		);
+		if (opened.state.isBashRunning) {
+			// Execution callback maps are connection-local. A reattached proxy cannot
+			// safely resume UUID-tagged updates from the old connection, so terminate
+			// the orphaned host execution; the host capture path cleans its spill.
+			await client.abortBash().catch(() => {});
+		}
 		return new RemoteInteractiveRuntime(localRuntime, remoteSession, client) as unknown as AgentSessionRuntime;
 	} catch (cause) {
 		await client.stop().catch(() => {});
@@ -238,6 +245,35 @@ function createRemoteSessionProxy(
 		await Promise.race([settled, new Promise<void>((resolve) => setTimeout(resolve, 100))]);
 	};
 	const executionNamespace = randomUUID();
+	const cleanupRemoteBashOutput = async (path: string): Promise<void> => {
+		let cleanupTimeout: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				client.cleanupBashOutput(path),
+				new Promise<never>((_, reject) => {
+					cleanupTimeout = setTimeout(() => reject(new Error("RPC cleanup timed out")), 1_000);
+				}),
+			]);
+			return;
+		} catch (transportError) {
+			// Spill paths are shared host filesystem paths. If the RPC transport is
+			// already unavailable, remove locally as a bounded best-effort fallback;
+			// a later reconnect is not required to prevent this callback failure from
+			// permanently leaking the host-owned artifact.
+			try {
+				await rm(path, { force: true });
+				return;
+			} catch (localError) {
+				onWarning?.({
+					type: "interactive_host_action_failed",
+					message: `Warning: failed to clean up shared bash output spill: ${localError instanceof Error ? localError.message : String(localError)}`,
+					cause: new AggregateError([transportError, localError]),
+				});
+			}
+		} finally {
+			if (cleanupTimeout) clearTimeout(cleanupTimeout);
+		}
+	};
 	let nextBashExecutionId = 0;
 	const bashExecutions = new Map<
 		string,
@@ -509,7 +545,7 @@ function createRemoteSessionProxy(
 						});
 						await waitForBashCallbacks(execution.promises, false);
 						if (execution.hasError) {
-							if (result.fullOutputPath) await client.cleanupBashOutput(result.fullOutputPath);
+							if (result.fullOutputPath) await cleanupRemoteBashOutput(result.fullOutputPath);
 							throw execution.error;
 						}
 						return result;

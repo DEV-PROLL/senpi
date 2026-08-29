@@ -758,6 +758,60 @@ describe("Coding Agent Tools", () => {
 			expect(fullOutput).toContain("2998\n2999\n3000");
 		});
 
+		it("does not hang forever on a never-settling output callback", async () => {
+			vi.useFakeTimers();
+			try {
+				const execution = executeBashWithOperations(
+					"never-settling-callback",
+					process.cwd(),
+					{
+						exec: async (_command, _cwd, { onData }) => {
+							onData(Buffer.from("output"));
+							return { exitCode: 0 };
+						},
+					},
+					{ onChunk: () => new Promise<void>(() => {}) },
+				);
+				await vi.advanceTimersByTimeAsync(4_999);
+				let settled = false;
+				void execution.then(() => {
+					settled = true;
+				});
+				expect(settled).toBe(false);
+				await vi.advanceTimersByTimeAsync(1);
+				await expect(execution).resolves.toMatchObject({ output: "output", exitCode: 0 });
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("waits for a slow output callback before normal completion", async () => {
+			vi.useFakeTimers();
+			try {
+				const execution = executeBashWithOperations(
+					"slow-callback",
+					process.cwd(),
+					{
+						exec: async (_command, _cwd, { onData }) => {
+							onData(Buffer.from("output"));
+							return { exitCode: 0 };
+						},
+					},
+					{ onChunk: () => new Promise<void>((resolve) => setTimeout(resolve, 500)) },
+				);
+				await vi.advanceTimersByTimeAsync(499);
+				let settled = false;
+				void execution.then(() => {
+					settled = true;
+				});
+				expect(settled).toBe(false);
+				await vi.advanceTimersByTimeAsync(1);
+				await expect(execution).resolves.toMatchObject({ output: "output", exitCode: 0 });
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it("executeBash should persist full output when truncation happens by line count only", async () => {
 			const result = await executeBashWithOperations("seq 3000", process.cwd(), createLocalBashOperations());
 			const fullOutputPath = result.fullOutputPath;

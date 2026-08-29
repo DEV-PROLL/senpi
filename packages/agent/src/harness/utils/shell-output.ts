@@ -151,6 +151,10 @@ export async function executeShellWithCapture(
 			await options?.onChunk?.(text, createProgress);
 		} catch (error) {
 			captureError = new ExecutionError("callback_error", toError(error).message, error);
+			// Keep the harness execution rejected. Merely recording the callback error
+			// here turns a failed observer into a fulfilled capture result, preventing
+			// the harness abort path from killing the child process.
+			throw error;
 		}
 	};
 

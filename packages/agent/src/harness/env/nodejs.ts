@@ -410,6 +410,8 @@ function waitForChildProcess(child: ChildProcess): Promise<number | null> {
 	});
 }
 
+const NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS = 5_000;
+
 export class NodeExecutionEnv implements ExecutionEnv {
 	cwd: string;
 	private shellPath?: string;
@@ -556,7 +558,15 @@ export class NodeExecutionEnv implements ExecutionEnv {
 
 			void waitForChildProcess(child).then(
 				async (code) => {
-					await Promise.allSettled([...callbackPromises]);
+					// Normal command completion must not be held hostage by an observer that
+					// never settles. Abort completion uses the shorter cancellation path above;
+					// this generous bound preserves slow, legitimate callbacks without hanging
+					// the execution forever.
+					const callbacksSettled = Promise.allSettled([...callbackPromises]);
+					await Promise.race([
+						callbacksSettled,
+						new Promise<void>((resolve) => setTimeout(resolve, NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS)),
+					]);
 					if (callbackError) {
 						settle(err(callbackError));
 						return;

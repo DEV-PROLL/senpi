@@ -16,6 +16,8 @@ import { sanitizeBinaryOutput } from "../utils/shell.ts";
 import type { BashOperations } from "./tools/bash.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./tools/truncate.ts";
 
+const NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS = 5_000;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -306,7 +308,13 @@ export async function executeBashWithOperations(
 		return await closeTempFileAndCleanup(err);
 	}
 
-	await waitForCallbacks(false);
+	// Normal completion has a generous bound for observer callbacks: unlike the
+	// cancellation path, it must not hang forever on an observer that never
+	// settles, while still allowing legitimately slow callbacks to finish.
+	await Promise.race([
+		waitForCallbacks(false),
+		new Promise<void>((resolve) => setTimeout(resolve, NORMAL_CALLBACK_SETTLEMENT_TIMEOUT_MS)),
+	]);
 	if (hasCallbackError) {
 		return await closeTempFileAndCleanup(callbackError);
 	}
