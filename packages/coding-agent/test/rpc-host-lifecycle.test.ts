@@ -1,5 +1,15 @@
 import { execFileSync, spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer, type ServerResponse } from "node:http";
 import { type AddressInfo, createConnection, createServer, type Socket } from "node:net";
@@ -283,6 +293,29 @@ describe("host watchdog configuration", () => {
 		await delay(300);
 		disarm();
 		expect(fired).toBe(false);
+	});
+
+	it("removes supervisor public state on inherited-pipe EOF", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "senpi-hlc-wd-state-"));
+		roots.push(dir);
+		const fifo = join(dir, "pipe");
+		const socket = join(dir, "rpc.sock");
+		const pidFile = join(dir, "host.pid");
+		const settings = join(dir, "settings.json");
+		execFileSync("mkfifo", [fifo]);
+		writeFileSync(socket, "socket");
+		writeFileSync(pidFile, "pid");
+		writeFileSync(settings, "settings");
+		const writeEnd = openSync(fifo, "w+");
+		const readEnd = openSync(fifo, "r");
+		const reason = new Promise<string>((resolve) => {
+			armHostWatchdog({ fd: readEnd, cleanupPaths: [socket, pidFile, settings] }, resolve);
+		});
+		closeSync(writeEnd);
+		await reason;
+		expect(existsSync(socket)).toBe(false);
+		expect(existsSync(pidFile)).toBe(false);
+		expect(existsSync(settings)).toBe(false);
 	});
 
 	it("fires on inherited-pipe EOF and removes the supervisor's private directory", async () => {
