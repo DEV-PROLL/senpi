@@ -175,6 +175,9 @@ export class SessionCommandRouter {
 			if (owner !== undefined && this.releasedConnections.has(owner)) {
 				await this.releaseOwnedSession(openedSession.sessionId);
 			}
+			if (opened.attached && owner !== undefined) {
+				this.writer.replayInFlightMessage(opened.sessionId, owner);
+			}
 			const state = entry.runtime!.session;
 			this.writer.enqueue(opened.sessionId, {
 				id: command.id,
