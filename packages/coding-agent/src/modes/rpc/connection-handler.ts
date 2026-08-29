@@ -112,6 +112,8 @@ export interface RpcConnectionHandler {
 	 * host polls this after each command and decides how to tear down.
 	 */
 	isShutdownRequested(): boolean;
+	/** Cancel UI requests that can no longer be answered by this connection. */
+	cancelPendingExtensionUiRequests(): void;
 	/** Tear down subscriptions and dispose the runtime. Never calls process.exit. */
 	dispose(): Promise<void>;
 }
@@ -1400,6 +1402,9 @@ export function createRpcConnectionHandler(
 		},
 		isShutdownRequested() {
 			return shutdownRequested;
+		},
+		cancelPendingExtensionUiRequests() {
+			pendingExtensionRequests.cancelAll();
 		},
 		async dispose() {
 			await ready;

@@ -21,6 +21,8 @@ import type {
 	RpcAuthAccountsChangedEvent,
 	RpcCommand,
 	RpcExtensionEvent,
+	RpcExtensionUIRequest,
+	RpcExtensionUIResponse,
 	RpcProviderAccount,
 	RpcResponse,
 	RpcSessionState,
@@ -76,6 +78,7 @@ export type RpcClientEvent =
 	| JsonAgentSessionEvent
 	| RpcProviderAccountEvent
 	| RpcExtensionEvent
+	| RpcExtensionUIRequest
 	| { type: "bash_start" }
 	| { type: "bash_end" };
 export type RpcEventListener = (event: RpcClientEvent) => void;
@@ -292,6 +295,10 @@ export class RpcClient {
 		const opened = this.getData<{ sessionId: string; state: RpcSessionState; attached?: boolean }>(response);
 		this.sessionId = opened.sessionId;
 		return opened;
+	}
+
+	async sendExtensionUIResponse(response: RpcExtensionUIResponse): Promise<void> {
+		await this.send(response, true, undefined, false);
 	}
 
 	async closeSession(sessionId = this.sessionId): Promise<void> {
@@ -807,7 +814,8 @@ export class RpcClient {
 					isProviderAccountEvent(event) ||
 					event.type === "extension_event" ||
 					event.type === "bash_start" ||
-					event.type === "bash_end"
+					event.type === "bash_end" ||
+					event.type === "extension_ui_request"
 				)
 					return;
 				events.push(event);
@@ -873,9 +881,10 @@ export class RpcClient {
 	}
 
 	private async send(
-		command: RpcCommandBody,
+		command: RpcCommandBody | RpcExtensionUIResponse,
 		route = true,
 		hooks?: { onResponse?: (response: RpcResponse) => void; onReject?: (error: Error) => void },
+		expectResponse = true,
 	): Promise<RpcResponse> {
 		const childProcess = this.process;
 		const stream = this.socket ?? childProcess?.stdin;
@@ -896,13 +905,17 @@ export class RpcClient {
 			throw error;
 		}
 
-		const id = `req_${++this.requestId}`;
+		const id = "type" in command && command.type === "extension_ui_response" ? command.id : `req_${++this.requestId}`;
 		const fullCommand = {
 			...command,
 			...(route && this.sessionId && !("sessionId" in command) ? { sessionId: this.sessionId } : {}),
-			id,
+			...(command.type === "extension_ui_response" ? {} : { id }),
 		} as RpcCommand;
 
+		if (!expectResponse) {
+			stream.write(serializeJsonLine(fullCommand));
+			return Promise.resolve({ type: "response", command: command.type, success: true } as RpcResponse);
+		}
 		return new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => {
 				const pending = this.pendingRequests.get(id);

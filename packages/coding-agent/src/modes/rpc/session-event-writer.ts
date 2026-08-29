@@ -140,7 +140,10 @@ export class SessionEventWriter {
 		if (this.sealedSessions.has(sessionId)) return false;
 		const targetId = this.connectionContext.getStore();
 		const record = value as RpcRecord;
-		const isTargeted = record.type === "response" || record.type === "extension_ui_request";
+		const isTargeted =
+			record.type === "response" ||
+			(record.type === "extension_ui_request" &&
+				["select", "confirm", "input", "editor"].includes(String(record.method)));
 		const targets = isTargeted ? [targetId] : this.connections.size > 0 ? [...this.connections.keys()] : [undefined];
 		for (const target of targets) {
 			if (target !== undefined && !this.connections.has(target)) continue;
