@@ -148,21 +148,52 @@ describe("normalizeWarpWslShiftEnterInput", () => {
 			normalizeWarpWslShiftEnterInput("\n", {
 				TERM_PROGRAM: "WarpTerminal",
 				WSL_DISTRO_NAME: "Ubuntu",
-			}),
+				WSL_INTEROP: "/run/WSL/1_interop",
+			}, "linux"),
 			"\x1b[13;2u",
 		);
 		assert.equal(
 			normalizeWarpWslShiftEnterInput("\n", {
 				WARP_SESSION_ID: "session",
 				WSL_INTEROP: "/run/WSL/1_interop",
-			}),
+			}, "linux"),
 			"\x1b[13;2u",
 		);
 	});
 
+	it("does not treat empty or non-Linux WSL markers as a target session", () => {
+		assert.equal(
+			normalizeWarpWslShiftEnterInput("\n", {
+				TERM_PROGRAM: "WarpTerminal",
+				WSL_DISTRO_NAME: "",
+			},
+			"linux",
+		),
+			"\n",
+		);
+		assert.equal(
+			normalizeWarpWslShiftEnterInput("\n", {
+				TERM_PROGRAM: "WarpTerminal",
+				WSL_INTEROP: "/run/WSL/1_interop",
+			},
+			"darwin",
+		),
+			"\n",
+		);
+		assert.equal(
+			normalizeWarpWslShiftEnterInput("\n", {
+				TERM_PROGRAM: "WarpTerminal",
+				WSL_INTEROP: "spoofed",
+			},
+			"linux",
+		),
+			"\n",
+		);
+	});
+
 	it("leaves other terminals, remote or multiplexed sessions, and input unchanged", () => {
-		assert.equal(normalizeWarpWslShiftEnterInput("\n", { WSL_DISTRO_NAME: "Ubuntu" }), "\n");
-		assert.equal(normalizeWarpWslShiftEnterInput("\n", { TERM_PROGRAM: "WarpTerminal" }), "\n");
+		assert.equal(normalizeWarpWslShiftEnterInput("\n", { WSL_DISTRO_NAME: "Ubuntu" }, "linux"), "\n");
+		assert.equal(normalizeWarpWslShiftEnterInput("\n", { TERM_PROGRAM: "WarpTerminal" }, "linux"), "\n");
 		assert.equal(
 			normalizeWarpWslShiftEnterInput("\r", {
 				TERM_PROGRAM: "WarpTerminal",
@@ -336,7 +367,7 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 		}
 	});
 
-	it("normalizes Warp-on-WSL LF before forwarding input", () => {
+	it("forwards Warp-on-WSL LF unchanged for non-editor consumers", () => {
 		const harness = setupNegotiation({
 			TERM_PROGRAM: "WarpTerminal",
 			WARP_SESSION_ID: undefined,
@@ -346,7 +377,7 @@ describe("ProcessTerminal Kitty keyboard protocol negotiation", () => {
 		});
 		try {
 			harness.send("\n");
-			assert.equal(harness.getInput(), "\x1b[13;2u");
+			assert.equal(harness.getInput(), "\n");
 
 			harness.send("\r");
 			assert.equal(harness.getInput(), "\r");
@@ -472,6 +503,72 @@ describe("ProcessTerminal stop", () => {
 		try {
 			// When / Then
 			assert.doesNotThrow(() => harness.terminal.stop());
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("does not throw when Bun reports the dead terminal only in the message", () => {
+		// Given
+		const bunShimEio = new Error("setRawMode failed with errno: 5");
+		const harness = setupTerminalStopHarness(false, () => {
+			throw bunShimEio;
+		});
+
+		try {
+			// When / Then
+			assert.doesNotThrow(() => harness.terminal.stop());
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("does not throw when the message carries the EPIPE errno", () => {
+		// Given
+		const bunShimEpipe = new Error("setRawMode failed with errno: 32");
+		const harness = setupTerminalStopHarness(false, () => {
+			throw bunShimEpipe;
+		});
+
+		try {
+			// When / Then
+			assert.doesNotThrow(() => harness.terminal.stop());
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("rethrows raw-mode failures whose message carries no dead-terminal errno", () => {
+		// Given
+		const unrelated = new Error("boom");
+		const harness = setupTerminalStopHarness(false, () => {
+			throw unrelated;
+		});
+
+		try {
+			// When / Then
+			assert.throws(
+				() => harness.terminal.stop(),
+				(error: unknown) => error === unrelated,
+			);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("rethrows raw-mode failures carrying a non-dead errno in the message", () => {
+		// Given
+		const unrelated = new Error("setRawMode failed with errno: 22");
+		const harness = setupTerminalStopHarness(false, () => {
+			throw unrelated;
+		});
+
+		try {
+			// When / Then
+			assert.throws(
+				() => harness.terminal.stop(),
+				(error: unknown) => error === unrelated,
+			);
 		} finally {
 			harness.cleanup();
 		}

@@ -9,6 +9,7 @@ import {
 	isImageMarker,
 } from "../image-markers.ts";
 import { getKeybindings } from "../keybindings.ts";
+import { normalizeWarpWslShiftEnterInput } from "../terminal.ts";
 import { decodePrintableKey, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
 import {
@@ -740,6 +741,7 @@ export class Editor implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
+		data = normalizeWarpWslShiftEnterInput(data);
 		const kb = getKeybindings();
 
 		// Handle character jump mode (awaiting next character to jump to)

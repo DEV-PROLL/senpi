@@ -4,14 +4,16 @@
 
 ### What changed
 
-- `packages/tui/src/terminal.ts`: a standalone LF input event is rewritten to the existing CSI-u
-  Shift+Enter sequence only when both Warp and WSL are detected in a direct local session. Plain CR
-  Enter, non-Warp terminals, non-WSL Warp sessions, SSH/multiplexer sessions, and bracketed paste
-  payloads keep their existing input bytes.
+- `packages/tui/src/components/editor.ts` applies the existing CSI-u Shift+Enter sequence to a
+  standalone LF only while the multiline editor handles it. `ProcessTerminal` forwards raw input,
+  so single-line inputs and selectors keep their existing Enter behavior. The conversion is limited
+  to Linux sessions where both Warp and non-empty WSL markers are present; plain CR Enter,
+  non-Warp terminals, non-WSL sessions, SSH/multiplexer sessions, and bracketed paste payloads keep
+  their existing input bytes.
 - `packages/tui/src/mux.ts`: `isMultiplexerSession()` accepts an optional environment so terminal
   normalization reuses the shared tmux, GNU Screen, and Zellij detection without process-global test setup.
 - `packages/tui/test/terminal.test.ts`: focused coverage proves both supported Warp/WSL environment
-  markers and the non-target boundaries.
+  markers, hardened platform/marker boundaries, and raw forwarding for non-editor consumers.
 
 ### Why
 
@@ -20,7 +22,8 @@
   editor's submit binding wins before the Ctrl+J/newline binding. Normalizing only direct local
   Warp-on-WSL sessions restores an unambiguous Shift+Enter identity while Warp's plain CR Enter
   continues to submit. SSH and multiplexer sessions are excluded because their active client terminal
-  can differ from the inherited process environment.
+  can differ from the inherited process environment. The editor-only boundary prevents this
+  compatibility workaround from changing submission semantics for other focused TUI components.
 - See [Warp #13782](https://github.com/warpdotdev/Warp/issues/13782) for the terminal byte behavior.
 
 ### Why an extension could not handle it
@@ -34,6 +37,100 @@
 - LOW: `packages/tui/src/terminal.ts` at `forwardInputSequence()` and its normalization helpers,
   `packages/tui/src/mux.ts` at shared multiplexer detection, and `packages/tui/test/terminal.test.ts`
   beside the existing native Shift+Enter normalization coverage.
+## 2026-08-27 - Preserve Windows Terminal scrollback during resize redraws
+
+### What changed
+
+- `packages/tui/src/tui.ts`: Windows full redraws continue to clear and repaint the visible screen, but no longer emit `ESC[3J`, which deletes the user's terminal scrollback buffer on ConPTY. Non-Windows non-multiplexer redraws retain their existing scrollback-clearing behavior.
+
+### Why
+
+- Windows Terminal's ConPTY resize and focus transitions can trigger a full redraw outside a multiplexer. Clearing scrollback is destructive and makes prior session output unrecoverable when the user returns to the terminal window.
+
+### Why this lives in the fork
+
+- The platform-specific redraw guard belongs in the TUI renderer's `fullRender()` path, where screen clearing and scrollback deletion are emitted together.
+
+### Expected merge conflict zones
+
+- LOW: `packages/tui/src/tui.ts` around `TuiBase.doRender()` and the `fullRender()` scrollback-clear guard.
+- LOW: `packages/tui/test/mux-scrollback.test.ts` around resize scrollback emission assertions.
+
+## Dead-terminal detection reads Bun's errno-in-message shape (2026-08-26)
+
+### What changed
+
+- `packages/tui/src/terminal.ts`: `isDeadTerminalError()` gains a third, last-resort branch that parses a
+  trailing `errno: <n>` out of the error message. It fires only when that number is a dead-terminal errno
+  that is stable across darwin and linux — `EIO` (5) and `EPIPE` (32). `ENOTCONN` is deliberately left out of
+  the numeric set because its value differs per platform (57 on darwin, 107 on linux). The existing string
+  `code` and numeric `errno` branches are unchanged and still win first, and any error that matches none of
+  the three branches still propagates out of `ProcessTerminal.stop()`.
+- `test/terminal.test.ts` pins the real Bun shape (a bare `new Error("setRawMode failed with errno: 5")`
+  with neither `code` nor `errno`), the `errno: 32` message form, and two rethrow fences: an unrelated
+  `new Error("boom")` and a live-but-unrelated `errno: 22` message.
+
+### Why
+
+- Bun 1.4.0's tty shim throws a plain `Error` for a failed `setRawMode()` ioctl: `code` and `errno` are both
+  absent and the number survives only in the message text (verified locally:
+  `{"isError":true,"hasCode":false,"hasErrno":false,"msg":"setRawMode failed with errno: 5"}`). The previous
+  classifier recognized only the two property shapes, so on a dead SSH/PTY peer the exception escaped
+  `ProcessTerminal.stop()` into `Tui.stop()` and `stopInteractiveTui()`, aborting shutdown and hanging the
+  session with `error: setRawMode failed with errno: 5`.
+
+### Why this lives in the fork
+
+- Raw-mode ownership and teardown are private `ProcessTerminal` lifecycle responsibilities running inside the
+  shutdown path. No extension surface sits between the saved raw-mode state and the stdin ioctl, so the
+  classification has to happen where the throw occurs.
+
+### Expected merge conflict zones
+
+- LOW: `packages/tui/src/terminal.ts` around the dead-terminal errno constants and the `isDeadTerminalError()`
+  body.
+- LOW: `packages/tui/test/terminal.test.ts` around the `ProcessTerminal stop` suite.
+
+## 2026-08-26 - Guard stdin EIO when the controlling terminal detaches
+
+### What changed
+
+- `packages/tui/src/terminal.ts` arms a `process.stdin` "error" guard from `ProcessTerminal.start()` until a 250ms grace window after `stop()`: a vanished or re-backgrounded controlling terminal fails the next stdin read with EIO, and without a listener the EventEmitter rethrew it as an uncaught exception that killed the agent process. The classifier owns EIO only — Node's `code: "EIO"` and Bun's raw `errno: 5`/`-5` shapes — and every other stdin error keeps its default EventEmitter propagation. EIO is swallowed without pausing the stream, so a pgrp that regains the tty foreground keeps accepting input.
+
+### Why
+
+- When omo's launcher chain dies (e.g. external SIGTERM), the orphaned engine's pending stdin read on the now-background tty fails with EIO and crashed the process through `uncaughtException` ("exiting due to uncaughtException: EIO read"). The same hazard was fixed upstream-style in gajae #3758; this port adapts it to the fork's `ProcessTerminal` and adds the numeric-errno shape from the shutdown-time classifier.
+
+### Why this lives in the fork
+
+- The crash topology (launcher chain + orphaned engine) and the Bun runtime shim are fork-owned; the fork's terminal lifecycle differs from upstream's.
+
+### Expected merge conflict zones
+
+- `ProcessTerminal.start()`/`stop()` in `packages/tui/src/terminal.ts` during upstream syncs.
+
+## TUI runtime re-diverges from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `packages/tui/src/components/markdown.ts` keeps the fork LaTeX pipeline (`latex_block` /
+  `latex_inline` / `latex_literal` token kinds, `latexToUnicode`, formula length caps, and
+  word-boundary guards) on top of upstream's renderer.
+- `packages/tui/src/terminal.ts` keeps dead-terminal detection (EIO/EPIPE/ENOTCONN plus Bun's raw
+  errno-5 macOS tty shim) and the `PI_TUI_KEYBOARD_PROTOCOL` enhancement gate.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- The token-scanner section of `packages/tui/src/components/markdown.ts` and the raw-mode setup in
+  `packages/tui/src/terminal.ts`.
 
 ## Alt-screen Kitty teardown keeps its disambiguated helper name after the 59a71b23 sync (2026-08-19)
 
