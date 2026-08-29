@@ -2,9 +2,39 @@
 
 ## 2026-08-29 - Render external-owner compaction delegation once, as state (#1174 UX half)
 
-- Auto compaction rejections with `rejectionCause: "external-owner"` now render a single muted informational line ("The Claude Agent SDK manages and compacts this session's context natively.") at most once per delegation episode, instead of repainting a red error line on every rejected attempt. Manual `/compact` rejections keep their explicit error feedback.
-- A delegation episode is tracked entirely in the interactive layer from observed `compaction_end` events: it starts on an external-owner rejection and the one-time notice re-arms on a successful compaction, a model switch, or a session rebind. The logic does not depend on repeat rejection events arriving (the core attempt-suppression half of #1174 lands separately).
-- The footer context meter appends an ` (SDK)` marker while a delegation episode is active (`FooterComponent.setCompactionDelegated`, optional on `InteractiveFooter`), so a saturated meter reads as "compacted natively by the SDK" rather than a stall. The marker rides the existing tail segment and respects the footer width ladder.
+### What changed
+
+- `interactive-mode.ts`: auto compaction rejections with `rejectionCause: "external-owner"` now render a
+  single muted informational line ("The Claude Agent SDK manages and compacts this session's context
+  natively.") at most once per delegation episode, instead of repainting a red error line on every
+  rejected attempt. Manual `/compact` rejections keep their explicit error feedback. The episode is
+  tracked entirely in the interactive layer from observed `compaction_end` events: it starts on an
+  external-owner rejection and the one-time notice re-arms on a successful compaction, a model switch,
+  or a session rebind; the logic does not depend on repeat rejection events arriving (the core
+  attempt-suppression half of #1174 lands separately).
+- `components/footer.ts`: the context meter appends an ` (SDK)` marker while a delegation episode is
+  active, so a saturated meter reads as "compacted natively by the SDK" rather than a stall. The marker
+  rides the existing tail segment and respects the footer width ladder.
+- `grok/chrome.ts`: `InteractiveFooter` gains the optional `setCompactionDelegated` seam that feeds the
+  marker.
+
+### Why
+
+- Issue #1174: once the local context estimate crossed the compaction threshold on the claude-sdk-oauth
+  lane, every turn repainted the same red error line (twice per tool-call turn), presenting a designed
+  stand-down as a recurring failure, and the saturated context meter looked like a stall instead of
+  SDK-owned state.
+
+### Why an extension could not handle it
+
+- The `compaction_end` rendering branch, the chat container, and the footer meter segments are private
+  `InteractiveMode`/footer render state; extensions observe compaction events but cannot restyle or
+  dedupe the built-in error rendering.
+
+### Expected merge conflict zones
+
+- LOW: the `compaction_end` error branch in `interactive-mode.ts`; the context segment composition in
+  `components/footer.ts`; the footer seam in `grok/chrome.ts`.
 
 ## 2026-08-28 - Hydrate setup-only proxy mirrors from host state
 
