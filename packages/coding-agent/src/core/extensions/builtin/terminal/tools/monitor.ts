@@ -1,5 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
+import { APPROVED_MONITOR_PARENT } from "../monitor-permission.ts";
 import { MonitorRegistry } from "../monitor-registry.ts";
 import { DEFAULT_COLS, DEFAULT_ROWS, TERMINAL_MONITOR_TOOL } from "../shared.ts";
 import { errorResult, type TerminalToolContext, type TerminalToolResult, textResult } from "./context.ts";
@@ -33,6 +34,10 @@ export const monitorSchema = Type.Object({
 			description: "Create (required): shell command to run and watch in a PTY-backed monitor session.",
 		}),
 	),
+	path: Type.Optional(Type.String({ minLength: 1, description: "File path to watch for a native event." })),
+	event: Type.Optional(
+		StringEnum(["create", "modify"] as const, { description: "Native file event (defaults to create)." }),
+	),
 	filter: Type.Optional(
 		Type.String({ description: "Only PTY output lines matching this regex become monitor events." }),
 	),
@@ -51,6 +56,16 @@ export const monitorSchema = Type.Object({
 export type MonitorInput = Static<typeof monitorSchema>;
 
 type MonitorCreateInput = MonitorInput & { description: string; command: string };
+type FileMonitorCreateInput = MonitorInput & { description: string; path: string };
+
+function isFileCreateInput(input: MonitorInput): input is FileMonitorCreateInput {
+	return (
+		typeof input.description === "string" &&
+		input.description.length > 0 &&
+		typeof input.path === "string" &&
+		input.path.length > 0
+	);
+}
 
 function isCreateInput(input: MonitorInput): input is MonitorCreateInput {
 	return (
@@ -140,9 +155,37 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 				ctx.onMonitorRearmed?.(bashId);
 				return textResult(`Monitor ${bashId} re-armed.`);
 			}
-			if (!isCreateInput(input)) {
-				return errorResult("monitor requires description and command to start a watcher.");
+			const fileInput = isFileCreateInput(input);
+			const commandInput = isCreateInput(input);
+			if (fileInput && commandInput) return errorResult("monitor accepts either command or path, not both.");
+			if (fileInput) {
+				if (input.filter !== undefined || input.persistent)
+					return errorResult("Native file monitors do not support filter or persistent.");
+				if (!ctx.monitorRegistry)
+					return errorResult("Native file monitors require a lifecycle-owned monitor registry.");
+				try {
+					const id = await ctx.monitorRegistry.registerFile({
+						description: input.description,
+						path: input.path,
+						event: input.event ?? "create",
+						timeoutMs: resolveTimeoutMs(input.timeout_ms),
+						cwd: execCtx?.cwd ?? ctx.cwd,
+						...((input as Record<string | symbol, unknown>)[APPROVED_MONITOR_PARENT] !== undefined
+							? {
+									approvedParent: (input as Record<string | symbol, unknown>)[
+										APPROVED_MONITOR_PARENT
+									] as string,
+								}
+							: {}),
+					});
+					return textResult(`Monitor started with ID: ${id}`, {
+						details: { bash_id: id, watch_id: id, monitor: true },
+					});
+				} catch (error) {
+					return errorResult(error instanceof Error ? error.message : String(error));
+				}
 			}
+			if (!commandInput) return errorResult("monitor requires description and command or path to start a watcher.");
 			return createMonitor(ctx, registry, input, execCtx);
 		},
 	};

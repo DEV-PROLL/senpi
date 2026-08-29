@@ -33,6 +33,7 @@ export class TerminalSessionBundle {
 		this.manager = new TerminalManager(options);
 		this.monitors = new MonitorRegistry((event) => this.#dispatchMonitorEvent(event), {
 			onChange: (snapshot) => this.#sinks?.onMonitorState(snapshot),
+			reserve: () => this.manager.reserve(),
 		});
 	}
 
