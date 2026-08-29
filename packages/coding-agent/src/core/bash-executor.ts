@@ -62,12 +62,14 @@ export async function executeBashWithOperations(
 	let callbackError: unknown;
 	let hasCallbackError = false;
 	const callbackPromises = new Set<Promise<void>>();
-	const waitForCallbacks = async (): Promise<void> => {
+	const waitForCallbacks = async (allowAbandonment: boolean): Promise<void> => {
 		if (callbackPromises.size === 0) return;
-		await Promise.race([
-			Promise.allSettled([...callbackPromises]).then(() => undefined),
-			new Promise<void>((resolve) => setTimeout(resolve, 100)),
-		]);
+		const settled = Promise.allSettled([...callbackPromises]).then(() => undefined);
+		if (!allowAbandonment) {
+			await settled;
+			return;
+		}
+		await Promise.race([settled, new Promise<void>((resolve) => setTimeout(resolve, 100))]);
 	};
 	let outputChunkStart = 0;
 	let outputBytes = 0;
@@ -276,7 +278,7 @@ export async function executeBashWithOperations(
 			signal: executionSignal,
 		});
 	} catch (err) {
-		await waitForCallbacks();
+		await waitForCallbacks(options?.signal?.aborted === true);
 		// Check if it was an abort
 		if (hasCallbackError) {
 			return await closeTempFileAndCleanup(callbackError);
@@ -304,7 +306,7 @@ export async function executeBashWithOperations(
 		return await closeTempFileAndCleanup(err);
 	}
 
-	await waitForCallbacks();
+	await waitForCallbacks(false);
 	if (hasCallbackError) {
 		return await closeTempFileAndCleanup(callbackError);
 	}

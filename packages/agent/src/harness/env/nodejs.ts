@@ -539,6 +539,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
 							callbackError = new ExecutionError("callback_error", cause.message, error);
 							onAbort();
 						}
+						throw error;
 					});
 				callbackPromises.add(callbackPromise);
 				void callbackPromise.then(
@@ -555,7 +556,7 @@ export class NodeExecutionEnv implements ExecutionEnv {
 
 			void waitForChildProcess(child).then(
 				async (code) => {
-					await Promise.all([...callbackPromises]);
+					await Promise.allSettled([...callbackPromises]);
 					if (callbackError) {
 						settle(err(callbackError));
 						return;

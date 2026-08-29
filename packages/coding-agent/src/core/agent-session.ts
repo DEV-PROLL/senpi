@@ -15,6 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type {
@@ -7645,6 +7646,11 @@ export class AgentSession {
 		for (const abortController of [...this._bashAbortControllers]) {
 			abortController.abort();
 		}
+	}
+
+	/** Remove a host-owned full-output spill after a remote observer failed. */
+	async cleanupBashOutput(path: string): Promise<void> {
+		await rm(path, { force: true });
 	}
 
 	/** Whether a bash command is currently running */

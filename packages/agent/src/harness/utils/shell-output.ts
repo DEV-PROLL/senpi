@@ -90,9 +90,16 @@ export async function executeShellWithCapture(
 		});
 	};
 
-	const cleanupFullOutput = async (): Promise<void> => {
-		if (fullOutputPath) await env.remove(fullOutputPath, { force: true });
+	const cleanupFullOutput = async (): Promise<ExecutionError | undefined> => {
+		if (!fullOutputPath) return undefined;
+		const result = await env.remove(fullOutputPath, { force: true });
+		return result.ok ? undefined : toExecutionError(result.error);
 	};
+
+	const withCleanupError = (primary: ExecutionError, cleanupError: ExecutionError | undefined): ExecutionError =>
+		cleanupError
+			? new ExecutionError(primary.code, primary.message, new AggregateError([primary, cleanupError]))
+			: primary;
 
 	const createProgress = (): ShellCaptureProgress => {
 		const tailTruncation = truncateTail(tailOutput);
@@ -162,17 +169,17 @@ export async function executeShellWithCapture(
 		if (progress.truncation.truncated && !fullOutputRequested) ensureFullOutputFile(tailOutput);
 		const writeResult = await writeChain;
 		if (!writeResult.ok) {
-			await cleanupFullOutput();
-			return err(writeResult.error);
+			return err(withCleanupError(writeResult.error, await cleanupFullOutput()));
 		}
 		if (captureError) {
-			await cleanupFullOutput();
-			return err(captureError);
+			return err(withCleanupError(captureError, await cleanupFullOutput()));
 		}
 		progress = createProgress();
 
 		if (!result.ok) {
 			if (result.error.code === "aborted" || options?.abortSignal?.aborted) {
+				const cleanupError = await cleanupFullOutput();
+				if (cleanupError) return err(cleanupError);
 				return ok({
 					...progress,
 					exitCode: undefined,
@@ -200,7 +207,7 @@ export async function executeShellWithCapture(
 		});
 	} catch (error) {
 		acceptingOutput = false;
-		await cleanupFullOutput();
-		return err(toExecutionError(error));
+		const primaryError = toExecutionError(error);
+		return err(withCleanupError(primaryError, await cleanupFullOutput()));
 	}
 }

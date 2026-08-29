@@ -1119,6 +1119,10 @@ export function createRpcConnectionHandler(
 				return success(id, "abort_bash");
 			}
 
+			case "cleanup_bash_output":
+				await session.cleanupBashOutput(command.path);
+				return success(id, "cleanup_bash_output");
+
 			// =================================================================
 			// Session
 			// =================================================================

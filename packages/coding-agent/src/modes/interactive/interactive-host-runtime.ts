@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionEvent, AgentSessionEventListener } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
@@ -227,13 +228,16 @@ function createRemoteSessionProxy(
 		});
 	};
 	let state = { ...initialState };
-	const waitForBashCallbacks = async (promises: Set<Promise<void>>): Promise<void> => {
+	const waitForBashCallbacks = async (promises: Set<Promise<void>>, allowAbandonment: boolean): Promise<void> => {
 		if (promises.size === 0) return;
-		await Promise.race([
-			Promise.allSettled([...promises]).then(() => undefined),
-			new Promise<void>((resolve) => setTimeout(resolve, 100)),
-		]);
+		const settled = Promise.allSettled([...promises]).then(() => undefined);
+		if (!allowAbandonment) {
+			await settled;
+			return;
+		}
+		await Promise.race([settled, new Promise<void>((resolve) => setTimeout(resolve, 100))]);
 	};
+	const executionNamespace = randomUUID();
 	let nextBashExecutionId = 0;
 	const bashExecutions = new Map<
 		string,
@@ -489,7 +493,7 @@ function createRemoteSessionProxy(
 							updateBashState();
 						}
 					}
-					const executionId = `bash-${++nextBashExecutionId}`;
+					const executionId = `bash-${executionNamespace}-${++nextBashExecutionId}`;
 					const execution = {
 						chunk: onChunk,
 						promises: new Set<Promise<void>>(),
@@ -503,8 +507,11 @@ function createRemoteSessionProxy(
 							executionId,
 							operations: options?.operations as Record<string, unknown> | undefined,
 						});
-						await waitForBashCallbacks(execution.promises);
-						if (execution.hasError) throw execution.error;
+						await waitForBashCallbacks(execution.promises, false);
+						if (execution.hasError) {
+							if (result.fullOutputPath) await client.cleanupBashOutput(result.fullOutputPath);
+							throw execution.error;
+						}
 						return result;
 					} finally {
 						bashExecutions.delete(executionId);

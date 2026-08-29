@@ -630,6 +630,10 @@ export class RpcClient {
 		await this.send({ type: "abort_bash" });
 	}
 
+	async cleanupBashOutput(path: string): Promise<void> {
+		await this.send({ type: "cleanup_bash_output", path });
+	}
+
 	/**
 	 * Get session statistics.
 	 */
