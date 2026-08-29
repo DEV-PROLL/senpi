@@ -1,5 +1,23 @@
 # TUI delta rendering fork changes
 
+## 2026-08-29 - Preserve upstream terminal input fixes
+
+### What changed
+
+- `packages/tui/src/components/editor.ts` and `packages/tui/src/terminal.ts` retain the current upstream terminal input behavior after synchronizing main.
+
+### Why
+
+- The PR merge must preserve both the upstream terminal changes and the callback lifecycle repair.
+
+### Why an extension could not handle it
+
+- Terminal input normalization and editor dispatch are owned by the TUI runtime.
+
+### Expected merge conflict zones
+
+- `packages/tui/src/components/editor.ts` and `packages/tui/src/terminal.ts`.
+
 ## Warp on WSL LF is normalized to Shift+Enter (2026-08-24)
 
 ### What changed

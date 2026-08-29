@@ -9,7 +9,6 @@ import {
 	isImageMarker,
 } from "../image-markers.ts";
 import { getKeybindings } from "../keybindings.ts";
-import { normalizeWarpWslShiftEnterInput } from "../terminal.ts";
 import { decodePrintableKey, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
 import {
@@ -19,6 +18,7 @@ import {
 	pasteMarkerId,
 	segmentWithMarkers,
 } from "../paste-markers.ts";
+import { normalizeWarpWslShiftEnterInput } from "../terminal.ts";
 import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.ts";
 import { UndoStack } from "../undo-stack.ts";
 import {

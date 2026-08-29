@@ -1,5 +1,5 @@
 import { applyPatch } from "diff";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -756,6 +756,80 @@ describe("Coding Agent Tools", () => {
 			const fullOutput = readFileSync(fullOutputPath!, "utf-8");
 			expect(fullOutput).toContain("1\n2\n3");
 			expect(fullOutput).toContain("2998\n2999\n3000");
+		});
+
+		it("rejects and cleans its spill when an output callback never settles", async () => {
+			vi.useFakeTimers();
+			try {
+				const spillMarker = `never-settling-callback-${process.pid}-${Date.now()}`;
+				const output = `${spillMarker}\n${"x".repeat(51 * 1024)}`;
+				const execution = executeBashWithOperations(
+					"never-settling-callback",
+					process.cwd(),
+					{
+						exec: async (_command, _cwd, { onData }) => {
+							onData(Buffer.from(output));
+							return { exitCode: 0 };
+						},
+					},
+					{ onChunk: () => new Promise<void>(() => {}) },
+				);
+				const rejection = expect(execution).rejects.toThrow("Bash output callback did not settle within 5000ms");
+				let settled = false;
+				void execution.then(
+					() => {
+						settled = true;
+					},
+					() => {
+						settled = true;
+					},
+				);
+
+				await vi.advanceTimersByTimeAsync(4_999);
+				expect(settled).toBe(false);
+				await vi.advanceTimersByTimeAsync(1);
+				await rejection;
+
+				const leakedSpills = readdirSync(tmpdir())
+					.filter((name) => name.startsWith("pi-bash-") && name.endsWith(".log"))
+					.filter((name) => {
+						try {
+							return readFileSync(join(tmpdir(), name), "utf-8").includes(spillMarker);
+						} catch {
+							return false;
+						}
+					});
+				expect(leakedSpills).toEqual([]);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("waits for a slow output callback before normal completion", async () => {
+			vi.useFakeTimers();
+			try {
+				const execution = executeBashWithOperations(
+					"slow-callback",
+					process.cwd(),
+					{
+						exec: async (_command, _cwd, { onData }) => {
+							onData(Buffer.from("output"));
+							return { exitCode: 0 };
+						},
+					},
+					{ onChunk: () => new Promise<void>((resolve) => setTimeout(resolve, 500)) },
+				);
+				await vi.advanceTimersByTimeAsync(499);
+				let settled = false;
+				void execution.then(() => {
+					settled = true;
+				});
+				expect(settled).toBe(false);
+				await vi.advanceTimersByTimeAsync(1);
+				await expect(execution).resolves.toMatchObject({ output: "output", exitCode: 0 });
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it("executeBash should persist full output when truncation happens by line count only", async () => {

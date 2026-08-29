@@ -55,7 +55,14 @@ describe("strict model generation", () => {
 
 		const result = spawnSync(
 			process.execPath,
-			["--import", pathToFileURL(preloadPath).href, "scripts/generate-models.ts", "--json-only", "--json-output", outputDir],
+			[
+				"--import",
+				pathToFileURL(preloadPath).href,
+				"scripts/generate-models.ts",
+				"--json-only",
+				"--json-output",
+				outputDir,
+			],
 			{ cwd: isolatedPackageRoot, encoding: "utf8", timeout: 10_000 },
 		);
 

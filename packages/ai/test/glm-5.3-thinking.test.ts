@@ -93,14 +93,12 @@ describe("GLM 5.3 openai-completions reasoning effort", () => {
 		},
 	);
 
-	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])(
-		"maps high and max effort for the %s", async (id) => {
-			const model = getModel("zai", id as Glm53Variant);
-			expect(model).toBeDefined();
-			await expect(captureParams(model!, "high")).resolves.toMatchObject({ reasoning_effort: "high" });
-			await expect(captureParams(model!, "max")).resolves.toMatchObject({ reasoning_effort: "max" });
-		},
-	);
+	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])("maps high and max effort for the %s", async (id) => {
+		const model = getModel("zai", id as Glm53Variant);
+		expect(model).toBeDefined();
+		await expect(captureParams(model!, "high")).resolves.toMatchObject({ reasoning_effort: "high" });
+		await expect(captureParams(model!, "max")).resolves.toMatchObject({ reasoning_effort: "max" });
+	});
 
 	it("maps low effort through the zai thinking-level map (not raw)", async () => {
 		const params = await captureParams(glm53OnZai(), "low");
@@ -113,7 +111,8 @@ describe("GLM 5.3 openai-completions reasoning effort", () => {
 	});
 
 	it.each(["glm-5.3-flash", "glm-5.3-highspeed"])(
-		"keeps thinking enabled for %s when reasoning is off", async (id) => {
+		"keeps thinking enabled for %s when reasoning is off",
+		async (id) => {
 			const model = getModel("zai", id as Glm53Variant);
 			expect(model).toBeDefined();
 			const params = await captureParams(model!, "off");

@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Bash callback settlement is bounded on direct, shared-host, and harness execution paths so never-settling callbacks cannot hang commands or silently lose spill cleanup failures.
+
 - Deterministic compaction fallback now supports replay-safe Gemini opaque provider state (thoughtSignature, thinkingSignature, textSignature, and empty visible text blocks) and recovers earlier safe boundaries without breaking atomic tool-call chains ([#947](https://github.com/code-yeongyu/senpi/pull/947)).
 
 ### New Features
@@ -29,6 +31,14 @@
 
 ### Fixed
 
+- Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and late filesystem
+  close failures, waiting for the stream's terminal `close` event and failing only the tool call
+  instead of returning an incomplete path or terminating the interactive session through
+  `uncaughtException`.
+- Failed bash spill files are now removed after cleanup while surfaced full-output paths remain
+  readable, and command or update-callback failures preserve any secondary cleanup error.
+- Local shell stream callback failures now enter the executor cleanup path, preventing uncaught
+  callback throws from leaving large-output spill files behind.
 - `cursor-cli-oauth` no longer mixes Cursor's internal tool-call protocol, arguments, and results into assistant text; Cursor still owns execution, while Senpi now stores and renders only the model's actual prose ([OmO #7169](https://github.com/code-yeongyu/oh-my-openagent/issues/7169)).
 
 - On the `claude-sdk-oauth` lane, the "Compaction rejected: the Claude Agent SDK owns compaction for
