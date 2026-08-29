@@ -26,6 +26,8 @@ export interface RpcSessionEntry {
 	sessionPath?: string;
 	/** Canonical reservation key for path-opened sessions; matches the reservations set. */
 	reservationKey?: string;
+	/** Current runtime cwd, which can change when a session is replaced. */
+	cwd: string;
 	/** Live attachments (open + later attaches). The runtime is disposed only when the last one closes. */
 	attachments: number;
 	lifecycleMutex: Promise<void>;
@@ -80,6 +82,7 @@ export class RpcSessionRegistry {
 
 	async openSession(profile: RpcSessionLaunchProfile): Promise<OpenRpcSession> {
 		this.validateProfile(profile);
+		this.syncRuntimeMetadata();
 		const sessionPath = profile.sessionPath ? canonicalPath(profile.sessionPath) : undefined;
 		if (sessionPath && this.reservations.has(sessionPath)) {
 			// Attach-on-open: a live session outlives individual client attachments, so a
@@ -119,6 +122,7 @@ export class RpcSessionRegistry {
 			profile: storedProfile,
 			sessionPath,
 			reservationKey: sessionPath,
+			cwd: storedProfile.cwd,
 			attachments: 1,
 			lifecycleMutex: Promise.resolve(),
 		};
@@ -206,6 +210,7 @@ export class RpcSessionRegistry {
 
 	/** Completes a close previously made visible by beginClose(). */
 	async closeMarked(handle: string): Promise<void> {
+		this.syncRuntimeMetadata();
 		const entry = this.entries.get(handle);
 		if (entry?.state !== "closing") throw new RpcSessionRegistryError("unknown_session");
 		entry.lifecycleMutex = (async () => {
@@ -217,7 +222,7 @@ export class RpcSessionRegistry {
 			} finally {
 				entry.state = "closed";
 				this.entries.delete(handle);
-				if (entry.sessionPath) this.reservations.delete(entry.sessionPath);
+				if (entry.reservationKey) this.reservations.delete(entry.reservationKey);
 			}
 		})();
 		return entry.lifecycleMutex;
@@ -231,14 +236,37 @@ export class RpcSessionRegistry {
 		name?: string;
 		status: RpcSessionState;
 	}> {
+		this.syncRuntimeMetadata();
 		return [...this.entries].map(([sessionId, entry]) => ({
 			sessionId,
 			durableSessionId: entry.durableSessionId,
 			sessionPath: entry.sessionPath,
-			cwd: entry.profile.cwd,
+			cwd: entry.cwd,
 			name: entry.runtime?.session.sessionManager.getSessionName(),
 			status: entry.state,
 		}));
+	}
+
+	/** Reconcile path and durable identity after runtime replacement. */
+	private syncRuntimeMetadata(): void {
+		for (const entry of this.entries.values()) {
+			const manager = entry.runtime?.session.sessionManager;
+			if (!manager) continue;
+			const currentPath = manager.getSessionFile();
+			// Preserve the originally canonicalized key while the runtime still points at
+			// the same path. SessionManager may expose a symlink-resolved spelling after
+			// opening a file that did not exist yet; treating that as replacement would
+			// break ordinary attach-on-open aliases.
+			if (currentPath !== entry.sessionPath) {
+				const currentKey = currentPath ? canonicalPath(currentPath) : undefined;
+				if (entry.reservationKey) this.reservations.delete(entry.reservationKey);
+				if (currentKey) this.reservations.add(currentKey);
+				entry.reservationKey = currentKey;
+				entry.sessionPath = currentPath;
+			}
+			entry.durableSessionId = manager.getSessionId();
+			entry.cwd = manager.getCwd();
+		}
 	}
 
 	private validateProfile(profile: RpcSessionLaunchProfile): void {
