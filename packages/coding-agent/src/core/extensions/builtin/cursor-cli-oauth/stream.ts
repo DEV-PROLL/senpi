@@ -223,6 +223,11 @@ function ensureOpen(mapper: StreamMapper, kind: OpenBlockKind): void {
 	openBlock(mapper, kind);
 }
 
+function resetTextSegment(mapper: StreamMapper): void {
+	closeOpen(mapper);
+	mapper.textAccumulated = "";
+}
+
 function pushTextDelta(mapper: StreamMapper, delta: string): void {
 	const block = mapper.output.content[mapper.openIndex];
 	mapper.openText += delta;
@@ -624,9 +629,10 @@ export function streamCursorCliOauth(
 						for (const block of event.message.content) appendAssistantFragment(mapper, block.text);
 						break;
 					case "tool_call":
-						// Cursor already executed this tool inside its subprocess. Do not
-						// expose provider protocol frames as assistant text or map them to
-						// host tool calls that Senpi could execute a second time.
+						// Preserve the text-segment boundary and cumulative snapshot reset,
+						// but do not expose provider protocol frames as assistant text or map
+						// them to host tool calls that Senpi could execute a second time.
+						resetTextSegment(mapper);
 						break;
 					case "result":
 						if (event.subtype === "success" && !event.is_error) {

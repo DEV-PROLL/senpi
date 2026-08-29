@@ -1,5 +1,10 @@
 # Local fork changes
 
+## Cursor CLI OAuth tool-frame suppression boundary (2026-08-29)
+
+- Suppress Cursor CLI tool protocol frames without creating assistant text, while still closing the preceding text segment and resetting cumulative-snapshot tracking so post-tool prose is not lost.
+
+
 ## Credential rotation and fallback parity fixes (2026-08-28)
 
 - Preserve dotted bare model IDs in fallback tombstone matching, admit policy-only credential slots, avoid consuming half-open leases during runtime preflight, and isolate service-created credential pool state under the requested agent directory.

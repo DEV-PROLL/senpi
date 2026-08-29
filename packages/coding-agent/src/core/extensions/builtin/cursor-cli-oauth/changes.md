@@ -4,8 +4,8 @@
 
 ### What changed
 
-- `stream.ts`: Cursor `tool_call` events are no longer serialized into `<cursor-cli-tool>` assistant text. They also remain intentionally unmapped to host `toolCall` blocks because Cursor already executed them in its subprocess.
-- `stream.test.ts`: the tool-turn regression now proves that text deltas and stored assistant content contain only the model's final prose, with no provider tags, tool kind, arguments, or output.
+- `stream.ts`: Cursor `tool_call` events are no longer serialized into `<cursor-cli-tool>` assistant text. They also remain intentionally unmapped to host `toolCall` blocks because Cursor already executed them in its subprocess. The suppressed events still close the preceding text segment and reset cumulative-snapshot tracking without creating an empty stored block, so post-tool prose is preserved.
+- `stream.test.ts`: the tool-turn regression now proves that text deltas and stored assistant content contain only the model's prose before and after both started/completed tool frames, including a post-tool cumulative fragment sharing the pre-tool prefix.
 
 ### Why
 
