@@ -44,7 +44,16 @@ import { getEditorTheme, initTheme } from "../src/modes/interactive/theme/theme.
 import { processImage } from "../src/utils/image-process.ts";
 
 /** The widened submission-channel payload: text plus images resolved from markers. */
-type UserSubmission = { text: string; images?: ImageContent[] };
+type UserSubmission = { text: string; images?: ImageContent[]; pendingEchoId: string };
+
+function createEchoControllerStub() {
+	let nextId = 0;
+	return {
+		begin: vi.fn(() => `pending-test-${++nextId}`),
+		promptOptions: vi.fn(() => ({ preflightResult: vi.fn(), promptDisposition: vi.fn() })),
+		reject: vi.fn(),
+	};
+}
 
 type MockFn = ReturnType<typeof vi.fn>;
 
@@ -74,6 +83,7 @@ interface ModeContext {
 	editor: FakeEditor;
 	session: FakeSession;
 	pendingImages: Map<number, ImageContent>;
+	optimisticUserEchoes: ReturnType<typeof createEchoControllerStub>;
 	compactionQueuedMessages: { text: string; mode: string; enqueueOrder: number }[];
 	pendingUserInputs: UserSubmission[];
 	onInputCallback?: (input: UserSubmission) => void;
@@ -83,6 +93,7 @@ interface ModeContext {
 	getSessionLogger: () => ModeContext["sessionLogger"];
 	ui: { requestRender: () => void };
 	showStatus: MockFn;
+	clearStatusIndicator: MockFn;
 	showError: (message: string) => void;
 	showWarning: (message: string) => void;
 	hideShortcutOverlay: () => void;
@@ -113,6 +124,7 @@ interface ModeContext {
 	queueCompactionSubmission?: (text: string, mode: "steer" | "followUp") => void;
 	queueCompactionMessage?: (text: string, mode: "steer" | "followUp", droppedImageCount?: number) => void;
 	getUserInput?: () => Promise<UserSubmission>;
+	buildMainLoopPromptOptions?: (userInput: UserSubmission) => unknown;
 	isExtensionCommand?: (text: string) => boolean;
 	getExpandedEditorText?: () => string;
 }
@@ -133,6 +145,7 @@ type ModePrototype = {
 		droppedImageCount?: number,
 	): void;
 	takeSubmissionImages(this: ModeContext, submittedText: string): ImageContent[];
+	buildMainLoopPromptOptions(this: ModeContext, userInput: UserSubmission): unknown;
 	isExtensionCommand(this: ModeContext, text: string): boolean;
 	getExpandedEditorText(this: ModeContext): string;
 };
@@ -180,6 +193,7 @@ function createModeContext(): ModeContext {
 			editor,
 			session,
 			pendingImages: new Map<number, ImageContent>(),
+			optimisticUserEchoes: createEchoControllerStub(),
 			compactionQueuedMessages: [],
 			pendingUserInputs: [] as UserSubmission[],
 			onInputCallback: undefined,
@@ -192,6 +206,7 @@ function createModeContext(): ModeContext {
 			getSessionLogger: () => sessionLogger,
 			ui: { requestRender: vi.fn() },
 			showStatus: vi.fn(),
+			clearStatusIndicator: vi.fn(),
 			showError: vi.fn(),
 			showWarning: vi.fn(),
 			hideShortcutOverlay: vi.fn(),
@@ -223,6 +238,7 @@ function createModeContext(): ModeContext {
 		"isExtensionCommand",
 		"getExpandedEditorText",
 		"getUserInput",
+		"buildMainLoopPromptOptions",
 	] as const) {
 		const real = proto[method] as unknown as ((this: ModeContext, ...args: never[]) => unknown) | undefined;
 		if (typeof real === "function") {
@@ -361,7 +377,13 @@ describe("InteractiveMode image submission - normal channel", () => {
 		expect(context.session.prompt).toHaveBeenCalledTimes(1);
 		const [promptText, promptOptions] = context.session.prompt.mock.calls[0] as [string, Record<string, unknown>];
 		expect(promptText).toBe("just text");
-		expect(promptOptions).toEqual({ streamingBehavior: "steer" });
+		expect(promptOptions).toEqual(
+			expect.objectContaining({
+				streamingBehavior: "steer",
+				preflightResult: expect.any(Function),
+				promptDisposition: expect.any(Function),
+			}),
+		);
 	});
 
 	it("resolves markers into the widened getUserInput payload and clears pendingImages", async () => {
@@ -376,6 +398,7 @@ describe("InteractiveMode image submission - normal channel", () => {
 		await expect(userInput).resolves.toEqual({
 			text: "look at [Image #1]",
 			images: [pending],
+			pendingEchoId: "pending-test-1",
 		});
 		expect(context.pendingImages.size).toBe(0);
 	});
@@ -383,11 +406,12 @@ describe("InteractiveMode image submission - normal channel", () => {
 	it("returns queued submissions (with images) from getUserInput before installing a callback", async () => {
 		const queued = image("cXVldWVk");
 		const context = createModeContext();
-		context.pendingUserInputs.push({ text: "queued [Image #1]", images: [queued] });
+		context.pendingUserInputs.push({ text: "queued [Image #1]", images: [queued], pendingEchoId: "pending-test-1" });
 
 		await expect(proto.getUserInput.call(context)).resolves.toEqual({
 			text: "queued [Image #1]",
 			images: [queued],
+			pendingEchoId: "pending-test-1",
 		});
 		expect(context.onInputCallback).toBeUndefined();
 	});
@@ -442,7 +466,7 @@ describe("InteractiveMode image submission - normal channel", () => {
 		const userInput = beginUserInput(context);
 		await submit(context, "all markers deleted");
 
-		await expect(userInput).resolves.toEqual({ text: "all markers deleted" });
+		await expect(userInput).resolves.toEqual({ text: "all markers deleted", pendingEchoId: "pending-test-1" });
 	});
 
 	it("passes plain text through with no images key", async () => {
@@ -452,7 +476,10 @@ describe("InteractiveMode image submission - normal channel", () => {
 		const userInput = beginUserInput(context);
 		await submit(context, "hello without attachments");
 
-		await expect(userInput).resolves.toEqual({ text: "hello without attachments" });
+		await expect(userInput).resolves.toEqual({
+			text: "hello without attachments",
+			pendingEchoId: "pending-test-1",
+		});
 	});
 
 	it("lets a hand-typed [Image #1] with no pending entry pass through untouched", async () => {
@@ -462,7 +489,7 @@ describe("InteractiveMode image submission - normal channel", () => {
 		const userInput = beginUserInput(context);
 		await submit(context, "look at [Image #1]");
 
-		await expect(userInput).resolves.toEqual({ text: "look at [Image #1]" });
+		await expect(userInput).resolves.toEqual({ text: "look at [Image #1]", pendingEchoId: "pending-test-1" });
 	});
 
 	it("lets a hand-typed marker with no pending entry consume no slot before a real one", async () => {
@@ -481,6 +508,7 @@ describe("InteractiveMode image submission - normal channel", () => {
 		await expect(userInput).resolves.toEqual({
 			text: "typed [Image #2] by hand then pasted [Image #1]",
 			images: [pasted],
+			pendingEchoId: "pending-test-1",
 		});
 	});
 
@@ -562,6 +590,7 @@ describe("InteractiveMode image submission - Alt+Enter followUp", () => {
 		await expect(userInput).resolves.toEqual({
 			text: "describe [Image #1]",
 			images: [pending],
+			pendingEchoId: "pending-test-1",
 		});
 		expect(context.editor.setText).toHaveBeenCalledWith("");
 		expect(context.pendingImages.size).toBe(0);
@@ -582,7 +611,10 @@ describe("InteractiveMode image submission - Alt+Enter followUp", () => {
 
 		const userInput = beginUserInput(context);
 		await submit(context, "next ordinary message");
-		await expect(userInput).resolves.toEqual({ text: "next ordinary message" });
+		await expect(userInput).resolves.toEqual({
+			text: "next ordinary message",
+			pendingEchoId: "pending-test-1",
+		});
 	});
 
 	it("leaves no stale images on the next ordinary submission after Alt+Enter on a bash command", async () => {
@@ -596,7 +628,10 @@ describe("InteractiveMode image submission - Alt+Enter followUp", () => {
 
 		const userInput = beginUserInput(context);
 		await submit(context, "next ordinary message");
-		await expect(userInput).resolves.toEqual({ text: "next ordinary message" });
+		await expect(userInput).resolves.toEqual({
+			text: "next ordinary message",
+			pendingEchoId: "pending-test-1",
+		});
 	});
 });
 

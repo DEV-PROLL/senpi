@@ -260,9 +260,11 @@ describe("model fallback builtin command", () => {
 			expected: "anthropic/claude-fable-5 -> anthropic/claude-opus-5:xhigh, anthropic/claude-opus-4-8:xhigh",
 		},
 		{
+			// Fable's own chain drops out with the model, but the shipped wildcard
+			// lane remains so a chainless model still has an escape route.
 			name: "Fable 5 is unavailable",
 			models: [opus5, opus48],
-			expected: "No fallback chains configured.",
+			expected: "* -> anthropic/claude-opus-5:xhigh, anthropic/claude-opus-4-8:xhigh",
 		},
 	])("shows the availability-filtered default chain when $name", async ({ models, expected }) => {
 		const dir = await mkdtemp(join(tmpdir(), "senpi-fallback-command-"));

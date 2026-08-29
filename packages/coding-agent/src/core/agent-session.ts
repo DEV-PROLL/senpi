@@ -31,7 +31,7 @@ import type {
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { prepareAgentToolCall } from "@earendil-works/pi-agent-core";
+import { ProviderRetryWatchdogAbortError, prepareAgentToolCall } from "@earendil-works/pi-agent-core";
 import { contentText, SERVER_FALLBACK_ABORTED_DIAGNOSTIC, type ThinkingSelection } from "@earendil-works/pi-ai";
 import type {
 	Api,
@@ -51,6 +51,7 @@ import {
 	isClassifierRefusal,
 	isContextOverflow,
 	isCursorPayloadResourceExhausted,
+	isCursorQuotaResourceExhausted,
 	isCursorZeroTokenResourceExhausted,
 	isProviderStreamStallError,
 	isProviderTimeoutError,
@@ -63,14 +64,19 @@ import {
 	streamSimple,
 } from "@earendil-works/pi-ai/compat";
 import { extract429RetryAfterMs, parseRetryAfterMsMarker } from "@earendil-works/pi-ai/utils/retry-hint";
+import { retryBackoffDelayMs } from "@earendil-works/pi-ai/utils/retry-profile/backoff";
 import { getAgentDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import { normalizeToolResultImages } from "../utils/tool-result-images.ts";
-import { AgentAbortProvenance } from "./agent-abort-provenance.ts";
-import { AgentSettledDelivery, type DeferredAgentSettledAction } from "./agent-settled-delivery.ts";
+import { AgentAbortProvenance, type AgentAbortSource } from "./agent-abort-provenance.ts";
+import {
+	AgentSettledDelivery,
+	type DeferredAgentSettledAction,
+	type DeferredTurnClaim,
+} from "./agent-settled-delivery.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { envValue } from "./brand.ts";
@@ -180,7 +186,7 @@ import { getSupportedThinkingLevels, supportsMax, supportsXhigh } from "./thinki
 import { resetTimings, time } from "./timings.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { composeFilesystemPolicies } from "./tools/filesystem-policy.ts";
-import { createAllToolDefinitions } from "./tools/index.ts";
+import { createAllToolDefinitions, temporarilyDisabledToolNames } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
@@ -368,6 +374,7 @@ export type AgentSessionEvent =
 	| Exclude<AgentEvent, { type: "agent_end" }>
 	| AgentSessionAgentEndEvent
 	| { type: "agent_settled" }
+	| { type: "agent_idle" }
 	| { type: "session_abort" }
 	| { type: "continuation_error"; errorMessage: string }
 	| {
@@ -386,6 +393,7 @@ export type AgentSessionEvent =
 			type: "queue_update";
 			steering: readonly string[];
 			followUp: readonly string[];
+			ordered: readonly { text: string; mode: "steer" | "followUp"; enqueueOrder: number }[];
 	  }
 	| { type: "compaction_start"; reason: CompactionReason; requestId?: string }
 	| {
@@ -516,6 +524,8 @@ export interface AgentSessionConfig {
 	agentDir?: string;
 	/** Clock override for fallback selector cooldowns (tests only). */
 	fallbackNow?: () => number;
+	/** Random source for retry jitter (tests only). */
+	retryRandom?: () => number;
 	/** Global model narrowing for selectors and startup model choice (from --models / enabledModels) */
 	scopedModels?: Array<{
 		model: Model<any>;
@@ -810,32 +820,57 @@ const THINKING_LEVELS_WITH_MAX: ThinkingLevel[] = ["off", "minimal", "low", "med
 /** Caps explicit skill expansion so one prompt cannot consume unbounded context. */
 export const MAX_SKILL_EXPANSIONS_PER_PROMPT = 5;
 
-/** Cursor ingest rejects large verbatim tool payloads; cap each toolResult text part. */
+/** Cursor ingest rejects large verbatim tool payloads. The bound is UTF-8 bytes. */
 export const CURSOR_TOOL_RESULT_MAX_CHARS = 2000;
+export const CURSOR_TOOL_RESULT_MAX_BYTES = 50_000;
+const CURSOR_TRUNCATION_MARKER = "\n...[truncated]";
 
 export function truncateToolResultBodies(
 	messages: AgentMessage[] | undefined,
 	maxChars = CURSOR_TOOL_RESULT_MAX_CHARS,
+	maxBytes = CURSOR_TOOL_RESULT_MAX_BYTES,
 ): { messages: AgentMessage[] | undefined; changed: boolean } {
-	if (!Array.isArray(messages) || messages.length === 0) {
-		return { messages, changed: false };
-	}
+	if (!Array.isArray(messages) || messages.length === 0) return { messages, changed: false };
+	const encoder = new TextEncoder();
+	const byteLength = (text: string): number => encoder.encode(text).byteLength;
+	const markerChars = [...CURSOR_TRUNCATION_MARKER].length;
+	let usedBytes = 0;
 	let changed = false;
-	const next = messages.map((msg) => {
-		if (msg.role !== "toolResult" || !Array.isArray(msg.content)) return msg;
-		let local = false;
-		const content = msg.content.map((part) => {
-			if (part.type === "text" && typeof part.text === "string" && part.text.length > maxChars) {
-				local = true;
-				return { ...part, text: `${part.text.slice(0, maxChars)}\n...[truncated]` };
+
+	for (const message of messages) {
+		if (message.role !== "toolResult" || !Array.isArray(message.content)) continue;
+		for (const part of message.content) {
+			if (part.type !== "text" || typeof part.text !== "string") continue;
+			const text = part.text;
+			const codePoints = [...text];
+			const alreadyWithinPartLimit = codePoints.length <= maxChars;
+			const fullBytes = byteLength(text);
+			if (alreadyWithinPartLimit && usedBytes + fullBytes <= maxBytes) {
+				usedBytes += fullBytes;
+				continue;
 			}
-			return part;
-		});
-		if (!local) return msg;
-		changed = true;
-		return { ...msg, content };
-	});
-	return { messages: changed ? next : messages, changed };
+
+			const remainingBytes = Math.max(0, maxBytes - usedBytes);
+			const markerBytes = byteLength(CURSOR_TRUNCATION_MARKER);
+			if (remainingBytes < markerBytes) {
+				part.text = "";
+				changed = true;
+				continue;
+			}
+			const contentLimit = Math.max(0, maxChars - markerChars);
+			const availableBytes = remainingBytes - markerBytes;
+			let kept = "";
+			for (const codePoint of codePoints.slice(0, contentLimit)) {
+				if (byteLength(kept + codePoint) > availableBytes) break;
+				kept += codePoint;
+			}
+			const nextText = kept + CURSOR_TRUNCATION_MARKER;
+			part.text = nextText;
+			usedBytes += byteLength(nextText);
+			changed = true;
+		}
+	}
+	return { messages, changed };
 }
 
 // ============================================================================
@@ -868,6 +903,7 @@ export class AgentSession {
 	private _nextInputId = 0;
 	private _idleWaitPromise: Promise<void> | undefined;
 	private _resolveIdleWait: (() => void) | undefined;
+	private _settlementEpoch = 0;
 
 	/** Tracks pending steering messages for UI display. Removed when delivered. */
 	private _steeringMessages: string[] = [];
@@ -883,6 +919,7 @@ export class AgentSession {
 	private readonly _supersededCompactionLogAttemptIds = new Set<string>();
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	private _pendingNextTurnMessages: CustomMessage[] = [];
+	private _pendingCustomMessages: CustomMessage[] = [];
 	// Queues held while the first post-compaction response is classified. Agent
 	// core otherwise drains steering immediately before AgentSession can consume
 	// the stale-usage exemption and schedule the continuation itself.
@@ -906,6 +943,7 @@ export class AgentSession {
 	// response must not retrigger threshold compaction from stale provider usage.
 	private _skipNextPostRetryCompactionCheck = false;
 	private _blockedPostCompactionAssistant: { assistant: AssistantMessage; revision: number } | undefined;
+	private _delegatedCompactionKey: { provider: string; id: string } | undefined;
 	private _skipNextPostCompactionAssistantCheck = false;
 	private _scheduledContinuationRecompacted = false;
 	private readonly _assistantsPendingAtCompaction = new WeakSet<AssistantMessage>();
@@ -922,6 +960,18 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
+
+	/**
+	 * Resolve the effective retry profile for the current model's provider.
+	 * Falls back to the senpi-default profile when the provider declares none.
+	 */
+	private _resolveRetryProfile() {
+		const providerId = this.model?.provider;
+		const declared = providerId !== undefined ? this._modelRuntime.getProvider(providerId)?.retryPolicy : undefined;
+		return this.settingsManager.resolveRetryProfile(
+			providerId !== undefined ? { id: providerId, retryPolicy: declared } : undefined,
+		);
+	}
 	private _probePhase: ProbePhase = "idle";
 	private _hintDeadlineMs: number | undefined = undefined;
 	private _cumulativeHintedWaitMs = 0;
@@ -972,6 +1022,7 @@ export class AgentSession {
 	private readonly _selectorCooldowns: SelectorCooldowns;
 	private readonly _probeBackScheduler: ProbeBackScheduler;
 	private readonly _fallbackNow: () => number;
+	private readonly _retryRandom: () => number;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -1036,6 +1087,7 @@ export class AgentSession {
 		}
 		this._selectorCooldowns = new SelectorCooldowns(config.fallbackNow ?? (() => Date.now()));
 		this._fallbackNow = config.fallbackNow ?? (() => Date.now());
+		this._retryRandom = config.retryRandom ?? Math.random;
 		this._retryFallback = new RetryFallbackController({
 			getSettings: () => this.settingsManager.getRetryFallbackSettings(),
 			registry: this._modelRegistry,
@@ -1311,6 +1363,18 @@ export class AgentSession {
 			(this.agent.prepareNextTurn
 				? async (_turn: PrepareNextTurnContext, signal?: AbortSignal) => await this.agent.prepareNextTurn?.(signal)
 				: undefined);
+		const previousTransformContext = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			if (this.model?.provider === "cursor" || this.model?.provider === "cursor-cli-oauth") {
+				truncateToolResultBodies(messages);
+			}
+			const transformed = previousTransformContext ? await previousTransformContext(messages, signal) : messages;
+			if (this.model?.provider === "cursor" || this.model?.provider === "cursor-cli-oauth") {
+				truncateToolResultBodies(transformed);
+			}
+			return transformed;
+		};
+
 		this.agent.prepareNextTurnWithContext = async (turn, signal) => {
 			// Enforce compaction only when this prepare precedes an actual provider
 			// admission: a tool continuation or queued steer/follow-up messages. A
@@ -1322,9 +1386,7 @@ export class AgentSession {
 				// mutates rootPrompt mid-run and poisons conversationId (#984).
 				// Still truncate verbatim toolResult bodies so the skip cannot send MB-scale payloads (#1043).
 				if (provider === "cursor" || provider === "cursor-cli-oauth") {
-					const truncated = this._truncateCursorToolResultBodies();
-					if (truncated && this.agent) this.agent.allowConversationRotate = true;
-					return truncated;
+					return this._truncateCursorToolResultBodies();
 				}
 				if (turn.toolResults.length === 0 && !this.agent.hasQueuedMessages()) {
 					return false;
@@ -1531,6 +1593,7 @@ export class AgentSession {
 			type: "queue_update",
 			steering: [...this._steeringMessages],
 			followUp: [...this._followUpMessages],
+			ordered: [...this._queuedInputOrder].sort((a, b) => a.enqueueOrder - b.enqueueOrder),
 		});
 	}
 
@@ -1578,6 +1641,7 @@ export class AgentSession {
 	private _invalidateCompactionForModelSelection(): void {
 		this.abortCompaction();
 		this.abortBranchSummary();
+		this._delegatedCompactionKey = undefined;
 		this._incrementMessageRevision();
 	}
 
@@ -1611,21 +1675,46 @@ export class AgentSession {
 		}
 		this._isAgentRunActive = false;
 		let deferredActions: DeferredAgentSettledAction[] = [];
+		let deferredTurnClaims: DeferredTurnClaim[] = [];
 		this._agentSettledDelivery.begin(this._userAbortGeneration);
+		const settlementEpoch = ++this._settlementEpoch;
 		try {
 			await this._extensionRunner.emit({ type: "agent_settled" });
 			this._emit({ type: "agent_settled" });
 			if (this._abortProvenance.takeLateUserJoin()) await this._emitSessionAbort();
-			deferredActions = this._agentSettledDelivery.finish(this._userAbortGeneration);
+			({ actions: deferredActions, turnClaims: deferredTurnClaims } = this._agentSettledDelivery.finish(
+				this._userAbortGeneration,
+			));
 		} finally {
 			this._agentSettledDelivery.cancel();
 			this._abortProvenance.closeAgentEndBoundary();
 			this._resolveIdleWaitIfIdle();
 		}
 		for (const action of deferredActions) action();
+		queueMicrotask(() => {
+			void this._emitAgentIdleAfterDeferredTurns(settlementEpoch, deferredTurnClaims);
+		});
 	}
 
-	private async _promptAgent(messages: AgentMessage | AgentMessage[]): Promise<void> {
+	private async _emitAgentIdleAfterDeferredTurns(
+		settlementEpoch: number,
+		deferredTurnClaims: DeferredTurnClaim[],
+	): Promise<void> {
+		const dispositions = await Promise.all(deferredTurnClaims.map((claim) => claim.disposition));
+		if (dispositions.includes("started")) return;
+		if (dispositions.includes("delegated") || this._sessionWorkBarrier.hasActiveWork) {
+			await this._waitForSettledSessionWork();
+		}
+		if (settlementEpoch !== this._settlementEpoch) return;
+		if (this._isAgentRunActive || this._sessionWorkBarrier.hasActiveWork) return;
+		this._emit({ type: "agent_idle" });
+	}
+
+	private async _promptAgent(
+		messages: AgentMessage | AgentMessage[],
+		deferredTurnClaim?: DeferredTurnClaim,
+	): Promise<void> {
+		deferredTurnClaim?.resolve("started");
 		this._isAgentRunActive = true;
 		this._requiredCompactionAdmissionError = undefined;
 		this.agent.abortServerSideFallback =
@@ -1746,7 +1835,8 @@ export class AgentSession {
 			!lastAssistant ||
 			(!this._isRetryableError(lastAssistant) &&
 				!this._isHardErrorFallbackEligible(lastAssistant) &&
-				!isCursorZeroTokenResourceExhausted(lastAssistant))
+				!isCursorZeroTokenResourceExhausted(lastAssistant) &&
+				!isCursorQuotaResourceExhausted(lastAssistant, this.model?.contextWindow ?? 0))
 		) {
 			return;
 		}
@@ -1943,10 +2033,17 @@ export class AgentSession {
 		if (!settings.enabled) {
 			return false;
 		}
+		// The same-model budget comes from the resolved profile so a provider-declared
+		// budget (e.g. kimi-code's 9) is honoured; identical to settings.maxRetries for
+		// providers without a profile.
+		const turnMaxRetries = this._resolveRetryProfile().turn.maxRetries;
 
 		const retryableError = this._isRetryableError(lastAssistant);
 		if (isCursorZeroTokenResourceExhausted(lastAssistant)) {
 			return true;
+		}
+		if (isCursorQuotaResourceExhausted(lastAssistant, this.model?.contextWindow ?? 0)) {
+			return this._retryFallback.canTryFallback();
 		}
 		if (!retryableError && this._isHardErrorFallbackEligible(lastAssistant)) {
 			return true;
@@ -1957,10 +2054,10 @@ export class AgentSession {
 		}
 
 		if (isClassifierRefusal(lastAssistant)) {
-			return this._retryAttempt + 1 <= settings.maxRetries && this._retryFallback.canTryFallback();
+			return this._retryAttempt + 1 <= turnMaxRetries && this._retryFallback.canTryFallback();
 		}
 
-		if (this._retryAttempt + 1 > settings.maxRetries) {
+		if (this._retryAttempt + 1 > turnMaxRetries) {
 			return this._retryFallback.canTryFallback();
 		}
 
@@ -2117,10 +2214,11 @@ export class AgentSession {
 			const retryableError = this._isRetryableError(msg);
 			const hardErrorFallbackEligible = this._isHardErrorFallbackEligible(msg);
 			const cursorZeroTokenRe = isCursorZeroTokenResourceExhausted(msg);
+			const cursorQuotaRe = isCursorQuotaResourceExhausted(msg, this.model?.contextWindow ?? 0);
 			const retryCanAdmitProvider =
 				!userAbortSuppressedQueuedContinuation &&
 				this.settingsManager.getRetrySettings().enabled &&
-				(retryableError || hardErrorFallbackEligible || cursorZeroTokenRe);
+				(retryableError || hardErrorFallbackEligible || cursorZeroTokenRe || cursorQuotaRe);
 			let compactedBeforeRetry = false;
 			if (
 				retryCanAdmitProvider &&
@@ -2129,7 +2227,8 @@ export class AgentSession {
 			) {
 				this._retireFailedRetryAssistant(msg);
 				compactedBeforeRetry = await this._runPrePromptCompaction(msg, true, requiredAutoCompaction, true);
-				retryContinuationBlocked = !compactedBeforeRetry && !this._isCompactionDelegated();
+				retryContinuationBlocked =
+					!compactedBeforeRetry && !this._isCompactionDelegated() && !cursorQuotaRe && !hardErrorFallbackEligible;
 			}
 
 			let retryOutcome: "continued" | "blocked" | "not-handled" | "cancelled" = "not-handled";
@@ -2138,6 +2237,11 @@ export class AgentSession {
 			if (!retryContinuationBlocked && !userAbortSuppressedQueuedContinuation) {
 				if (cursorZeroTokenRe) {
 					retryOutcome = await this._handleRetryableError(msg, { sameModelRemint: true });
+				} else if (cursorQuotaRe) {
+					// Mid-turn Cursor errors may retain unpaired tool calls. Remove the
+					// failed assistant before provider fallback so replay stays valid.
+					this._retireFailedRetryAssistant(msg);
+					retryOutcome = await this._handleRetryableError(msg, { hardErrorFallback: true });
 				} else if (retryableError) {
 					retryOutcome = await this._handleRetryableError(msg);
 				} else if (hardErrorFallbackEligible) {
@@ -2161,6 +2265,9 @@ export class AgentSession {
 				retryOutcome === "not-handled" &&
 				(msg.stopReason === "error" || msg.stopReason === "aborted");
 
+			if (retryOutcome === "not-handled" && cursorQuotaRe && msg.errorMessage) {
+				msg.errorMessage = `${msg.errorMessage} (likely provider usage/quota exhaustion: conversation is well below the model context window)`;
+			}
 			if (retryOutcome === "not-handled" && this._retryAttempt > 0 && msg.errorMessage) {
 				const attempt = this._retryAttempt;
 				this._retryAttempt = 0;
@@ -2428,6 +2535,7 @@ export class AgentSession {
 			};
 			await this._extensionRunner.emit(extensionEvent);
 			this._turnIndex++;
+			this._flushPendingCustomMessages();
 		} else if (event.type === "message_start") {
 			const extensionEvent: MessageStartEvent = {
 				type: "message_start",
@@ -2680,6 +2788,11 @@ export class AgentSession {
 	/** Current retry attempt (0 if not retrying) */
 	get retryAttempt(): number {
 		return this._retryAttempt;
+	}
+
+	/** Abort owner for the current turn boundary, used by internal renderers. */
+	get currentAbortSource(): AgentAbortSource | undefined {
+		return this._abortProvenance.currentSource;
 	}
 
 	/**
@@ -3825,6 +3938,7 @@ export class AgentSession {
 			triggerTurn?: boolean;
 			deliverAs?: "steer" | "followUp" | "nextTurn";
 		},
+		deferredTurnClaim?: DeferredTurnClaim,
 	): Promise<void> {
 		const userAbortGeneration = this._userAbortGeneration;
 		const appMessage = {
@@ -3859,6 +3973,7 @@ export class AgentSession {
 			if (options?.deliverAs === "nextTurn") {
 				this._pendingNextTurnMessages.push(appMessage);
 			} else if (this.isStreaming && options?.triggerTurn !== false) {
+				deferredTurnClaim?.resolve("delegated");
 				if (options?.deliverAs === "followUp") {
 					this.agent.followUp(appMessage);
 				} else {
@@ -3871,6 +3986,7 @@ export class AgentSession {
 						this._compactionLifecycle.state.generation === activeCompactionGeneration &&
 						this._compactionLifecycle.state.status !== "completed"))
 			) {
+				deferredTurnClaim?.resolve("delegated");
 				if (options?.deliverAs === "followUp") {
 					this.agent.followUp(appMessage);
 				} else {
@@ -3892,22 +4008,35 @@ export class AgentSession {
 					}
 					throw error;
 				}
-				await this._promptAgent(appMessage);
+				await this._promptAgent(appMessage, deferredTurnClaim);
+			} else if (this.isStreaming) {
+				this._pendingCustomMessages.push(appMessage);
 			} else {
-				this.agent.state.messages.push(appMessage);
-				this.sessionManager.appendCustomMessageEntry(
-					message.customType,
-					message.content,
-					message.display,
-					message.details,
-				);
-				this._incrementMessageRevision();
-				this._emit({ type: "message_start", message: appMessage });
-				this._emit({ type: "message_end", message: appMessage });
+				this._appendCustomMessage(appMessage);
 			}
 		} finally {
+			deferredTurnClaim?.resolve("finished-without-start");
 			finishSessionWork?.();
 		}
+	}
+
+	private _appendCustomMessage(appMessage: CustomMessage): void {
+		this.agent.state.messages.push(appMessage);
+		this.sessionManager.appendCustomMessageEntry(
+			appMessage.customType,
+			appMessage.content,
+			appMessage.display,
+			appMessage.details,
+		);
+		this._incrementMessageRevision();
+		this._emit({ type: "message_start", message: appMessage });
+		this._emit({ type: "message_end", message: appMessage });
+	}
+
+	private _flushPendingCustomMessages(): void {
+		const pending = this._pendingCustomMessages;
+		this._pendingCustomMessages = [];
+		for (const message of pending) this._appendCustomMessage(message);
 	}
 
 	/**
@@ -3927,6 +4056,7 @@ export class AgentSession {
 			deliverAs?: "steer" | "followUp";
 			expandPromptTemplates?: boolean;
 		},
+		deferredTurnClaim?: DeferredTurnClaim,
 	): Promise<void> {
 		const bindingPromptReadiness = this._extensionBindingPromptReadiness;
 		let resolveBindingPromptReadiness: (() => void) | undefined;
@@ -3936,24 +4066,32 @@ export class AgentSession {
 			});
 			bindingPromptReadiness.add(readiness);
 		}
-		// Normalize content to text string + optional images
+		// Normalize content to text string + optional images. A throw here (null or a
+		// content array whose iterator/part getter throws) happens before the guarded
+		// try below, so resolve the deferred-turn claim first to keep agent_idle reachable.
 		let text: string;
 		let images: ImageContent[] | undefined;
 
-		if (typeof content === "string") {
-			text = content;
-		} else {
-			const textParts: string[] = [];
-			images = [];
-			for (const part of content) {
-				if (part.type === "text") {
-					textParts.push(part.text);
-				} else {
-					images.push(part);
+		try {
+			if (typeof content === "string") {
+				text = content;
+			} else {
+				const textParts: string[] = [];
+				images = [];
+				for (const part of content) {
+					if (part.type === "text") {
+						textParts.push(part.text);
+					} else {
+						images.push(part);
+					}
 				}
+				text = textParts.join("\n");
+				if (images.length === 0) images = undefined;
 			}
-			text = textParts.join("\n");
-			if (images.length === 0) images = undefined;
+		} catch (error) {
+			deferredTurnClaim?.resolve("finished-without-start");
+			resolveBindingPromptReadiness?.();
+			throw error;
 		}
 
 		// An extension binding invokes this method fire-and-forget. When it
@@ -3970,6 +4108,8 @@ export class AgentSession {
 				source: "extension",
 				promptDisposition: (nextDisposition) => {
 					disposition = nextDisposition;
+					if (nextDisposition === "started") deferredTurnClaim?.resolve("started");
+					else if (nextDisposition === "queued") deferredTurnClaim?.resolve("delegated");
 					resolveBindingPromptReadiness?.();
 				},
 				onSessionWorkReady: waitForExistingSessionWork
@@ -3991,6 +4131,9 @@ export class AgentSession {
 			}
 			throw error;
 		} finally {
+			// A path that neither started nor delegated a turn (handled, rejected,
+			// admission failure, cancellation) resolves as finished-without-start.
+			deferredTurnClaim?.resolve("finished-without-start");
 			resolveBindingPromptReadiness?.();
 			finishSessionWork?.();
 		}
@@ -4203,7 +4346,12 @@ export class AgentSession {
 		},
 	): Promise<SystemPromptChangeEvent | undefined> {
 		const previousModel = this.model;
-		if (opts.invalidateCompaction && this._modelSelectionChangesContext(previousModel, model)) {
+		if (
+			opts.invalidateCompaction &&
+			(this._modelSelectionChangesContext(previousModel, model) ||
+				previousModel?.provider !== model.provider ||
+				previousModel?.id !== model.id)
+		) {
 			this._invalidateCompactionForModelSelection();
 		}
 		const thinking = this._getThinkingForModelSwitch(model, opts.ephemeralThinkingLevel);
@@ -4289,7 +4437,10 @@ export class AgentSession {
 			nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		}
 		const next = favoriteModels[nextIndex];
-		const invalidatesCompaction = this._modelSelectionChangesContext(currentModel, next.model);
+		const invalidatesCompaction =
+			this._modelSelectionChangesContext(currentModel, next.model) ||
+			currentModel?.provider !== next.model.provider ||
+			currentModel?.id !== next.model.id;
 		if (invalidatesCompaction) {
 			this._invalidateCompactionForModelSelection();
 		}
@@ -4744,6 +4895,41 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
+		const model = this.model;
+		if (!model) throw new Error(formatNoModelSelectedMessage());
+		const pathEntries = this.sessionManager.getBranch();
+		const settings = cursorOverflowCompactionSettings(
+			this.settingsManager.getCompactionSettings(),
+			model.provider,
+			"manual",
+		);
+		if (!prepareCompaction(pathEntries, settings)) {
+			const requestId = randomUUID();
+			const lastEntry = pathEntries[pathEntries.length - 1];
+			const error = new Error(
+				lastEntry?.type === "compaction" ? "Already compacted" : "Nothing to compact (session too small)",
+			);
+			const errorMessage = `Compaction failed: ${error.message}`;
+			this._emit({ type: "compaction_start", reason: "manual", requestId });
+			this._emit({
+				type: "compaction_end",
+				reason: "manual",
+				result: undefined,
+				aborted: false,
+				willRetry: false,
+				requestId,
+				errorMessage,
+			});
+			await this._emitSessionCompactFailed({
+				reason: "manual",
+				errorMessage,
+				aborted: false,
+				willRetry: false,
+				fromExtension: false,
+			});
+			throw error;
+		}
+
 		const admission = this._claimPendingCompactionAdmission();
 		const controller = admission.controller;
 		const requestId = randomUUID();
@@ -5143,7 +5329,7 @@ export class AgentSession {
 				}
 			}
 			this.agent.state.messages = [...sessionContext.messages, ...preservedPendingMessages];
-			this._reapplyCursorToolTruncateAfterReload();
+			this._truncateCursorToolResultBodies();
 			compactionResult.estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
 			this._incrementMessageRevision();
 			if (
@@ -5155,6 +5341,7 @@ export class AgentSession {
 			) {
 				throw new CompactionCancelledError();
 			}
+			this._delegatedCompactionKey = undefined;
 			if (request.owner === "compaction" && this._compactionAbortController === request.controller) {
 				this._compactionAbortController = undefined;
 			}
@@ -5232,6 +5419,11 @@ export class AgentSession {
 			[...pathEntries, simulatedCompactionEntry],
 			simulatedCompactionEntry.id,
 		).messages;
+		// Size the same retained context that will be admitted to Cursor. Persisted JSONL
+		// remains verbatim, but the in-memory request representation is bounded first.
+		if (model.provider === "cursor" || model.provider === "cursor-cli-oauth") {
+			truncateToolResultBodies(simulatedMessages);
+		}
 		const contextTokens = estimateMessagesTokens(filterContextExcludedMessages(simulatedMessages));
 		const settings = this.settingsManager.getCompactionSettings();
 		return contextTokens > model.contextWindow - settings.reserveTokens;
@@ -5254,7 +5446,7 @@ export class AgentSession {
 			pendingMessages.push(message);
 		}
 		this.agent.state.messages = [...sessionMessages, ...pendingMessages];
-		this._reapplyCursorToolTruncateAfterReload();
+		this._truncateCursorToolResultBodies();
 	}
 
 	private async _rejectCompaction(
@@ -5271,6 +5463,9 @@ export class AgentSession {
 		// also emitted with accepted:false so the compaction extension's circuit-breaker
 		// bookkeeping stops being dead code; other builtin session_compact handlers guard
 		// on event.accepted.
+		if (rejectionCause === "external-owner" && this.model) {
+			this._delegatedCompactionKey = { provider: this.model.provider, id: this.model.id };
+		}
 		const trimmedExtensionReason = extensionReason?.trim();
 		const detailedMessage = trimmedExtensionReason
 			? `Compaction rejected: ${trimmedExtensionReason}`
@@ -5601,9 +5796,7 @@ export class AgentSession {
 			} else {
 				const messages = filterContextExcludedMessages(this.agent.state.messages);
 				const estimate = estimateContextTokens(messages);
-				if (estimate.lastUsageIndex === null) {
-					if (!this._isRequiredCompactionError(assistantMessage)) return false;
-				} else {
+				if (estimate.lastUsageIndex !== null) {
 					// Verify the usage source is post-compaction. Kept pre-compaction messages
 					// have stale usage reflecting the old (larger) context and would falsely
 					// trigger compaction right after one just finished.
@@ -5664,14 +5857,12 @@ export class AgentSession {
 	}
 
 	private _isCompactionDelegated(): boolean {
-		const state = this._compactionLifecycle.state;
 		const model = this.model;
 		return (
-			state.status === "failed" &&
-			state.rejectionCause === "external-owner" &&
-			state.model !== undefined &&
+			this._delegatedCompactionKey !== undefined &&
 			model !== undefined &&
-			state.model.provider === model.provider
+			this._delegatedCompactionKey.provider === model.provider &&
+			this._delegatedCompactionKey.id === model.id
 		);
 	}
 
@@ -5682,6 +5873,7 @@ export class AgentSession {
 		willRetry = false,
 		allowSummaryOnly = false,
 	): Promise<boolean> {
+		if (this._isCompactionDelegated()) return false;
 		const controller = new AbortController();
 		const requestId = randomUUID();
 		this._claimCompactionController(controller, "compaction");
@@ -5785,7 +5977,15 @@ export class AgentSession {
 					}
 				},
 				getActiveSignal: () => this.agent.signal,
-				abortActive: () => this.agent.abort(),
+				abortActive: () =>
+					this.agent.abort(
+						new ProviderRetryWatchdogAbortError(
+							`Provider retry continuation watchdog timed out after ${retryTimeoutMs}ms` +
+								(this.agent.streamStartTimeoutMs === undefined
+									? " (stream-start guard disabled)"
+									: ` (stream-start guard: ${this.agent.streamStartTimeoutMs}ms)`),
+						),
+					),
 				timeoutMs: retryTimeoutMs,
 			});
 			return "continued";
@@ -5863,6 +6063,7 @@ export class AgentSession {
 	 * @returns Whether the post-run loop should call `agent.continue()`
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
+		if (this._isCompactionDelegated()) return false;
 		const finishCompactionWork = this._sessionWorkBarrier.begin();
 		const agentMessagesAtStart = this.agent.state.messages.slice();
 		const autoCompactionController = new AbortController();
@@ -6123,6 +6324,7 @@ export class AgentSession {
 	}
 
 	private _refreshCurrentModelFromRegistry(): void {
+		this._delegatedCompactionKey = undefined;
 		const currentModel = this.model;
 		if (!currentModel) {
 			return;
@@ -6165,25 +6367,44 @@ export class AgentSession {
 		runner.bindCore(
 			{
 				sendMessage: (message, options) => {
-					const send = () =>
-						this.sendCustomMessage(message, options).catch((err) => {
-							runner.emitError({
-								extensionPath: RUNTIME_EXTENSION_PATH,
-								event: "send_message",
-								error: err instanceof Error ? err.message : String(err),
-							});
+					const reportError = (err: unknown) => {
+						runner.emitError({
+							extensionPath: RUNTIME_EXTENSION_PATH,
+							event: "send_message",
+							error: err instanceof Error ? err.message : String(err),
 						});
+					};
+					if (options?.triggerTurn === true) {
+						if (
+							this._agentSettledDelivery.deferTriggerTurn((claim) => {
+								this.sendCustomMessage(message, options, claim).catch(reportError);
+							})
+						) {
+							return;
+						}
+					}
+					const send = () => this.sendCustomMessage(message, options).catch(reportError);
 					if (this._agentSettledDelivery.defer(send)) return;
 					send();
 				},
 				sendUserMessage: (content, options) => {
-					this.sendUserMessage(content, options).catch((err) => {
+					const reportError = (err: unknown) => {
 						runner.emitError({
 							extensionPath: RUNTIME_EXTENSION_PATH,
 							event: "send_user_message",
 							error: err instanceof Error ? err.message : String(err),
 						});
-					});
+					};
+					// sendUserMessage always triggers a turn; register a settlement-deferred
+					// turn claim so agent_idle is not emitted before its deferred agent_start.
+					if (
+						this._agentSettledDelivery.deferTriggerTurn((claim) => {
+							this.sendUserMessage(content, options, claim).catch(reportError);
+						})
+					) {
+						return;
+					}
+					this.sendUserMessage(content, options).catch(reportError);
 				},
 				appendEntry: (customType, data) => {
 					const entryId = this.sessionManager.appendCustomEntry(customType, data);
@@ -6449,9 +6670,12 @@ export class AgentSession {
 				}),
 			})),
 		].filter((tool) => isAllowedTool(tool.definition.name));
+		// Withheld tools stay in _baseToolDefinitions (and therefore in _toolRegistry, which
+		// getRegisteredTool serves to the Cursor exec bridge) but are dropped from the model-facing
+		// definitions so they never reach the prompt. See temporarilyDisabledToolNames.
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
-				.filter(([name]) => isAllowedTool(name))
+				.filter(([name]) => isAllowedTool(name) && !temporarilyDisabledToolNames.has(name))
 				.map(([name, definition]) => [
 					name,
 					{
@@ -6507,10 +6731,15 @@ export class AgentSession {
 			return entry !== undefined && normalizeToolExposure(entry.definition).exposure === "direct";
 		};
 
+		// A withheld tool is dropped from the DEFAULT selection only. An explicit activeToolNames
+		// request names the tool deliberately, and callers that do so (tests, SDK embedders,
+		// filesystem-policy wiring) still expect it to activate.
+		const hasExplicitActiveToolNames = options?.activeToolNames !== undefined;
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
 		).filter((name) => {
 			if (!isAllowedTool(name)) return false;
+			if (!hasExplicitActiveToolNames && temporarilyDisabledToolNames.has(name)) return false;
 			const previousRegistrationIds = options?.previousActiveToolRegistrationIds;
 			if (!previousRegistrationIds) return true;
 			const current = this._toolDefinitions.get(name);
@@ -6547,6 +6776,7 @@ export class AgentSession {
 		includeAllExtensionTools?: boolean;
 		previousActiveToolRegistrationIds?: ReadonlyMap<string, string>;
 	}): void {
+		this._delegatedCompactionKey = undefined;
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
 		const shellPath = this.settingsManager.getShellPath();
@@ -6628,6 +6858,7 @@ export class AgentSession {
 		});
 		time("shutdown", "reload");
 		await this.settingsManager.reload();
+		this._delegatedCompactionKey = undefined;
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
 		time("settings", "reload");
@@ -6753,15 +6984,9 @@ export class AgentSession {
 		return isCursorPayloadResourceExhausted(message, 0);
 	}
 
-	private _reapplyCursorToolTruncateAfterReload(): boolean {
+	private _truncateCursorToolResultBodies(maxChars = CURSOR_TOOL_RESULT_MAX_CHARS): boolean {
 		const provider = this.model?.provider;
 		if (provider !== "cursor" && provider !== "cursor-cli-oauth") return false;
-		const truncated = this._truncateCursorToolResultBodies();
-		if (this.agent) this.agent.allowConversationRotate = true;
-		return truncated;
-	}
-
-	private _truncateCursorToolResultBodies(maxChars = CURSOR_TOOL_RESULT_MAX_CHARS): boolean {
 		const { messages: next, changed } = truncateToolResultBodies(this.agent?.state?.messages, maxChars);
 		if (changed && next) this.agent.state.messages = next;
 		return changed;
@@ -6849,6 +7074,9 @@ export class AgentSession {
 		errorMessage: string,
 	): number | undefined {
 		const settings = this.settingsManager.getRetrySettings();
+		// Budget checks use the resolved profile (same value as settings.maxRetries
+		// for providers without a declared profile).
+		const turnMaxRetries = this._resolveRetryProfile().turn.maxRetries;
 		const hintSettings = this.settingsManager.getHintPolicySettings();
 		const finishTurn = (attempt: number, finalError: string | undefined) => {
 			const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
@@ -6885,7 +7113,7 @@ export class AgentSession {
 			return undefined;
 		}
 		this._retryAttempt++;
-		if (this._retryAttempt > settings.maxRetries) {
+		if (this._retryAttempt > turnMaxRetries) {
 			finishTurn(this._retryAttempt - 1, message.errorMessage);
 			return undefined;
 		}
@@ -6906,6 +7134,11 @@ export class AgentSession {
 			return "not-handled";
 		}
 
+		// Resolve the effective retry profile for the current provider.
+		// Profile-driven behaviour only diverges when a provider declares one;
+		// the senpi-default profile preserves today's tier routing exactly.
+		const retryProfile = this._resolveRetryProfile();
+
 		// Retry promise is created synchronously in _handleAgentEvent for agent_end.
 		// Keep a defensive fallback here in case a future refactor bypasses that path.
 		if (!this._retryPromise) {
@@ -6923,7 +7156,7 @@ export class AgentSession {
 		let hintTierDelayMs: number | undefined;
 		if (sameModelRemint) {
 			this._retryAttempt++;
-			if (this._retryAttempt > settings.maxRetries) {
+			if (this._retryAttempt > retryProfile.turn.maxRetries) {
 				if (this._retryAttempt > 1) {
 					this._emit({
 						type: "auto_retry_end",
@@ -6946,6 +7179,14 @@ export class AgentSession {
 				errorMessage,
 			});
 			if (!switchedFallback) {
+				const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+				if (exhaustedChainKey) {
+					this._emit({
+						type: "retry_fallback_exhausted",
+						chainKey: exhaustedChainKey,
+						lastError: errorMessage,
+					});
+				}
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -6954,7 +7195,7 @@ export class AgentSession {
 		} else if (isRefusal) {
 			// Refusals are only retried through a new chain candidate. They never use
 			// same-model retries or the transient over-budget fallback escape hatch.
-			if (this._retryAttempt + 1 > settings.maxRetries) {
+			if (this._retryAttempt + 1 > retryProfile.turn.maxRetries) {
 				if (this._retryAttempt > 0) {
 					this._emit({
 						type: "auto_retry_end",
@@ -6994,8 +7235,8 @@ export class AgentSession {
 			this._retryAttempt++;
 		} else {
 			// A provider-stream stall is an ordinary transient failure: it consumes
-			// the same bounded same-model budget (`settings.maxRetries`) as every
-			// other retryable class and escalates to the fallback chain only when
+			// the same bounded same-model budget (the resolved profile's turn
+			// maxRetries) as every other retryable class and escalates to the fallback chain only when
 			// that budget is exhausted. It is excluded from 429-class tier routing
 			// because a stall carries no rate-limit markers or retry-after hint.
 			const stallError = isProviderStreamStallError(message);
@@ -7008,7 +7249,42 @@ export class AgentSession {
 				/rate.?limit|(?:^429(?=\s+\{)|(?:\bHTTP\/1\.[01]\s+|\bHTTP\s+|\bstatus(?:\s+code)?\s+|\berror\s+|\bcode\s+)429\b)|too many requests|resource.?exhausted/i.test(
 					errorMessage,
 				);
-			if (is429Class) {
+			// Profile-driven routing: "after-turn-budget" (Kimi) keeps 429s on the
+			// ordinary same-model budget; "tiered" (senpi default) uses hint tiers.
+			if (is429Class && retryProfile.fallback.rateLimited === "after-turn-budget") {
+				// Kimi profile: 429s consume the same-model budget like any transient.
+				// Mark tier-routed so the generic non-429 path below does not double-count.
+				is429TierRouted = true;
+				this._retryAttempt++;
+				if (this._retryAttempt > retryProfile.turn.maxRetries) {
+					switchedFallback = await this._retryFallback.tryFallback("transient", {
+						errorMessage,
+						retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
+					});
+					if (switchedFallback) {
+						this._retryAttempt = 1;
+					} else {
+						const exhaustedChainKey = this._retryFallback.exhaustedChainKey;
+						if (exhaustedChainKey) {
+							this._emit({
+								type: "retry_fallback_exhausted",
+								chainKey: exhaustedChainKey,
+								lastError: errorMessage,
+							});
+						}
+						this._emit({
+							type: "auto_retry_end",
+							success: false,
+							attempt: this._retryAttempt - 1,
+							finalError: message.errorMessage,
+						});
+						this._retryAttempt = 0;
+						this._resetHintTierState();
+						this._resolveRetry();
+						return "not-handled";
+					}
+				}
+			} else if (is429Class) {
 				const hintMs = this._getProviderRetryDelayMs(errorMessage);
 				const hintSettings = this.settingsManager.getHintPolicySettings();
 				const tier = classifyRateLimitedWait(hintMs, hintSettings);
@@ -7026,7 +7302,7 @@ export class AgentSession {
 					}
 				} else if (tier === "tier1-in-turn") {
 					this._retryAttempt++;
-					if (this._retryAttempt > settings.maxRetries) {
+					if (this._retryAttempt > retryProfile.turn.maxRetries) {
 						// Budget exhausted within tier1; fall back.
 						switchedFallback = await this._retryFallback.tryFallback("transient", {
 							errorMessage,
@@ -7126,7 +7402,7 @@ export class AgentSession {
 			if (!is429TierRouted) {
 				this._retryAttempt++;
 			}
-			if (!is429TierRouted && this._retryAttempt > settings.maxRetries) {
+			if (!is429TierRouted && this._retryAttempt > retryProfile.turn.maxRetries) {
 				switchedFallback = await this._retryFallback.tryFallback("transient", {
 					errorMessage,
 					retryAfterMs: this._getProviderRetryDelayMs(errorMessage),
@@ -7159,8 +7435,14 @@ export class AgentSession {
 
 		const providerDelayMs = isRefusal || hardErrorFallback ? undefined : this._getProviderRetryDelayMs(errorMessage);
 		const maxRetryDelayMs = this.settingsManager.getProviderRetrySettings().maxRetryDelayMs;
+		// Profile ceiling null (Kimi) bypasses the over-ceiling error path entirely.
+		const profileCeiling =
+			retryProfile.turn.serverHint.mode === "override"
+				? retryProfile.turn.serverHint.ceiling.maxDelayMs
+				: maxRetryDelayMs;
+		const effectiveMaxRetryDelayMs = profileCeiling ?? Number.MAX_SAFE_INTEGER;
 		// For 429-class failures the tier routing replaces the over-budget gate.
-		if (!is429TierRouted && providerDelayMs !== undefined && providerDelayMs > maxRetryDelayMs) {
+		if (!is429TierRouted && providerDelayMs !== undefined && providerDelayMs > effectiveMaxRetryDelayMs) {
 			// A wait this long means the model is unavailable rather than busy, so the
 			// configured chain beats failing the turn. The switch is gated: the over-budget
 			// branch above may have already switched on this same error, and hopping again
@@ -7196,18 +7478,27 @@ export class AgentSession {
 		// 429-tier delays already carry the exponential floor from nextInTurnDelayMs /
 		// degradeWithoutFallback; the non-tier branch keeps its own exponential fallback.
 		const nonTierProviderDelayMs = providerDelayMs === 0 ? undefined : providerDelayMs;
+		// Locally computed exponential goes through the profile's backoff policy
+		// (cap + jitter), sampled through the injectable retryRandom seam so tests
+		// stay deterministic; provider-derived hints on the non-429 path remain
+		// authoritative and fallback switches stay exact.
+		const localExponentialMs = retryBackoffDelayMs(
+			retryProfile.turn.backoff,
+			this._retryAttempt,
+			this._retryRandom(),
+		);
 		const delayMs = switchedFallback
 			? 0
 			: is429TierRouted
-				? (hintTierDelayMs ?? providerDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1))
-				: (nonTierProviderDelayMs ?? settings.baseDelayMs * 2 ** (this._retryAttempt - 1));
+				? (hintTierDelayMs ?? providerDelayMs ?? localExponentialMs)
+				: (nonTierProviderDelayMs ?? localExponentialMs);
 		// Prepare before auto_retry_start so an immediate Esc can cancel the retry sleep.
 		this._retryAbortController = new AbortController();
 
 		this._emit({
 			type: "auto_retry_start",
 			attempt: this._retryAttempt,
-			maxAttempts: settings.maxRetries,
+			maxAttempts: retryProfile.turn.maxRetries,
 			delayMs,
 			errorMessage,
 		});
@@ -7689,6 +7980,7 @@ export class AgentSession {
 
 			// Update agent state (preserving exact messages still awaiting persistence)
 			this._restoreAgentMessagesFromSession();
+			this._delegatedCompactionKey = undefined;
 			this._incrementMessageRevision();
 
 			// Emit session_tree event

@@ -31,6 +31,9 @@ afterEach(() => {
 describe("SettingsManager retry fallback settings", () => {
 	const defaultChains = {
 		"claude-fable-5": ["k3:max", "kimi-k3:max", "claude-opus-5:xhigh", "claude-opus-4-8:xhigh"],
+		// Last-resort lane so a model without its own chain still has an escape
+		// route instead of wedging the session terminal.
+		"*": ["k3:max", "kimi-k3:max", "claude-opus-5:xhigh", "claude-opus-4-8:xhigh"],
 	};
 
 	it("defaults abortServerSideFallback to true and round-trips an explicit false", () => {
@@ -79,9 +82,11 @@ describe("SettingsManager retry fallback settings", () => {
 		await manager.flush();
 
 		const reloaded = SettingsManager.create(projectDir, agentDir);
+		// Overriding one key layers over the shipped defaults; the wildcard lane
+		// survives so other models keep their escape route.
 		expect(reloaded.getRetryFallbackSettings()).toEqual({
 			modelFallback: false,
-			chains: { "claude-fable-5": ["ccapi/kimi-k3:max"] },
+			chains: { "claude-fable-5": ["ccapi/kimi-k3:max"], "*": defaultChains["*"] },
 			revertPolicy: "never",
 		});
 

@@ -1,55 +1,54 @@
-import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import {
-	CURSOR_TOOL_RESULT_MAX_CHARS,
-	truncateToolResultBodies,
-} from "../../../src/core/agent-session.ts";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { CURSOR_TOOL_RESULT_MAX_CHARS, truncateToolResultBodies } from "../../../src/core/agent-session.ts";
 
 function textMessage(role: AgentMessage["role"], text: string): AgentMessage {
 	return { role, content: [{ type: "text", text }] } as AgentMessage;
 }
 
+function messageText(message: AgentMessage): string {
+	const content = (message as { content?: unknown }).content;
+	if (!Array.isArray(content)) throw new Error("expected content message");
+	const part = content[0] as { type?: string; text?: string } | undefined;
+	if (part?.type !== "text" || typeof part.text !== "string") throw new Error("expected text part");
+	return part.text;
+}
+
 describe("1043 cursor toolResult truncate", () => {
-	it("caps long toolResult text and leaves other roles", () => {
+	it("caps long toolResult text at a code-point-safe, marker-inclusive boundary", () => {
 		const messages = [
 			textMessage("user", "진행해"),
 			textMessage("assistant", "ok".repeat(5000)),
-			textMessage("toolResult", "x".repeat(40_000)),
+			textMessage("toolResult", `${"a".repeat(1998)}😀tail`),
 		];
+		const original = messages[2];
 		const { messages: next, changed } = truncateToolResultBodies(messages, 2000);
 		expect(changed).toBe(true);
-		expect(next?.[0].content).toEqual([{ type: "text", text: "진행해" }]);
-		expect((next?.[1].content[0] as { text: string }).text.length).toBe(10_000);
-		const toolText = (next?.[2].content[0] as { text: string }).text;
-		expect(toolText.startsWith("x".repeat(2000))).toBe(true);
-		expect(toolText.length).toBeLessThanOrEqual(2000 + 32);
-		expect(toolText.length).not.toBe(40_000);
+		if (!next) throw new Error("expected messages");
+		expect(messageText(next[1]).length).toBe(10_000);
+		const toolText = messageText(next[2]);
+		expect(next[2]).toBe(original);
+		expect(toolText).toBe(`${"a".repeat(1985)}\n...[truncated]`);
+		expect([...toolText].length).toBeLessThanOrEqual(2000);
+		expect(toolText).not.toContain("\ud800");
+	});
+
+	it("bounds the aggregate UTF-8 payload across all tool results", () => {
+		const messages = Array.from({ length: 100 }, (_, index) =>
+			textMessage("toolResult", `${index}:${"가".repeat(2000)}`),
+		);
+		const original = messages[0];
+		const { messages: next, changed } = truncateToolResultBodies(messages);
+		expect(changed).toBe(true);
+		expect(next?.[0]).toBe(original);
+		if (!next) throw new Error("expected messages");
+		const bytes = new TextEncoder().encode(next.map(messageText).join("")).byteLength;
+		expect(bytes).toBeLessThanOrEqual(50_000);
 	});
 
 	it("is a no-op when every toolResult is already short", () => {
 		const messages = [textMessage("toolResult", "ok")];
 		const { changed } = truncateToolResultBodies(messages, CURSOR_TOOL_RESULT_MAX_CHARS);
 		expect(changed).toBe(false);
-	});
-
-	it("Cursor admission truncates before the compact skip return", () => {
-		const src = readFileSync(join(import.meta.dirname, "../../../src/core/agent-session.ts"), "utf8");
-		const start = src.indexOf("const compactBeforeNextAdmission = async");
-		expect(start).toBeGreaterThanOrEqual(0);
-		const slice = src.slice(start, start + 1800);
-		const truncateAt = slice.indexOf("_truncateCursorToolResultBodies");
-		const skipAt = slice.indexOf("return truncated");
-		expect(truncateAt).toBeGreaterThanOrEqual(0);
-		expect(skipAt).toBeGreaterThan(truncateAt);
-	});
-
-	it("re-truncates after compact reloads sessionContext.messages", () => {
-		const src = readFileSync(join(import.meta.dirname, "../../../src/core/agent-session.ts"), "utf8");
-		const assign = "this.agent.state.messages = [...sessionContext.messages, ...preservedPendingMessages];";
-		const i = src.indexOf(assign);
-		expect(i).toBeGreaterThanOrEqual(0);
-		expect(src.slice(i, i + 400)).toContain("_reapplyCursorToolTruncateAfterReload");
 	});
 });

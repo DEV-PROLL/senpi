@@ -4,7 +4,7 @@
 
 ### What changed
 
-- `packages/coding-agent/src/core/agent-session.ts`: export `truncateToolResultBodies` (2000 chars). Cursor `compactBeforeNextAdmission` truncates before the #984 skip return. Compact apply and `_restoreAgentMessagesFromSession` re-truncate and remint.
+- `packages/coding-agent/src/core/agent-session.ts`: export `truncateToolResultBodies` with a marker-inclusive UTF-8 aggregate bound. Cursor context transformation truncates before every provider request, while compact apply and `_restoreAgentMessagesFromSession` re-truncate in place.
 
 ### Why
 

@@ -1,5 +1,39 @@
 # cursor-cli-oauth extension changes
 
+## 2026-08-24 - Keep provider tool protocol out of assistant text
+
+### What changed
+
+- `stream.ts`: Cursor `tool_call` events are no longer serialized into `<cursor-cli-tool>` assistant text. They also remain intentionally unmapped to host `toolCall` blocks because Cursor already executed them in its subprocess. The suppressed events still close the preceding text segment and reset cumulative-snapshot tracking without creating an empty stored block, so post-tool prose is preserved.
+- `stream.test.ts`: the tool-turn regression now proves that text deltas and stored assistant content contain only the model's prose before and after both started/completed tool frames, including a post-tool cumulative fragment sharing the pre-tool prefix.
+
+### Why
+
+- Rendering provider protocol as text mixed long JSON blobs into the TUI and persisted untrusted tool arguments/results in conversation context.
+
+### Why an extension could not handle it
+
+- The pollution happened inside the builtin provider before OmO or another extension received the assistant message, so the provider boundary is the only layer that can remove it without post-processing legitimate model prose.
+
+## 2026-08-21 - Cache provider settings loads by mtime+size to cut lock convoy
+
+### What changed
+
+- `settings.ts`: `loadCursorCliOauthProviderSettingsFromDisk` caches the `SettingsManager` instance keyed on (cwd, mtimeMs:size of the global and project settings.json). A cache hit skips `SettingsManager.create` and its two locked disk reads; environment overrides are re-parsed on every call so live env changes take effect immediately.
+
+### Why
+
+- `fallbackEligible()` calls this loader on every retry-fallback candidate probe. A fresh `SettingsManager` per call took the cross-process settings lock twice and read+parsed both files; under error storms this multiplied into hundreds of locked disk reads per session per error, driving the lock-retry busy-wait (fixed in core) that froze the TUI.
+
+### Why an extension could not handle it
+
+- This IS the extension side: the cache is local to the provider settings loader.
+
+### Expected merge conflict zones
+
+- `settings.ts` around `loadCursorCliOauthProviderSettingsFromDisk`.
+
+
 ## 2026-08-19 - Guaranteed-refusal lane leaves implicit fallback expansion
 
 ### What changed

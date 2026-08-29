@@ -1,5 +1,62 @@
 # changes
 
+## Browser-smoke exempts @anthropic-ai/sdk-internal Node builtins (2026-08-26)
+
+### What changed
+
+- `scripts/check-browser-smoke.mjs` gains an esbuild plugin that marks `node:*` specifiers external ONLY when the importer path sits inside `node_modules/@anthropic-ai/sdk/`; senpi-owned browser code keeps failing loudly on Node builtins (mutation-verified).
+
+### Why
+
+- `@anthropic-ai/sdk>=0.93.0` (forced by the claude-agent-sdk peer floor) ships a credentials subsystem behind runtime-guarded dynamic `import('node:fs')` calls that never execute in browsers, but esbuild's browser platform hard-errors on the unresolvable specifiers.
+
+### Why this lives in the fork
+
+- The browser-smoke guardrail is a fork-only check with no upstream counterpart.
+
+### Expected merge conflict zones
+
+- LOW: `scripts/check-browser-smoke.mjs` plugin block during guardrail changes.
+
+## Binary build script re-diverges from upstream dcd4619 (2026-08-25)
+
+### What changed
+
+- `scripts/build-binaries.sh` keeps the fork release build: trusted native-dep rebuilds
+  (`npm rebuild canvas`), `prepare-bun-compile-assets.mjs`, minified `--keep-names` bun compiles with
+  the jsdom xhr sync worker embedded, `--min-release-age=0` native installs, and darwin codesign
+  stripping.
+
+### Why
+
+These are fork-owned product surfaces (senpi branding, provider wire behavior, fork runtime features) that upstream does not carry; the sync must re-assert them on top of upstream's tree.
+
+### Why this lives in the fork
+
+The divergence lives in core wiring, package identity, or build plumbing that executes before any extension loads, so no extension hook can express it.
+
+### Expected merge conflict zones
+
+- The per-platform `bun build --compile` invocation lines in `scripts/build-binaries.sh`.
+
+## Install-script allowlist follows the @google/genai bump (2026-08-20)
+
+### What changed
+
+- `scripts/generate-coding-agent-shrinkwrap.mjs` and `scripts/generate-coding-agent-install-lock.mjs`: the allowed-install-script entry moved from `@google/genai@2.13.0` to `@google/genai@2.18.0`. The `protobufjs@7.6.5` entry is unchanged because the protobufjs major was not taken.
+
+### Why
+
+- Both generators refuse to emit a lock that contains an unreviewed lifecycle script, and the allowlist is keyed by exact `name@version`. Bumping `@google/genai` without moving the allowlist string would fail generation even though the package's `preinstall` is still the same no-op that was reviewed.
+
+### Why an extension could not handle it
+
+- These generators run as repository tooling to produce committed lock artifacts before anything is published or installed, so no extension participates in their execution.
+
+### Expected merge conflict zones
+
+- LOW: the `allowedInstallScriptPackages` map in each generator, which only changes when a lifecycle-script dependency is bumped.
+
 ## Reviewer-cited tracker parser, collector, and CI hardening (2026-08-17)
 
 ### What changed

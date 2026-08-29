@@ -1,5 +1,28 @@
 # terminal builtin extension — fork surface
 
+## Monitor snapshots cross the RPC wire (2026-08-28)
+
+### What changed
+
+- `extension.ts`: the monitor-state sink now builds one payload and publishes it
+  on both `pi.events` (`terminal_monitor_state`, consumed in-process by goal)
+  and `pi.rpc.emit` so JSONL RPC clients receive `{ type: "extension_event",
+  name: "terminal_monitor_state", data }` when they advertise `extension_events`.
+
+### Why
+
+- Ordinary `pi.events` channels are never forwarded over RPC. Desktop and other
+  RPC hosts could not observe live monitor snapshots without this second emit.
+
+### Why an extension could not handle it
+
+- The authoritative monitor registry is private to the terminal builtin; only
+  this sink sees the snapshot.
+
+### Expected merge conflict zones
+
+- LOW: `extension.ts` `onMonitorState` sink next to the existing `pi.events.emit`.
+
 ## Align terminal bash environment guidance (2026-08-13)
 
 ### What changed
