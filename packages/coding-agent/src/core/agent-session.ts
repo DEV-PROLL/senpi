@@ -6582,9 +6582,12 @@ export class AgentSession {
 				}),
 			})),
 		].filter((tool) => isAllowedTool(tool.definition.name));
+		// Withheld tools stay in _baseToolDefinitions (and therefore in _toolRegistry, which
+		// getRegisteredTool serves to the Cursor exec bridge) but are dropped from the model-facing
+		// definitions so they never reach the prompt. See temporarilyDisabledToolNames.
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
-				.filter(([name]) => isAllowedTool(name))
+				.filter(([name]) => isAllowedTool(name) && !temporarilyDisabledToolNames.has(name))
 				.map(([name, definition]) => [
 					name,
 					{
@@ -6644,6 +6647,7 @@ export class AgentSession {
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
 		).filter((name) => {
 			if (!isAllowedTool(name)) return false;
+			if (temporarilyDisabledToolNames.has(name)) return false;
 			const previousRegistrationIds = options?.previousActiveToolRegistrationIds;
 			if (!previousRegistrationIds) return true;
 			const current = this._toolDefinitions.get(name);
@@ -6704,12 +6708,8 @@ export class AgentSession {
 					ls: { filesystemPolicy },
 				});
 
-		// Withheld tools are still constructed above; they are dropped here so no downstream surface
-		// (prompt, registry, or renderer) ever sees them. See temporarilyDisabledToolNames.
 		this._baseToolDefinitions = new Map(
-			Object.entries(baseToolDefinitions)
-				.filter(([name]) => !temporarilyDisabledToolNames.has(name))
-				.map(([name, tool]) => [name, tool as ToolDefinition]),
+			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
 		if (options.flagValues) {
 			for (const [name, value] of options.flagValues) {
