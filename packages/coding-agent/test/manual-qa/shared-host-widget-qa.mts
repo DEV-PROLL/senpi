@@ -115,9 +115,12 @@ async function main(): Promise<void> {
 		const promptResponse = peer.request({ id: "prompt-1", type: "prompt", sessionId, message: "/todo append QA widget item" }, "prompt");
 		await promptResponse;
 		const first = await widgetWait;
-		const firstLines = (first.widgetLines as string[]).join("\n");
-		assert(firstLines.includes("QA widget item"), "todo-sidebar widget does not contain QA widget item");
-		console.log("WIDGET-LINES-OK: todo-sidebar contains QA widget item");
+		// The /todo command tokenizes "QA widget item" into phase "QA" + task "widget item",
+		// and the widget renders themed (ANSI-styled) lines — strip ANSI and match the task text.
+		const stripAnsi = (value: string): string => value.replace(/\u001b\[[0-9;]*m/g, "");
+		const firstLines = stripAnsi((first.widgetLines as string[]).join("\n")).toLowerCase();
+		assert(firstLines.includes("widget item"), "todo-sidebar widget does not contain the appended todo task");
+		console.log("WIDGET-LINES-OK: todo-sidebar renders the appended todo task");
 		assert(!peer.records.some((record) => record.type === "extension_ui_request" && record.method === "custom_unsupported"), "custom_unsupported request was emitted");
 		console.log("ZERO-CUSTOM-UNSUPPORTED-OK: no custom_unsupported request");
 		const priorCount = peer.records.length;
