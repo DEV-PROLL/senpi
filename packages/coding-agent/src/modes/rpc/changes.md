@@ -877,6 +877,12 @@ events.
 records. The extension and RPC guides document `pi.rpc.emit`, capability environment variables, the
 wire shape, multi-session tagging, and payload validation responsibilities.
 
+## 2026-08-30 - Render shared-host extension components
+
+- Added live server-side rendering for extension component factories used by `setWidget`, `setHeader`, and `setFooter`.
+- Added additive `setHeader`/`setFooter` extension UI requests and the `set_client_info { width }` command so attached clients can keep component layout responsive.
+- Factory widgets no longer degrade to `custom_unsupported`; that notice remains reserved for `ctx.ui.custom()`.
+
 ## 2026-08-25 - Preserve upstream RPC public queue API
 
 ### What changed

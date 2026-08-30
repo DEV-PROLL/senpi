@@ -1668,7 +1668,7 @@ Extensions can request user interaction via `ctx.ui.select()`, `ctx.ui.confirm()
 There are two categories of extension UI methods:
 
 - **Dialog methods** (`select`, `confirm`, `input`, `editor`): emit an `extension_ui_request` on stdout and block until the client sends back an `extension_ui_response` on stdin with the matching `id`.
-- **Fire-and-forget methods** (`notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`): emit an `extension_ui_request` on stdout but do not expect a response. The client can display the information or ignore it.
+- **Fire-and-forget methods** (`notify`, `setStatus`, `setWidget`, `setHeader`, `setFooter`, `setTitle`, `set_editor_text`): emit an `extension_ui_request` on stdout but do not expect a response. The client can display the information or ignore it.
 
 If a dialog method includes a `timeout` field, the agent-side will auto-resolve with a default value when the timeout expires. The client does not need to track timeouts.
 
@@ -1801,7 +1801,22 @@ Set or clear a widget (block of text lines) displayed above or below the editor.
 }
 ```
 
-Send `widgetLines: undefined` (or omit it) to clear the widget. The `widgetPlacement` field is `"aboveEditor"` (default) or `"belowEditor"`. Only string arrays are supported in RPC mode; component factories are ignored.
+Send `widgetLines: undefined` (or omit it) to clear the widget. The `widgetPlacement` field is `"aboveEditor"` (default) or `"belowEditor"`. Component factories are rendered by the host using the attached client's terminal width.
+
+#### setHeader / setFooter
+
+Set or clear the extension header or footer using rendered text lines. Clients that do not understand these additive methods ignore them.
+
+```json
+{
+  "type": "extension_ui_request",
+  "id": "uuid-10",
+  "method": "setHeader",
+  "widgetLines": ["Header line"]
+}
+```
+
+Omit `widgetLines` to restore the built-in surface. Attached clients send `set_client_info` with their terminal width after attach and on resize; hosts default to width 80 when no width is supplied.
 
 #### setTitle
 

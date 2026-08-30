@@ -744,6 +744,15 @@ type HostUiCapableRuntime = {
 	setHostUiHandler(callback?: (request: HostUiRequest) => Promise<HostUiResponse | undefined>): void;
 };
 
+function linesFactory(lines: string[] | undefined): ((tui: TUI, thm: Theme) => Component) | undefined {
+	if (lines === undefined) return undefined;
+	return () => {
+		const container = new Container();
+		for (const line of lines) container.addChild(new Text(line, 1, 0));
+		return container;
+	};
+}
+
 interface InteractiveTuiOptions {
 	tuiMode: TuiMode;
 	showHardwareCursor: boolean;
@@ -2826,6 +2835,12 @@ export class InteractiveMode {
 				this.setExtensionWidget(request.widgetKey ?? "", request.widgetLines, {
 					placement: request.widgetPlacement,
 				});
+				return undefined;
+			case "setHeader":
+				this.setExtensionHeader(linesFactory(request.widgetLines));
+				return undefined;
+			case "setFooter":
+				this.setExtensionFooter(linesFactory(request.widgetLines));
 				return undefined;
 			case "custom_unsupported":
 				this.showExtensionNotify(

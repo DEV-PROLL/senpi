@@ -152,7 +152,8 @@ type RpcSessionCommand =
 	// lives in ../omo-desktop-app/packages/contracts/src/rpc.ts and is updated separately.
 	| { id?: string; type: "get_provider_accounts"; provider: string }
 	| { id?: string; type: "account_pin"; provider: string; name: string | null }
-	| { id?: string; type: "account_remove"; provider: string; name: string };
+	| { id?: string; type: "account_remove"; provider: string; name: string }
+	| { id?: string; type: "set_client_info"; width: number };
 
 /** Stable multi-session protocol error codes. */
 export const RPC_ERROR_UNKNOWN_SESSION = "unknown_session";
@@ -614,6 +615,12 @@ export type RpcExtensionUIRequest =
 			widgetLines: string[] | undefined;
 			widgetPlacement?: "aboveEditor" | "belowEditor";
 	  }
+	| {
+			type: "extension_ui_request";
+			id: string;
+			method: "setHeader" | "setFooter";
+			widgetLines: string[] | undefined;
+		  }
 	| { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
 	| { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string }
 	// Additive (task 13/14): emitted ONLY when the client advertised the

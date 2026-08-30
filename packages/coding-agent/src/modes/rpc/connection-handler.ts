@@ -55,6 +55,7 @@ import type {
 import { getSupportedThinkingLevels } from "../../core/thinking-levels.ts";
 import { ProjectTrustStore } from "../../core/trust-manager.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
+import { createLiveComponentRenderer, type LiveComponentRenderer } from "./widget-line-renderer.ts";
 import {
 	buildCustomUnsupportedRequest,
 	DEFAULT_CUSTOM_EXTENSION_LABEL,
@@ -250,6 +251,16 @@ export function createRpcConnectionHandler(
 ): RpcConnectionHandler {
 	const clientCapabilities = options.capabilities;
 	const routingSessionId = options.sessionId;
+	let clientWidth = 80;
+	const liveRenderers = new Map<string, LiveComponentRenderer>();
+	const disposeRenderer = (key: string) => {
+		liveRenderers.get(key)?.dispose();
+		liveRenderers.delete(key);
+	};
+	const disposeAllRenderers = () => {
+		for (const renderer of liveRenderers.values()) renderer.dispose();
+		liveRenderers.clear();
+	};
 	// True only while THIS connection's own command drives a replacement; the issuer
 	// already learns the new identity from its command response.
 	let replacementIssuedHere = false;
@@ -484,30 +495,37 @@ export function createRpcConnectionHandler(
 		},
 
 		setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
+			disposeRenderer(key);
 			if (content === undefined || Array.isArray(content)) {
-				output({
-					type: "extension_ui_request",
-					id: crypto.randomUUID(),
-					method: "setWidget",
-					widgetKey: key,
-					widgetLines: content as string[] | undefined,
-					widgetPlacement: options?.placement,
-				} as RpcExtensionUIRequest);
+				output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setWidget", widgetKey: key, widgetLines: content as string[] | undefined, widgetPlacement: options?.placement } as RpcExtensionUIRequest);
 				return;
 			}
-			// A component factory closes over live TUI/theme state and cannot cross
-			// the RPC boundary. Never drop it silently: an opted-in client can show
-			// the same explicit degradation notice used by ctx.ui.custom.
-			const request = buildCustomUnsupportedRequest(clientCapabilities, "widget component");
-			if (request) output(request);
+			const renderer = createLiveComponentRenderer({
+				factory: content as (tui: import("@earendil-works/pi-tui").TUI, thm: Theme) => import("@earendil-works/pi-tui").Component,
+				getWidth: () => clientWidth,
+				emit: (widgetLines) => output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setWidget", widgetKey: key, widgetLines, widgetPlacement: options?.placement } as RpcExtensionUIRequest),
+			});
+			if (renderer) liveRenderers.set(key, renderer);
 		},
 
-		setFooter(_factory: unknown): void {
-			// Custom footer not supported in RPC mode - requires TUI access
+		setFooter(factory: unknown): void {
+			disposeRenderer("__footer__");
+			if (factory === undefined) {
+				output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setFooter", widgetLines: undefined } as RpcExtensionUIRequest);
+				return;
+			}
+			const renderer = createLiveComponentRenderer({ factory: factory as never, getWidth: () => clientWidth, emit: (widgetLines) => output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setFooter", widgetLines } as RpcExtensionUIRequest) });
+			if (renderer) liveRenderers.set("__footer__", renderer);
 		},
 
-		setHeader(_factory: unknown): void {
-			// Custom header not supported in RPC mode - requires TUI access
+		setHeader(factory: unknown): void {
+			disposeRenderer("__header__");
+			if (factory === undefined) {
+				output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setHeader", widgetLines: undefined } as RpcExtensionUIRequest);
+				return;
+			}
+			const renderer = createLiveComponentRenderer({ factory: factory as never, getWidth: () => clientWidth, emit: (widgetLines) => output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setHeader", widgetLines } as RpcExtensionUIRequest) });
+			if (renderer) liveRenderers.set("__header__", renderer);
 		},
 
 		setTitle(title: string): void {
@@ -1012,6 +1030,13 @@ export function createRpcConnectionHandler(
 			// State
 			// =================================================================
 
+			case "set_client_info":
+				if (Number.isFinite(command.width) && command.width > 0 && command.width !== clientWidth) {
+					clientWidth = command.width;
+					for (const renderer of liveRenderers.values()) renderer.rerender();
+				}
+				return success(id, "set_client_info");
+
 			case "get_state":
 				return success(id, "get_state", buildRpcSessionState(session, lastAbortSource));
 
@@ -1484,6 +1509,7 @@ export function createRpcConnectionHandler(
 	};
 
 	const dispose = async (): Promise<void> => {
+		disposeAllRenderers();
 		pendingExtensionRequests.close();
 		unsubscribeProviderAccountEvents();
 		unsubscribe?.();
