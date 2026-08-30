@@ -6,7 +6,11 @@ import type { BeforeAgentStartEventResult } from "../../types.ts";
 import { type IdleCompactionDecision, shouldWarmAtIdle } from "./idle.ts";
 import * as policy from "./policy.ts";
 import { isWarmResultStale, isWithinGraceBand, resolveSpeculationLeadTokens } from "./speculation-lead.ts";
-import { admitToolResult, resolveToolResultAdmissionCapTokens } from "./tool-admission.ts";
+import {
+	admitToolResult,
+	estimateAdmissionMarkerTokens,
+	resolveToolResultAdmissionCapTokens,
+} from "./tool-admission.ts";
 
 export interface CompactionGeometry {
 	reserveTokens: number;
@@ -85,15 +89,16 @@ export function admitContextToolResult(
 	contextWindow: number,
 	spillDir: string,
 	capTokens?: number,
-): { text: string; admitted: boolean } {
+): { text: string; admitted: boolean; spillPath?: string } {
 	const result = admitToolResult({ text, contextWindow, spillDir, capTokens });
-	return { text: result.text, admitted: result.spilled };
+	return { text: result.text, admitted: result.spilled, spillPath: result.spillPath };
 }
 
 export function admitContextToolResults(
 	messages: AgentMessage[],
 	contextWindow: number,
 	enabled: boolean,
+	capOverride?: number,
 ): AgentMessage[] {
 	if (!enabled) return messages;
 	return messages.map((message) => {
@@ -104,23 +109,61 @@ export function admitContextToolResults(
 			return admitted.admitted ? { ...message, content: [{ type: "text" as const, text: admitted.text }] } : message;
 		}
 		let changed = false;
-		let remainingTokens = resolveToolResultAdmissionCapTokens(contextWindow);
+		const textParts = message.content.filter((part) => part.type === "text" && part.text);
+		const hasSharedOmission = textParts.length >= 2;
+		const resultCap = capOverride ?? resolveToolResultAdmissionCapTokens(contextWindow);
+		let remainingTokens = resultCap;
+		const omitted: Array<{ tokens: number; path: string }> = [];
 		const content = message.content.map((part) => {
 			if (part.type !== "text" || !part.text) return part;
 			const partTokens = estimateTextTokens(part.text);
-			if (partTokens <= remainingTokens) {
+			const omissionReserve = hasSharedOmission
+				? 256 + estimateAdmissionMarkerTokens(partTokens, join(spillDir, "tool-result-0000000000-000000.txt"))
+				: 0;
+			if (partTokens <= remainingTokens - omissionReserve) {
 				remainingTokens -= partTokens;
 				return part;
 			}
-			if (remainingTokens <= 0) {
-				changed = true;
-				return { ...part, text: "" };
-			}
-			const admitted = admitContextToolResult(part.text, contextWindow, spillDir, remainingTokens);
+			const admitted = admitContextToolResult(
+				part.text,
+				contextWindow,
+				spillDir,
+				Math.max(0, remainingTokens - omissionReserve),
+			);
 			changed = true;
-			remainingTokens = 0;
+			remainingTokens = Math.max(0, remainingTokens - estimateTextTokens(admitted.text));
+			if (admitted.spillPath) omitted.push({ tokens: partTokens, path: admitted.spillPath });
 			return { ...part, text: admitted.text };
 		});
+		if (omitted.length > 0) {
+			const omission = `[tool-result admission: ${omitted.length} later text part(s) omitted (~${omitted.reduce((sum, item) => sum + item.tokens, 0)} tokens); full outputs at: ${omitted.map((item) => item.path).join("; ")} - read with the read tool]`;
+			const lastText = content.findLastIndex((part) => part.type === "text" && part.text);
+			const target = lastText >= 0 ? lastText : content.findIndex((part) => part.type === "text");
+			const targetPart = target >= 0 ? content[target] : undefined;
+			if (target >= 0 && targetPart?.type === "text") {
+				content[target] = { ...targetPart, text: `${targetPart.text ?? ""}\n${omission}` };
+			}
+		}
+		// Contract: total retained text tokens per tool result <= cap, and every omitted byte is reachable via a spill path named within the result.
+		const aggregateTokens = () =>
+			estimateTextTokens(
+				content
+					.filter((part) => part.type === "text")
+					.map((part) => part.text ?? "")
+					.join("\n"),
+			);
+		while (aggregateTokens() > resultCap) {
+			const target = content.findLastIndex((part) => part.type === "text" && part.text);
+			if (target < 0) break;
+			const part = content[target];
+			if (part.type !== "text") break;
+			const text = part.text ?? "";
+			const omissionIndex = text.indexOf("\n[tool-result admission:");
+			const prefix = omissionIndex >= 0 ? text.slice(0, omissionIndex) : text;
+			const suffix = omissionIndex >= 0 ? text.slice(omissionIndex) : "";
+			const nextText = `${prefix.slice(0, Math.floor(prefix.length / 2))}${suffix}`;
+			content[target] = { ...part, text: nextText === text ? "" : nextText };
+		}
 		return changed ? { ...message, content } : message;
 	});
 }

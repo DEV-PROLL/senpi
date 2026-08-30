@@ -17,7 +17,6 @@ const MIN_ADMISSION_CAP_TOKENS = 8192;
 const ADMISSION_CAP_FRACTION = 0.05;
 const HEAD_BUDGET_FRACTION = 0.6;
 const TAIL_BUDGET_FRACTION = 0.2;
-const MAX_SHRINK_PASSES = 8;
 
 export const TOOL_ADMISSION_MARKER_PREFIX = "[tool result truncated:";
 
@@ -59,8 +58,12 @@ function estimateTextTokens(text: string): number {
 	return estimateTokens({ role: "user", content: text, timestamp: 0 });
 }
 
-function buildMarker(keptTokens: number, totalTokens: number, spillPath: string): string {
+export function buildAdmissionMarker(keptTokens: number, totalTokens: number, spillPath: string): string {
 	return `${TOOL_ADMISSION_MARKER_PREFIX} kept ${keptTokens} of ~${totalTokens} tokens; full output at ${spillPath} - read it with the read tool if needed]`;
+}
+
+export function estimateAdmissionMarkerTokens(totalTokens: number, spillPath: string): number {
+	return estimateTextTokens(buildAdmissionMarker(0, totalTokens, spillPath));
 }
 
 function spillToFile(spillDir: string, text: string): string {
@@ -80,7 +83,7 @@ function buildExcerpt(text: string, budgetChars: number, totalTokens: number, sp
 	const head = text.slice(0, headChars);
 	const tail = text.slice(Math.max(headChars, text.length - tailChars));
 	const keptTokens = estimateTextTokens(head) + estimateTextTokens(tail);
-	return `${head}\n${buildMarker(keptTokens, totalTokens, spillPath)}\n${tail}`;
+	return `${head}\n${buildAdmissionMarker(keptTokens, totalTokens, spillPath)}\n${tail}`;
 }
 
 /**
@@ -107,9 +110,13 @@ export function admitToolResult(input: AdmitToolResultInput): AdmitToolResultOut
 	const charsPerToken = text.length / Math.max(1, totalTokens);
 	let budgetChars = Math.floor(capTokens * charsPerToken);
 	let excerpt = buildExcerpt(text, budgetChars, totalTokens, pointer);
-	for (let pass = 0; pass < MAX_SHRINK_PASSES && estimateTextTokens(excerpt) > capTokens; pass++) {
-		budgetChars = Math.floor(budgetChars * 0.8);
-		excerpt = buildExcerpt(text, budgetChars, totalTokens, pointer);
+	while (estimateTextTokens(excerpt) > capTokens && budgetChars > 0) {
+		budgetChars = Math.floor(budgetChars / 2);
+		excerpt = budgetChars > 0 ? buildExcerpt(text, budgetChars, totalTokens, pointer) : "";
+	}
+	if (estimateTextTokens(excerpt) > capTokens || budgetChars === 0) {
+		const marker = buildAdmissionMarker(0, totalTokens, pointer);
+		excerpt = estimateTextTokens(marker) <= capTokens ? marker : "";
 	}
 
 	return { text: excerpt, spilled: true, ...(spillPath ? { spillPath } : {}) };

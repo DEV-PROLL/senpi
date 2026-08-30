@@ -104,7 +104,7 @@ describe("ideal compaction extension wiring decisions", () => {
 				timestamp: 0,
 			},
 		];
-		const projected = admitContextToolResults(messages, 200_000, true)[0];
+		const projected = admitContextToolResults(messages, 200_000, true, cap)[0];
 		const projectedContent = (projected as { content: Array<{ type: string; text?: string }> }).content;
 		const text = projectedContent
 			.filter((part) => part.type === "text")
@@ -112,6 +112,60 @@ describe("ideal compaction extension wiring decisions", () => {
 			.join("");
 		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(cap);
 		expect(projectedContent).toContainEqual(image);
+	});
+
+	it("emits a trailing omission line for dropped multipart text", () => {
+		const cap = 10_000;
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "tool-2",
+				toolName: "test",
+				isError: false,
+				timestamp: 0,
+				content: [
+					{ type: "text" as const, text: "a".repeat(cap * 8) },
+					{ type: "text" as const, text: "b".repeat(cap * 8) },
+					{ type: "text" as const, text: "c".repeat(cap * 8) },
+				],
+			},
+		];
+		const projected = admitContextToolResults(messages, 200_000, true)[0] as {
+			content: Array<{ type: string; text?: string }>;
+		};
+		const text = projected.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text ?? "")
+			.join("\n");
+		expect(text).toContain("tool-result admission:");
+		expect(text).toContain("full outputs at:");
+		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(cap);
+	});
+
+	it.each([60, 200, 1000, 10000])("keeps aggregate admission bounded at cap %i across oversized parts", (cap) => {
+		for (let count = 1; count <= 4; count++) {
+			const messages = [
+				{
+					role: "toolResult" as const,
+					toolCallId: `tool-${cap}-${count}`,
+					toolName: "test",
+					isError: false,
+					timestamp: 0,
+					content: Array.from({ length: count }, (_, index) => ({
+						type: "text" as const,
+						text: String.fromCharCode(97 + index).repeat(cap * 8 + 100),
+					})),
+				},
+			];
+			const projected = admitContextToolResults(messages, Math.max(1, cap * 20), true, cap)[0] as {
+				content: Array<{ type: string; text?: string }>;
+			};
+			const text = projected.content
+				.filter((part) => part.type === "text")
+				.map((part) => part.text ?? "")
+				.join("\n");
+			expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(cap);
+		}
 	});
 
 	it("bypasses admission when an exact marker line sits inside the output", () => {
