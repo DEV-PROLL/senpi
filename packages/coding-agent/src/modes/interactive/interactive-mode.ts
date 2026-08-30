@@ -1472,7 +1472,7 @@ export class InteractiveMode {
 			throw error;
 		}
 		this.isInitialized = true;
-		(this.runtimeHost as Partial<HostUiCapableRuntime>).setClientInfo?.(this.ui.terminal.columns);
+		(this.runtimeHost as Partial<HostUiCapableRuntime> | undefined)?.setClientInfo?.(this.ui.terminal.columns);
 
 		await this.themeController.applyFromSettings();
 
@@ -5792,7 +5792,7 @@ export class InteractiveMode {
 
 		if (process.platform !== "win32") {
 			const resizeHandler = () => {
-				(this.runtimeHost as Partial<HostUiCapableRuntime>).setClientInfo?.(this.ui.terminal.columns);
+				(this.runtimeHost as Partial<HostUiCapableRuntime> | undefined)?.setClientInfo?.(this.ui.terminal.columns);
 			};
 			process.on("SIGWINCH", resizeHandler);
 			this.signalCleanupHandlers.push(() => process.off("SIGWINCH", resizeHandler));
