@@ -100,7 +100,7 @@ export interface RpcConnectionOptions {
 		setWidth: (connectionId: string | undefined, width: number) => void;
 		clearWidth: (connectionId: string | undefined) => void;
 		setCapabilities?: (connectionId: string | undefined, capabilities: readonly string[]) => void;
-		hasRenderedComponents?: () => boolean;
+		hasRenderedComponents?: (sessionId: string) => boolean;
 		connectionId: () => string | undefined;
 		onChange?: () => void;
 	};
@@ -271,7 +271,7 @@ export function createRpcConnectionHandler(
 	const routingSessionId = options.sessionId;
 	const clientWidth = () => options.sharedWidth?.getWidth() ?? 80;
 	const hasRenderedComponents = () =>
-		(options.sharedWidth?.hasRenderedComponents?.() ?? false) ||
+		(options.sharedWidth?.hasRenderedComponents?.(routingSessionId ?? "") ?? false) ||
 		(clientCapabilities?.includes(RENDERED_COMPONENTS_CAPABILITY) ?? false);
 	const liveRenderers = new Map<string, LiveComponentRenderer>();
 	const retainedRendererFactories = new Map<string, () => void>();

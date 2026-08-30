@@ -289,6 +289,7 @@ describe("multi-session RPC event writer", () => {
 			waitForBackpressure: async () => {},
 		});
 		writer.setConnectionCapabilities("capable", ["rendered_components"]);
+		writer.attachConnectionToSession("capable", "session");
 		writer.enqueue("session", { type: "message_start" });
 		writer.enqueue("session", {
 			type: "extension_ui_request",
@@ -308,6 +309,7 @@ describe("multi-session RPC event writer", () => {
 			waitForBackpressure: async () => {},
 		});
 		writer.setConnectionCapabilities("late-capable", ["rendered_components"]);
+		writer.attachConnectionToSession("late-capable", "session");
 		await writer.flush();
 
 		expect(records(defaultClient).some((record) => widgetLines(record)?.includes("factory"))).toBe(false);
@@ -342,6 +344,7 @@ describe("multi-session RPC event writer", () => {
 		writer.registerConnection("a", { writeRaw: (chunk) => a.push(chunk), waitForBackpressure: async () => {} });
 		writer.registerConnection("b", { writeRaw: (chunk) => b.push(chunk), waitForBackpressure: async () => {} });
 		writer.setConnectionCapabilities("a", ["rendered_components"]);
+		writer.attachConnectionToSession("a", "session");
 		writer.enqueue("session", {
 			type: "extension_ui_request",
 			method: "setWidget",

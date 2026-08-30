@@ -366,6 +366,9 @@ describe("RPC Unix-socket multi-connection host", () => {
 					value.method === "setFooter" &&
 					Array.isArray(value.widgetLines),
 			);
+			await expect(
+				peer.peer.request({ id: "client-info", type: "set_client_info", width: 80, capabilities: ["rendered_components"] }),
+			).resolves.toMatchObject({ type: "response", command: "set_client_info", success: true });
 			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
 			const sessionId = openedSessionId(opened);
 			expect(await arrayWidget).toMatchObject({

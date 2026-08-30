@@ -21,7 +21,7 @@
 ## 2026-08-30 - Shared-host rendered components
 
 - Added the `rendered_components` capability gate for factory-rendered widgets, headers, and footers. Shared-session component widths use the minimum reported width across attached connections, defaulting to 80 and dropping disconnected connections. Footer factories receive a session-backed readonly footer data provider. Interactive host startup records are buffered until the normal event listener is installed.
-- Snapshot replay retains rendered-component provenance and filters it per joining connection. Capability registration remains connection-wide across sessions and is cleared only when the socket is released; closing one session removes only its width contribution. Shared bindings retain component factories while disposing live renderers and footer providers when no capable connection remains, recreating them for a later capable connection.
+- Snapshot replay retains rendered-component provenance and filters it by each connection's session attachment and capability registration. Shared socket hosts never seed `rendered_components` from the host environment; clients register it with `set_client_info`, and must re-register width plus capabilities after reconnect. Shared bindings retain component factories while disposing live renderers and footer providers when no capable connection remains, recreating them for a later capable connection.
 
 ## 2026-08-30 - Deliver session events across a deferred rebind
 

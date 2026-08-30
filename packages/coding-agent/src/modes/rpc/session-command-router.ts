@@ -162,11 +162,13 @@ export class SessionCommandRouter {
 			});
 			const openedSession = opened;
 			const entry = this.registry.getForCommand(openedSession.sessionId, "open_session");
-			if (owner !== undefined)
+			if (owner !== undefined) {
 				this.writer.setConnectionCapabilities(
 					owner,
 					this.pendingCapabilities.get(owner) ?? this.connectionOptions?.capabilities ?? [],
 				);
+				this.writer.attachConnectionToSession(owner, openedSession.sessionId);
+			}
 			// A client that dies without close_session (terminal closed, SIGKILL, dropped
 			// SSH) still holds this handle's attachment and its path reservation. Remember
 			// which connection owns it so releaseConnection() can close exactly that.
@@ -211,7 +213,7 @@ export class SessionCommandRouter {
 										for (const binding of this.bindings.values()) binding.rerenderComponents?.();
 									}
 								},
-								hasRenderedComponents: () => this.writer.hasCapableConnection(),
+								hasRenderedComponents: (sessionId) => this.writer.hasCapableConnection(sessionId),
 
 								connectionId: () => this.writer.currentConnection(),
 								onChange: () => {
@@ -258,6 +260,8 @@ export class SessionCommandRouter {
 	async releaseConnection(connectionId: string): Promise<void> {
 		this.releasedConnections.add(connectionId);
 		this.writer.clearConnectionCapabilities(connectionId);
+		for (const sessionId of this.sessionsByConnection.get(connectionId)?.keys() ?? [])
+			this.writer.detachConnectionFromSession(connectionId, sessionId);
 		for (const widths of this.widths.values()) widths.delete(connectionId);
 		for (const binding of this.bindings.values()) binding.rerenderComponents?.();
 		const opens = this.opensByConnection.get(connectionId);
@@ -335,6 +339,7 @@ export class SessionCommandRouter {
 			const owner = this.writer.currentConnection();
 			if (owner !== undefined) {
 				this.widths.get(command.sessionId)?.delete(owner);
+				this.writer.detachConnectionFromSession(owner, command.sessionId);
 				for (const binding of this.bindings.values()) binding.rerenderComponents?.();
 			}
 			if (owner !== undefined) {

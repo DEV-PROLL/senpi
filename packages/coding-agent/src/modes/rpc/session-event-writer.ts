@@ -80,6 +80,7 @@ export class SessionEventWriter {
 	private readonly sessionSnapshots = new Map<string, Array<{ line: string; rendered: boolean }>>();
 	private readonly connectionContext = new AsyncLocalStorage<string>();
 	private readonly connectionCapabilities = new Map<string, Set<string>>();
+	private readonly connectionSessions = new Map<string, Set<string>>();
 	private readonly controlQueue: RecordQueue = { latestByKey: new Map(), ready: false };
 	private readonly readyQueues: RecordQueue[] = [];
 	private readonly sealedSessions = new Set<string>();
@@ -130,13 +131,14 @@ export class SessionEventWriter {
 			if (this.connections.get(id)?.actor === actor) {
 				this.connections.delete(id);
 				this.connectionCapabilities.delete(id);
+				this.connectionSessions.delete(id);
 			}
 		});
 		this.connections.set(id, { connection, actor });
 		this.connectionCapabilities.set(id, new Set());
-		const rendered = this.connectionCapabilities.get(id)?.has("rendered_components") ?? false;
+		this.connectionSessions.set(id, new Set());
 		for (const snapshot of this.sessionSnapshots.values())
-			for (const record of snapshot) if (!record.rendered || rendered) actor.enqueue(record.line);
+			for (const record of snapshot) if (!record.rendered) actor.enqueue(record.line);
 	}
 
 	unregisterConnection(id: string): void {
@@ -145,6 +147,20 @@ export class SessionEventWriter {
 		registered.actor.close();
 		this.connections.delete(id);
 		this.connectionCapabilities.delete(id);
+		this.connectionSessions.delete(id);
+	}
+
+	attachConnectionToSession(id: string, sessionId: string): void {
+		if (!this.connections.has(id)) return;
+		const sessions = this.connectionSessions.get(id) ?? new Set<string>();
+		sessions.add(sessionId);
+		this.connectionSessions.set(id, sessions);
+		if (this.connectionCapabilities.get(id)?.has("rendered_components"))
+			for (const record of this.sessionSnapshots.get(sessionId) ?? []) if (record.rendered) this.connections.get(id)!.actor.enqueue(record.line);
+	}
+
+	detachConnectionFromSession(id: string, sessionId: string): void {
+		this.connectionSessions.get(id)?.delete(sessionId);
 	}
 
 	setConnectionCapabilities(id: string, capabilities: readonly string[]): void {
@@ -153,17 +169,17 @@ export class SessionEventWriter {
 		const wasCapable = this.connectionCapabilities.get(id)?.has("rendered_components") ?? false;
 		this.connectionCapabilities.set(id, new Set(capabilities));
 		if (!wasCapable && capabilities.includes("rendered_components"))
-			for (const snapshot of this.sessionSnapshots.values())
-				for (const record of snapshot) if (record.rendered) registered.actor.enqueue(record.line);
+			for (const sessionId of this.connectionSessions.get(id) ?? [])
+				for (const record of this.sessionSnapshots.get(sessionId) ?? []) if (record.rendered) registered.actor.enqueue(record.line);
 	}
 
 	clearConnectionCapabilities(id: string): void {
 		if (this.connections.has(id)) this.connectionCapabilities.set(id, new Set());
 	}
 
-	hasCapableConnection(): boolean {
-		for (const capabilities of this.connectionCapabilities.values())
-			if (capabilities.has("rendered_components")) return true;
+	hasCapableConnection(sessionId: string): boolean {
+		for (const [id, capabilities] of this.connectionCapabilities)
+			if (capabilities.has("rendered_components") && this.connectionSessions.get(id)?.has(sessionId)) return true;
 		return false;
 	}
 
@@ -195,7 +211,8 @@ export class SessionEventWriter {
 			? [targetId]
 			: record[RENDERED_COMPONENT_RECORD] && this.connections.size > 0
 				? [...this.connections.keys()].filter((id) =>
-						this.connectionCapabilities.get(id)?.has("rendered_components"),
+						this.connectionCapabilities.get(id)?.has("rendered_components") &&
+						this.connectionSessions.get(id)?.has(sessionId),
 					)
 				: this.connections.size > 0
 					? [...this.connections.keys()]

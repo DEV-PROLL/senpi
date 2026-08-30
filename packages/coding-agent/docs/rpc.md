@@ -71,8 +71,7 @@ per connection; array/undefined widget records and dialog requests retain their 
 shared per session using the minimum of attached clients, and a closed or dropped connection no longer contributes its
 width or capability registration. Snapshot replay preserves rendered-component provenance and applies the same capability
 filter to late joiners; a client that registers `rendered_components` while a snapshot is active receives its retained
-factory-rendered records. Capability registration is connection-wide across that socket's sessions: closing one session
-removes only that session's width contribution, while socket disposal removes the capability registration. When the last
+factory-rendered records. On a shared socket host, `rendered_components` is registration-only: it is never inherited from the host environment and must be sent in `set_client_info` for each client connection. Registration applies to the sessions attached by that connection; closing one session removes only that session's width and capability association, while socket disposal removes all associations. Clients must re-register `width` and `capabilities` after every reconnect. When the last
 capable connection leaves a still-attached binding, live component renderers and footer data providers are disposed but
 their factories are retained; a later capable connection recreates and re-renders them.
 

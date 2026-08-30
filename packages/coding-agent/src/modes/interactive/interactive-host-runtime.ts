@@ -113,6 +113,8 @@ export async function createInteractiveHostRuntime(
 					if (disposed) return;
 					await client.openSession({ sessionPath, cwd: localRuntime.cwd });
 					if (disposed) return;
+					if (remoteRuntime) await remoteRuntime.reRegisterClientInfo();
+					if (disposed) return;
 					await remoteSession.refresh();
 					if (disposed) return;
 					fallbackWarned = false;
@@ -289,10 +291,15 @@ export class RemoteInteractiveRuntime {
 		this.#remoteSession.setHostUiHandler(callback);
 	}
 	#clientInfoSent = false;
+	#lastClientWidth = 80;
 	setClientInfo(width: number): void {
+		this.#lastClientWidth = width;
 		const capabilities = this.#clientInfoSent ? undefined : ["rendered_components"];
 		this.#clientInfoSent = true;
 		void this.#client.setClientInfo(width, capabilities).catch(() => {});
+	}
+	async reRegisterClientInfo(): Promise<void> {
+		await this.#client.setClientInfo(this.#lastClientWidth, ["rendered_components"]);
 	}
 	async dispose(): Promise<void> {
 		if (this.#state === "disposed") return;

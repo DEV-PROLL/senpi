@@ -16,7 +16,6 @@ import {
 import {
 	CUSTOM_UNSUPPORTED_CAPABILITY,
 	EXTENSION_EVENTS_CAPABILITY,
-	RENDERED_COMPONENTS_CAPABILITY,
 	RPC_CLIENT_CAPABILITIES_ENV,
 } from "./custom-capability.ts";
 import {
@@ -75,7 +74,6 @@ const REQUIRED_CAPABILITIES = ["multi_session", EXTENSION_EVENTS_CAPABILITY] as 
 export const PINNED_HOST_CLIENT_CAPABILITIES = [
 	EXTENSION_EVENTS_CAPABILITY,
 	CUSTOM_UNSUPPORTED_CAPABILITY,
-	RENDERED_COMPONENTS_CAPABILITY,
 ] as const;
 
 export function createHostDaemonPaths(agentDir = getAgentDir()): HostDaemonPaths {
