@@ -1,5 +1,17 @@
 # changes
 
+## 2026-08-31 - Shared session host is OFF by default (opt-in)
+
+- Interactive sessions no longer join the shared RPC host implicitly. `main.ts` now gates
+  `createInteractiveHostRuntime` on `shouldJoinSharedHost()` (`core/shared-host-policy.ts`): a bare
+  interactive session stays purely local and never opens `<agentDir>/rpc/rpc.sock`.
+- Opt in per-process with the `ENABLE_SHARED_HOST` env flag, or persistently with the
+  `experimental.sharedHost` setting (`SettingsManager.getExperimentalSharedHost()`). Non-interactive
+  modes (print, json, rpc, app-server) are unaffected; the app-server / `--multi-session` host owns
+  its own transport.
+- The former opt-out `DISABLE_SHARED_HOST` is obsolete: it is now the default, and setting it prints a
+  one-time notice pointing at the opt-in flag.
+
 ## 2026-08-30 - Durable entry notifications are rpc-scoped
 
 ## 2026-08-30 - Wire ideal compaction execution through AgentSession
