@@ -115,6 +115,8 @@ async function main(): Promise<void> {
 		const opened = await peer.request({ id: "open", type: "open_session", cwd }, "open_session");
 		const sessionId = (opened.data as WireRecord | undefined)?.sessionId;
 		assert(typeof sessionId === "string", "open_session did not return sessionId");
+		// Per-connection gating: register rendered_components (and width) like a real capable client.
+		await peer.request({ id: "client-info", type: "set_client_info", sessionId, width: 80, capabilities: ["rendered_components"] }, "set_client_info");
 		const widgetWait = peer.waitFor((record) => record.type === "extension_ui_request" && record.method === "setWidget" && record.widgetKey === "todo-sidebar" && Array.isArray(record.widgetLines) && (record.widgetLines as unknown[]).length > 0, "initial todo-sidebar widget");
 		const promptResponse = peer.request({ id: "prompt-1", type: "prompt", sessionId, message: "/todo append QA widget item" }, "prompt");
 		await promptResponse;
