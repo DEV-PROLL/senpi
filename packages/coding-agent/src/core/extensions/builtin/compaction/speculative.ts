@@ -58,8 +58,6 @@ const DEFAULT_CONTEXT_WINDOW = 200_000;
 // session parked near the limit alternate between the pruned and un-pruned history on
 // consecutive requests; because pruning rewrites old tool results, every alternation
 // invalidates the provider prompt-cache prefix and re-bills the whole conversation.
-const _SUMMARY_TOKEN_HEADROOM = 32_768;
-const _SUMMARY_CONTEXT_WINDOW_RESERVE_RATIO = 0.5;
 const SUMMARY_SCHEMA = "senpi.compaction.summary.v1";
 type CompactionProgressCallback = (delta: string) => void;
 

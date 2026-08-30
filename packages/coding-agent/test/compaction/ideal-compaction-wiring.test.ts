@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolveCompactionSettings } from "../../src/core/compaction-settings-resolver.ts";
 import {
 	admitContextToolResult,
 	resolveBeforeAgentStartMessage,
@@ -36,6 +37,14 @@ describe("ideal compaction extension wiring decisions", () => {
 		expect(shouldDeferGraceBand({ ...base, tokens: 82_000, graceBandEnabled: false })).toBe(false);
 	});
 
+	it("delivers a reminder as an ephemeral message on an ordinary turn", () => {
+		expect(resolveBeforeAgentStartMessage({ message: undefined, reminder: "budget reminder" })).toEqual({
+			customType: "compaction-budget-reminder",
+			content: "budget reminder",
+			display: false,
+		});
+	});
+
 	it("merges a simultaneous reminder into the pending restoration message", () => {
 		const restoration = { customType: "compaction-restoration", content: "restore checkpoint", display: false };
 		expect(resolveBeforeAgentStartMessage({ message: restoration, reminder: "budget reminder" })).toEqual({
@@ -68,6 +77,12 @@ describe("ideal compaction extension wiring decisions", () => {
 		expect(automatic).toMatchObject({ thresholdTokens: 140_000, leadTokens: 17_500 });
 		expect(low).toMatchObject({ thresholdTokens: 140_000, leadTokens: 8192 });
 		expect(high).toMatchObject({ thresholdTokens: 140_000, leadTokens: 32_768 });
+	});
+
+	it("falls back to safe defaults for malformed JSON settings fields", () => {
+		const settings = resolveCompactionSettings({ keepRecentTokens: "bad" as never, speculativeFraction: Number.NaN });
+		expect(settings.keepRecentTokens).toBe(20_000);
+		expect(settings.speculativeFraction).toBe(0.75);
 	});
 
 	it("bypasses admission when an exact marker line sits inside the output", () => {

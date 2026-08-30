@@ -31,12 +31,13 @@ export function buildCompactionContext(input: {
 		input.toolAdmissionEnabled,
 	);
 	const sourceMessages =
-		input.breakerFallback ||
-		shouldApplyContextReduction({
-			usageTokens: input.ctx.getContextUsage()?.tokens ?? null,
-			contextWindow: input.contextWindow,
-			isProviderNativeCompactionPath: isOpenAiRemoteCompactionModel(input.ctx.model) || input.laneOwnsCompaction,
-		})
+		!input.laneOwnsCompaction &&
+		(input.breakerFallback ||
+			shouldApplyContextReduction({
+				usageTokens: input.ctx.getContextUsage()?.tokens ?? null,
+				contextWindow: input.contextWindow,
+				isProviderNativeCompactionPath: isOpenAiRemoteCompactionModel(input.ctx.model) || input.laneOwnsCompaction,
+			}))
 			? reduceContextMessages(admittedMessages, BUILTIN_CONTEXT_REDUCTION_OPTIONS).messages
 			: admittedMessages;
 	const emergency = input.laneOwnsCompaction

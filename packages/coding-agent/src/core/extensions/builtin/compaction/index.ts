@@ -73,7 +73,6 @@ import {
 	createBlockingRemoteCompactionEvent,
 	endCompactionFeedback,
 	estimatePendingPromptTokens,
-	getPromptContextWindow,
 	isAbortedAssistantMessage,
 	isMonitorableMessageEvent,
 	isRequiredCompactionFallbackReason,
@@ -760,7 +759,9 @@ export default function compactionExtension(
 			}
 			return;
 		}
-		state = breaker.recordFailure(state, Date.now(), { route: compactEvent.reason });
+		if (!lanePolicy.disablesSenpiCompaction(ctx)) {
+			state = breaker.recordFailure(state, Date.now(), { route: compactEvent.reason });
+		}
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -864,7 +865,9 @@ export default function compactionExtension(
 		const usage = ctx.getContextUsage();
 		const settings = ctx.getCompactionSettings();
 		const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+		const laneOwnsCompaction = lanePolicy.disablesSenpiCompaction(ctx);
 		const breakerFallback =
+			!laneOwnsCompaction &&
 			breaker.isTripped(state, Date.now()) &&
 			usage?.tokens !== null &&
 			usage !== undefined &&
@@ -876,10 +879,10 @@ export default function compactionExtension(
 				event,
 				ctx,
 				contextWindow,
-				promptContextWindow: getPromptContextWindow(contextWindow, ctx.model?.maxTokens),
+				promptContextWindow: contextWindow,
 				toolAdmissionEnabled: settings.toolAdmissionEnabled !== false,
 				breakerFallback,
-				laneOwnsCompaction: lanePolicy.disablesSenpiCompaction(ctx),
+				laneOwnsCompaction,
 				emergencyPruneLatch,
 			}),
 		};

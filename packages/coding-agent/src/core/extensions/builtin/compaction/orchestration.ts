@@ -6,7 +6,7 @@ import type { BeforeAgentStartEventResult } from "../../types.ts";
 import { type IdleCompactionDecision, shouldWarmAtIdle } from "./idle.ts";
 import * as policy from "./policy.ts";
 import { isWarmResultStale, isWithinGraceBand, resolveSpeculationLeadTokens } from "./speculation-lead.ts";
-import { admitToolResult, containsToolAdmissionMarker } from "./tool-admission.ts";
+import { admitToolResult } from "./tool-admission.ts";
 
 export interface CompactionGeometry {
 	reserveTokens: number;
@@ -21,10 +21,11 @@ export function resolveCompactionGeometry(input: {
 }): CompactionGeometry {
 	const thresholdTokens = input.contextWindow * policy.computeEffectiveThreshold(input.contextWindow, input.lastYield);
 	return {
-		reserveTokens:
-			input.settings.reserveScalingEnabled === false
-				? input.settings.reserveTokens
-				: policy.resolveReserveTokens(input.contextWindow, input.settings.reserveTokens),
+		reserveTokens: policy.resolveEffectiveReserveTokens(
+			input.contextWindow,
+			input.settings.reserveTokens,
+			input.settings.reserveScalingEnabled !== false,
+		),
 		thresholdTokens,
 		leadTokens: resolveSpeculationLeadTokens(thresholdTokens, input.settings.speculativeLeadTokens),
 	};
@@ -52,11 +53,9 @@ export function resolveBeforeAgentStartMessage(input: {
 	reminderEnabled?: boolean;
 }): BeforeAgentStartEventResult["message"] | undefined {
 	if (!input.reminder || input.reminderEnabled === false) return input.message;
-	// The reminder only ever rides along on a message the turn was already going to
-	// deliver. Returning one from an otherwise empty handler manufactures turn-local
-	// context, which suppresses the retry controller's model-fallback dispatch
-	// (regressions/compaction-current-model-state).
-	if (!input.message) return undefined;
+	if (!input.message) {
+		return { customType: "compaction-budget-reminder", content: input.reminder, display: false };
+	}
 	return { ...input.message, content: `${input.message.content}\n\n${input.reminder}` };
 }
 
@@ -75,7 +74,6 @@ export function admitContextToolResult(
 	contextWindow: number,
 	spillDir: string,
 ): { text: string; admitted: boolean } {
-	if (containsToolAdmissionMarker(text)) return { text, admitted: false };
 	const result = admitToolResult({ text, contextWindow, spillDir });
 	return { text: result.text, admitted: result.spilled };
 }
@@ -88,15 +86,19 @@ export function admitContextToolResults(
 	if (!enabled) return messages;
 	return messages.map((message) => {
 		if (message.role !== "toolResult") return message;
-		const text =
-			typeof message.content === "string"
-				? message.content
-				: message.content
-						.filter((part: { type: string; text?: string }) => part.type === "text")
-						.map((part: { type: string; text?: string }) => part.text ?? "")
-						.join("\n");
-		if (!text) return message;
-		const admitted = admitContextToolResult(text, contextWindow, join(tmpdir(), "senpi-tool-spill"));
-		return admitted.admitted ? { ...message, content: [{ type: "text" as const, text: admitted.text }] } : message;
+		const spillDir = join(tmpdir(), "senpi-tool-spill");
+		if (typeof message.content === "string") {
+			const admitted = admitContextToolResult(message.content, contextWindow, spillDir);
+			return admitted.admitted ? { ...message, content: [{ type: "text" as const, text: admitted.text }] } : message;
+		}
+		let changed = false;
+		const content = message.content.map((part) => {
+			if (part.type !== "text" || !part.text) return part;
+			const admitted = admitContextToolResult(part.text, contextWindow, spillDir);
+			if (!admitted.admitted) return part;
+			changed = true;
+			return { ...part, text: admitted.text };
+		});
+		return changed ? { ...message, content } : message;
 	});
 }

@@ -7,8 +7,8 @@
  * head/tail excerpt plus a pointer it can re-read with the read tool.
  */
 
-import { randomBytes } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { estimateTokens } from "../../../compaction/index.ts";
 
@@ -20,6 +20,7 @@ const TAIL_BUDGET_FRACTION = 0.2;
 const MAX_SHRINK_PASSES = 8;
 
 export const TOOL_ADMISSION_MARKER_PREFIX = "[tool result truncated:";
+const knownSpillPaths = new Set<string>();
 
 /**
  * A whole line of the exact shape emitted by `buildMarker`. Anchored per line (`m` flag)
@@ -64,8 +65,13 @@ function buildMarker(keptTokens: number, totalTokens: number, spillPath: string)
 
 function spillToFile(spillDir: string, text: string): string {
 	mkdirSync(spillDir, { recursive: true });
-	const spillPath = join(spillDir, `tool-result-${Date.now()}-${randomBytes(3).toString("hex")}.txt`);
+	const digest = createHash("sha256").update(text).digest("hex").slice(0, 16);
+	const spillPath = join(
+		spillDir,
+		`tool-result-${Number.parseInt(digest.slice(0, 10), 16)}-${digest.slice(10, 16)}.txt`,
+	);
 	writeFileSync(spillPath, text, "utf-8");
+	knownSpillPaths.add(spillPath);
 	return spillPath;
 }
 
@@ -88,19 +94,27 @@ function buildExcerpt(text: string, budgetChars: number, totalTokens: number, sp
  */
 export function admitToolResult(input: AdmitToolResultInput): AdmitToolResultOutput {
 	const { text, contextWindow, spillDir } = input;
-	if (containsToolAdmissionMarker(text)) return { text, spilled: false };
+	const marker = text.match(TOOL_ADMISSION_MARKER_LINE)?.[0];
+	const markerPath = marker?.match(/full output at (.+) - read it with/)?.[1];
+	if (markerPath && knownSpillPaths.has(markerPath) && existsSync(markerPath)) return { text, spilled: false };
 	const capTokens = resolveToolResultAdmissionCapTokens(contextWindow);
 	const totalTokens = estimateTextTokens(text);
 	if (totalTokens <= capTokens) return { text, spilled: false };
 
-	const spillPath = spillToFile(spillDir, text);
+	let spillPath: string | undefined;
+	try {
+		spillPath = spillToFile(spillDir, text);
+	} catch {
+		// Admission is a safety boundary: if persistence fails, still cap model-visible text.
+	}
+	const pointer = spillPath ?? "(spill unavailable)";
 	const charsPerToken = text.length / Math.max(1, totalTokens);
 	let budgetChars = Math.floor(capTokens * charsPerToken);
-	let excerpt = buildExcerpt(text, budgetChars, totalTokens, spillPath);
+	let excerpt = buildExcerpt(text, budgetChars, totalTokens, pointer);
 	for (let pass = 0; pass < MAX_SHRINK_PASSES && estimateTextTokens(excerpt) > capTokens; pass++) {
 		budgetChars = Math.floor(budgetChars * 0.8);
-		excerpt = buildExcerpt(text, budgetChars, totalTokens, spillPath);
+		excerpt = buildExcerpt(text, budgetChars, totalTokens, pointer);
 	}
 
-	return { text: excerpt, spilled: true, spillPath };
+	return { text: excerpt, spilled: true, ...(spillPath ? { spillPath } : {}) };
 }

@@ -142,6 +142,14 @@ export function shouldStartSpeculativeCompaction(
 	return usage.tokens >= contextWindow * computeEffectiveThreshold(contextWindow, lastYield) * fraction;
 }
 
+export function resolveEffectiveReserveTokens(
+	contextWindow: number,
+	configuredReserve: number,
+	reserveScalingEnabled = true,
+): number {
+	return reserveScalingEnabled ? resolveReserveTokens(contextWindow, configuredReserve) : configuredReserve;
+}
+
 export function isAtHardLimit(
 	usage: ContextUsage,
 	contextWindow: number,
