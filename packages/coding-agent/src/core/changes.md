@@ -2,6 +2,24 @@
 
 ## 2026-08-30 - Durable entry notifications are rpc-scoped
 
+## 2026-08-30 - Wire ideal compaction execution through AgentSession
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` routes compaction through the ideal compaction execution pipeline while preserving the existing session lifecycle and transcript accounting contracts.
+
+### Why
+
+- The feature's compaction policy and execution layers need the session-owned model, settings, and transcript state at the integration boundary.
+
+### Why an extension could not handle it
+
+- Compaction dispatch is owned by `AgentSession`, before extension-level behavior can replace the session lifecycle integration.
+
+### Expected merge conflict zones
+
+- LOW: compaction dispatch in `agent-session.ts`.
+
 ## 2026-08-30 - Do not cancel client work from a binding-time tool change
 
 ### What changed
