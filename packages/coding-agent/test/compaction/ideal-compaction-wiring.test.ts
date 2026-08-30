@@ -193,6 +193,24 @@ describe("ideal compaction extension wiring decisions", () => {
 		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeGreaterThan(cap);
 	});
 
+	it("returns an empty plus fitting text block unchanged", () => {
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "fits",
+				toolName: "test",
+				isError: false,
+				timestamp: 0,
+				content: [
+					{ type: "text" as const, text: "" },
+					{ type: "text" as const, text: "a".repeat(8_191) },
+				],
+			},
+		];
+		const projected = admitContextToolResults(messages, 163_840, true, 8_192, shortAdmissionDir)[0];
+		expect(projected).toEqual(messages[0]);
+	});
+
 	it("counts empty text blocks in the exact multipart bound", () => {
 		const cap = 60;
 		const messages = [

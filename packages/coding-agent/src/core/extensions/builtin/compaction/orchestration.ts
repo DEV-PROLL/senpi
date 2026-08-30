@@ -120,10 +120,15 @@ export function admitContextToolResults(
 			const admitted = admitContextToolResult(message.content, contextWindow, spillDir);
 			return admitted.admitted ? { ...message, content: [{ type: "text" as const, text: admitted.text }] } : message;
 		}
+		const resultCap = capOverride ?? resolveToolResultAdmissionCapTokens(contextWindow);
+		const joinedText = message.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text ?? "")
+			.join("\n");
+		if (estimateTextTokens(joinedText) <= resultCap) return message;
 		let changed = false;
 		const textParts = message.content.filter((part) => part.type === "text");
 		const hasSharedOmission = textParts.some((part) => part.text) && textParts.length >= 2;
-		const resultCap = capOverride ?? resolveToolResultAdmissionCapTokens(contextWindow);
 		let remainingTokens = resultCap;
 		const omitted: Array<{ tokens: number; path: string }> = [];
 		const content = message.content.map((part) => {
