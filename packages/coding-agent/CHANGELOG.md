@@ -36,6 +36,9 @@
 
 - The `session_replaced` RPC event carries the replacement identity as `durableSessionId`. It previously used `sessionId`, which multi-session hosts overwrite with the connection's routing handle, so attached clients received a replacement event with no usable identity.
 
+- The RPC `session_replaced` event is now part of the typed `RpcClientEvent` union, so clients can discriminate it and read `durableSessionId` without casting.
+
+- An interactive session sharing a host no longer keeps rendering the previous session after another attached client switches, forks, or replaces the shared session; the proxy rebinds its session manager, settings, and transcript when the host announces the replacement.
 
 - The `session_replaced` RPC event carries the replacement identity as `durableSessionId`. It previously used `sessionId`, which multi-session hosts overwrite with the connection's routing handle, so attached clients received a replacement event with no usable identity.
 

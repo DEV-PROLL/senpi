@@ -1,5 +1,25 @@
 # changes
 
+## 2026-08-30 - Expose session_replaced on the public client event union
+
+### What changed
+
+- `rpc-client.ts`: `RpcSessionReplacedEvent` joins the public `RpcClientEvent` union, so a typed client can discriminate `event.type === "session_replaced"` and read `durableSessionId` without casting. The runtime already forwarded the event through the unchecked `data as RpcClientEvent` cast in `handleFrame`, so it reached listeners untyped.
+- `rpc-client.ts`: `collectEvents()` excludes it alongside the other non-session events it already filtered. It returns `JsonAgentSessionEvent[]`, and a replacement notice is connection-level rather than part of the agent's event stream.
+
+### Why
+
+- The command response for a replacement carries only `{ cancelled }`, and a replacement can be driven by another attached client or by an extension, so this event is the only channel delivering the new identity. A client that cannot narrow to it cannot resync.
+
+### Why an extension could not handle it
+
+- The client event union is protocol surface beneath every extension hook.
+
+### Expected merge conflict zones
+
+- LOW: the `RpcClientEvent` union members and the `collectEvents()` filter.
+
+
 ## 2026-08-30 - Require agentDir for the RPC project-trust gate
 
 ## 2026-08-30 - Carry the replacement identity as durableSessionId
@@ -74,63 +94,6 @@
 ### Expected merge conflict zones
 
 - LOW: `defaultHostLaunch` in `host-ensure.ts`, the child spawn in `runHostSupervisor`, and the internal-route dispatch block in `main.ts`.
-
-## 2026-08-30 - Carry the session replacement identity under durableSessionId
-
-### What changed
-
-- `rpc-types.ts` / `connection-handler.ts`: `RpcSessionReplacedEvent` renames its identity field from `sessionId` to `durableSessionId`. Multi-session hosts tag every outbound record through `tagSessionRecord()`, which spreads `sessionId: routingSessionId` last, so the event's own identity was overwritten by the per-connection routing handle before it reached the wire.
-
-### Why
-
-- The command response for a replacement reports only `{ cancelled }`, so `session_replaced` is the only push channel carrying the new identity. An attached client that did not issue the replacement was told its binding moved but received the routing handle it already knew, leaving it no way to resync without guessing.
-
-### Why an extension could not handle it
-
-- The routing tag is applied by the connection handler beneath every extension hook; no extension can observe or reorder it.
-
-### Expected merge conflict zones
-
-- LOW: the `session_replaced` payload in `rebindSession()` and its wire type.
-
-
-## 2026-08-30 - Settle a deferred rebind before compacting
-
-### What changed
-
-- `connection-handler.ts`: the deferred rebind refresh started by `setRebindSession` is now retained in `pendingRebindRefresh`, and the `compact` command awaits it before calling `session.compact()`.
-
-### Why
-
-- A replacement acknowledges its command before extensions finish binding, by design: extensions may wait for session work the replacement still owns, so the derived-surface refresh runs out of band. Nothing tracked that detached promise, so it escaped the registry's lifecycle mutex. Extensions bind their tool activation during that window (`video-in` and `look-at` sync their tool against the new model's capabilities), and an active-tool change advances the context revision and aborts core compaction by design. A client issuing `compact` right after `switch_session` returned therefore raced the rebind and failed with "Compaction cancelled".
-
-### Why an extension could not handle it
-
-- The ordering between a command response and the out-of-band rebind is connection-handler scheduling; no extension hook observes the deferred refresh.
-
-### Expected merge conflict zones
-
-- LOW: the deferred branch of `rebindSession()` and the `compact` command case.
-
-
-## 2026-08-30 - Reschedule the retained-queue drain when an enqueue races its settling
-
-### What changed
-
-- `session-event-writer.ts`: `flush()` clears `drainPromise` from a `.then` reaction, so an `enqueue()` landing between `drainUntilEmpty()` resolving and that reaction observed a stale in-flight drain. `requestFlush()` then returned early and scheduled nothing, stranding every subsequent record in its retained queue. The settle reaction now reschedules a flush while ready queues remain.
-
-### Why
-
-- On lanes with no registered connection the records go to the retained session queues rather than to a per-connection sink actor, so nothing else ever rescued them: `open_session` responses flushed, and the prompt events that followed were enqueued and never written. `SocketEventSinkActor.drain()` already carried the same guard; the queue lane did not.
-
-### Why an extension could not handle it
-
-- The drain scheduler is internal writer machinery beneath the RPC transport; no extension hook observes or drives it.
-
-### Expected merge conflict zones
-
-- LOW: the drain settle reaction in `flush()`.
-
 
 ## 2026-08-30 - Reschedule the sink actor drain when an enqueue races its settling
 

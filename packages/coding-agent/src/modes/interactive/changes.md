@@ -1,26 +1,25 @@
 # changes
 
-## 2026-08-30 - Scope host UI dispatch to the shared-host lane
-## 2026-08-30 - Restore the external-owner compaction delegation episode
+## 2026-08-30 - Rebind the shared-host proxy on session_replaced
 
 ### What changed
 
-- `interactive-mode.ts`: restores the `externalOwnerCompactionNoticeShown` guard, the `rejectionCause === "external-owner"` branch in `compaction_end`, and every episode reset (successful compaction, session rebind, reload, retry fallback, `cycleModel`, `selectModelFromUi`, the `model_changed` wire event, and full transcript rerenders). Settings-only `rebuildChatFromMessages` rebuilds deliberately preserve the episode.
+- `interactive-host-runtime.ts`: the remote session proxy handles the `session_replaced` wire event by refreshing its binding. Refreshes are serialized, so a replacement-driven refresh cannot interleave with a caller-driven one and commit a snapshot mixing two sessions. Replacements this runtime drives itself are wrapped in `aroundLocalReplacement`, which suppresses the echo a multi-session host broadcasts back to the issuing connection; the scope covers the whole command, because the host emits while completing it. `createRemoteSessionProxy` is exported for direct coverage.
 
 ### Why
 
-- A stray commit on this branch carried an RPC subject but held a reverse-diff of `interactive-mode.ts` that deleted the feature outright. Without it, a session whose compaction is owned by an external owner (the Claude Agent SDK) renders a red error on every auto-compaction attempt instead of one muted informational notice, and the footer never marks the saturated context meter as handled natively. The external-owner branch is checked before `aborted` because production rejections are emitted via `_rejectCompaction(..., true, reason)` and carry `aborted: true`.
+- A replacement can be driven by any other attached client, or by an extension that no client asked, and the command response carries only `{ cancelled }`. Without handling the event the proxy kept serving the previous session's `sessionManager`, `settingsManager`, and mirrored message list while the host had already moved on. Without the suppression the echo raced the runtime's own ordered refresh/rebind, which transports setup entries between two refreshes. The event is deliberately not forwarded to `AgentSession` listeners: it is connection-level, not part of the agent event stream.
 
 ### Why an extension could not handle it
 
-- The notice, its once-per-episode guard, and the footer delegation marker are interactive-mode chat rendering state that no extension surface owns.
+- The proxy owns the shared-host binding beneath every extension surface; no extension hook observes the connection's replacement notice.
 
 ### Expected merge conflict zones
 
-- LOW: the `compaction_end` and `model_changed` cases in `handleEvent`, and the episode resets at each model-switch and rerender call site.
+- LOW: the wire-event switch in the proxy's `client.onEvent` handler, the replacement methods, and the `refresh` definition.
 
 
-## 2026-08-30 - Keep shared-host disposal working when the remote session is incomplete
+## 2026-08-30 - Scope host UI dispatch to the shared-host lane
 
 ### What changed
 
