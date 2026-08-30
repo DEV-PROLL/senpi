@@ -6,6 +6,7 @@ import type {
 	CreateAgentSessionRuntimeFactory,
 	CreateAgentSessionRuntimeResult,
 } from "../src/core/agent-session-runtime.ts";
+import { ProjectTrustStore } from "../src/core/trust-manager.ts";
 import { RpcClient } from "../src/modes/rpc/rpc-client.ts";
 import type { RpcResponse } from "../src/modes/rpc/rpc-types.ts";
 import { SessionCommandRouter } from "../src/modes/rpc/session-command-router.ts";
@@ -19,9 +20,11 @@ afterEach(async () => {
 });
 
 function runtime(options: Parameters<CreateAgentSessionRuntimeFactory>[0]): CreateAgentSessionRuntimeResult {
+	new ProjectTrustStore(options.agentDir).set(options.cwd, true);
 	return {
 		session: {
 			sessionManager: options.sessionManager,
+			agentDir: options.agentDir,
 			isFastModeActive: () => false,
 			isStreaming: false,
 			extensionRunner: { hasHandlers: () => false, emit: async () => {} },
