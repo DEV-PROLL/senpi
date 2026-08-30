@@ -17,14 +17,17 @@ import {
 import { TOOL_ADMISSION_MARKER_PREFIX } from "../../src/core/extensions/builtin/compaction/tool-admission.ts";
 
 let admissionDir: string;
+let shortAdmissionDir: string;
 
 beforeEach(() => {
 	admissionDir = mkdtempSync(join(tmpdir(), "wiring-admission-"));
+	shortAdmissionDir = mkdtempSync(join(tmpdir(), "x-"));
 	rmSync(join(tmpdir(), "senpi-tool-spill"), { recursive: true, force: true });
 });
 
 afterEach(() => {
 	rmSync(admissionDir, { recursive: true, force: true });
+	rmSync(shortAdmissionDir, { recursive: true, force: true });
 });
 
 describe("ideal compaction extension wiring decisions", () => {
@@ -159,8 +162,7 @@ describe("ideal compaction extension wiring decisions", () => {
 	});
 
 	it.each(["short", "long"])("keeps tiny-cap omission metadata reachable (%s path)", (pathKind) => {
-		const spillDir = pathKind === "short" ? "/tmp/x" : admissionDir;
-		rmSync(spillDir, { recursive: true, force: true });
+		const spillDir = pathKind === "short" ? shortAdmissionDir : admissionDir;
 		const probeParts = [
 			{ tokens: 80_000, path: join(spillDir, "tool-result-probe-a.txt") },
 			{ tokens: 80_000, path: join(spillDir, "tool-result-probe-b.txt") },
@@ -189,6 +191,35 @@ describe("ideal compaction extension wiring decisions", () => {
 		expect(text).toContain("tool-result admission:");
 		expect(text.match(/tool-result-[^\s;]+/g)).toHaveLength(2);
 		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeGreaterThan(cap);
+	});
+
+	it("counts empty text blocks in the exact multipart bound", () => {
+		const cap = 60;
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "empty-first",
+				toolName: "test",
+				isError: false,
+				timestamp: 0,
+				content: [
+					{ type: "text" as const, text: "" },
+					{ type: "text" as const, text: "a".repeat(10_000) },
+					{ type: "text" as const, text: "b".repeat(10_000) },
+				],
+			},
+		];
+		const projected = admitContextToolResults(messages, 1_200, true, cap, shortAdmissionDir)[0] as {
+			content: Array<{ type: string; text?: string }>;
+		};
+		const text = projected.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text ?? "")
+			.join("\n");
+		const omission = text.slice(text.indexOf("[tool-result admission:"));
+		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(
+			resolveMultipartRetainedBound(cap, omission, 3),
+		);
 	});
 
 	it("keeps the 13-part reviewer repro within the amended bound", () => {

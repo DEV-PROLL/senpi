@@ -121,8 +121,8 @@ export function admitContextToolResults(
 			return admitted.admitted ? { ...message, content: [{ type: "text" as const, text: admitted.text }] } : message;
 		}
 		let changed = false;
-		const textParts = message.content.filter((part) => part.type === "text" && part.text);
-		const hasSharedOmission = textParts.length >= 2;
+		const textParts = message.content.filter((part) => part.type === "text");
+		const hasSharedOmission = textParts.some((part) => part.text) && textParts.length >= 2;
 		const resultCap = capOverride ?? resolveToolResultAdmissionCapTokens(contextWindow);
 		let remainingTokens = resultCap;
 		const omitted: Array<{ tokens: number; path: string }> = [];
