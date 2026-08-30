@@ -1,5 +1,25 @@
 # Builtin compaction extension changes
 
+## Preserve replay-safe Gemini signed state in deterministic fallback recovery (2026-08-18)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/compaction/retained-message-safety.ts`: Replaced blanket rejection of `thoughtSignature`, `thinkingSignature`, and `textSignature` with format-aware validation (`isValidProviderSignature`). Allowed valid base64 signatures on assistant blocks while continuing to fail closed on malformed values.
+- `packages/coding-agent/src/core/extensions/builtin/compaction/deterministic-fallback.ts`: Added `hasValidToolChains` validation to guarantee retained tool results are never orphaned from their preceding tool calls. Implemented backward boundary search to find earlier safe cut points when the initial cut point would fragment an atomic tool chain. Added structured diagnostic reasons (`DeterministicFallbackRejectionReason`) and telemetry fields for rejection observability without logging secret/signature payloads.
+
+### Why
+
+- During required compaction recovery under Gemini 3+, legitimate assistant turns often contain `thoughtSignature` on tool calls with empty text, or signed thinking/text blocks without visible text. Unconditionally rejecting these valid provider states prevented deterministic fallback recovery from succeeding on valid sessions, causing hard failure.
+
+### Why an extension could not handle it
+
+- The deterministic fallback recovery path and its message-safety validation are internal sub-policies of the builtin compaction extension (`retained-message-safety.ts` and `deterministic-fallback.ts`).
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/extensions/builtin/compaction/retained-message-safety.ts`
+- `packages/coding-agent/src/core/extensions/builtin/compaction/deterministic-fallback.ts`
+
 ## Apply idle warm compaction during the idle gap (2026-08-26)
 
 ### What changed

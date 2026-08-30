@@ -29,11 +29,13 @@ export class TerminalManager {
 	private readonly registry: SessionRegistry<TerminalSession>;
 	private readonly runtimes = new Map<string, TerminalRuntimeSession>();
 	private readonly scrollback?: number;
+	private readonly maxSessions: number;
+	private readonly exited = new Set<string>();
+	private reservations = 0;
 
 	constructor(options: TerminalManagerOptions = {}) {
-		this.registry = new SessionRegistry<TerminalSession>({
-			maxSessions: options.maxSessions ?? DEFAULT_MAX_SESSIONS,
-		});
+		this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+		this.registry = new SessionRegistry<TerminalSession>({ maxSessions: this.maxSessions });
 		this.scrollback = options.scrollback;
 	}
 
@@ -41,19 +43,43 @@ export class TerminalManager {
 		return this.runtimes.size;
 	}
 
+	get activeSize(): number {
+		this.reconcileRuntimes();
+		return this.runtimes.size - this.exited.size + this.reservations;
+	}
+
+	reserve(): (() => void) | null {
+		this.reconcileRuntimes();
+		if (this.runtimes.size - this.exited.size + this.reservations >= this.maxSessions) return null;
+		this.reservations += 1;
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			this.reservations -= 1;
+		};
+	}
+
 	/** Spawn a new terminal session and register it under an allocated `bash_N` id. */
 	async create(command: string, options: TerminalSessionOptions): Promise<CreatedTerminalSession> {
+		const release = this.reserve();
+		if (!release) throw new SessionRegistryCapacityError(this.maxSessions);
 		const runtimeOptions: TerminalRuntimeOptions = { ...options, scrollback: this.scrollback };
 		const runtime = new TerminalRuntimeSession(command, runtimeOptions);
 		let entry: { id: string };
 		try {
 			entry = await this.registry.create({ command, session: runtime.session });
 		} catch (error) {
+			release();
 			runtime.dispose();
 			runtime.session.kill();
 			throw error;
 		}
 		this.runtimes.set(entry.id, runtime);
+		runtime.session.onExit(() => {
+			this.exited.add(entry.id);
+		});
+		release();
 		this.reconcileRuntimes();
 		return { id: entry.id, runtime };
 	}
@@ -86,6 +112,7 @@ export class TerminalManager {
 		await this.registry.teardown();
 		for (const runtime of this.runtimes.values()) runtime.dispose();
 		this.runtimes.clear();
+		this.exited.clear();
 	}
 
 	/** Dispose runtime wrappers whose registry entry was pruned (capacity/LRU eviction). */
@@ -95,6 +122,7 @@ export class TerminalManager {
 			if (liveIds.has(id)) continue;
 			runtime.dispose();
 			this.runtimes.delete(id);
+			this.exited.delete(id);
 		}
 	}
 }

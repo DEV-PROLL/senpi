@@ -2,13 +2,54 @@
 
 ## [Unreleased]
 
+### Added
+
+### Fixed
+
+- Bash callback settlement is bounded on direct, shared-host, and harness execution paths so never-settling callbacks cannot hang commands or silently lose spill cleanup failures.
+
+- Deterministic compaction fallback now supports replay-safe Gemini opaque provider state (thoughtSignature, thinkingSignature, textSignature, and empty visible text blocks) and recovers earlier safe boundaries without breaking atomic tool-call chains ([#947](https://github.com/code-yeongyu/senpi/pull/947)).
+
+### New Features
+
 ### Breaking Changes
 
 ### Added
 
+- New experimental setting `experimental.bashEvalOnly` (default `false`). When enabled, the `bash` and
+  `powershell` tools are withheld from the model-facing tool surface and run only inside eval cells via
+  `tool.bash({ command: "..." })`, with system-prompt guidance and a redirect hint if the model calls them
+  directly. Hooks and permission checks still apply to those commands. The policy is inert whenever the
+  `eval` tool is unavailable, so shell access is never lost, and it follows the flag across a reload.
+
 ### Changed
 
+- `grep` is temporarily withheld from the model-facing tool surface. It no longer appears in the
+  system prompt or the active tool names, so the model can neither see nor call it. The tool is
+  still built and stays resolvable by name for programmatic callers such as the Cursor exec bridge,
+  and restoring it is removing its entry from `temporarilyDisabledToolNames`.
+
 ### Fixed
+
+- Cursor tool-result request views now truncate text and image payloads without mutating shared agent state or persisted session history; aggregate eviction preserves newest results, accounts conservatively for escaped/enveloped serialization, never amplifies output with markers, and remains grapheme-safe (#1043).
+- Native terminal file monitors now safely serialize delivery, handle watcher failures, preserve paused transitions, validate regular files and access errors, honor external-directory permissions, detect content-preserving rewrites, and release terminal capacity during lifecycle teardown.
+- Bash output spill files now capture early `EDQUOT`/`ENOSPC` stream errors and late filesystem
+  close failures, waiting for the stream's terminal `close` event and failing only the tool call
+  instead of returning an incomplete path or terminating the interactive session through
+  `uncaughtException`.
+- Failed bash spill files are now removed after cleanup while surfaced full-output paths remain
+  readable, and command or update-callback failures preserve any secondary cleanup error.
+- Local shell stream callback failures now enter the executor cleanup path, preventing uncaught
+  callback throws from leaving large-output spill files behind.
+- `cursor-cli-oauth` no longer mixes Cursor's internal tool-call protocol, arguments, and results into assistant text; Cursor still owns execution, while Senpi now stores and renders only the model's actual prose ([OmO #7169](https://github.com/code-yeongyu/oh-my-openagent/issues/7169)).
+- On the `claude-sdk-oauth` lane, the "Compaction rejected: the Claude Agent SDK owns compaction for
+  this session" notice now renders at most once per delegation episode as a muted informational line
+  instead of repainting a red error line every turn, and the footer context meter shows an `(SDK)`
+  marker while the SDK owns compaction. Manual `/compact` feedback is unchanged.
+- On the `claude-sdk-oauth` lane, automatic compaction no longer re-attempts and re-logs a rejection
+  every turn after the Claude Agent SDK owns compaction: the first `external-owner` rejection makes the
+  delegation sticky until compaction is accepted, the model or provider changes, or the session
+  navigates to another branch. Manual `/compact` behavior is unchanged.
 
 ### Removed
 
@@ -80,6 +121,7 @@
 
 ### Fixed
 
+- Shift+Enter now inserts a newline instead of submitting in direct Warp-on-WSL sessions, while plain Enter and other terminal paths remain unchanged ([#1109](https://github.com/code-yeongyu/senpi/pull/1109) by [@deopa0402](https://github.com/deopa0402)).
 - Goal tool results (`create_goal`, `update_goal`, `get_goal`) now render as a TUI widget — status-colored header with compact token and elapsed usage, objective preview (full objective plus created/updated timestamps when expanded), and the blocked reason — instead of dumping the raw JSON payload into the transcript. The model-facing JSON result text is unchanged.
 
 - The interactive fast-mode indicator and RPC fast-mode state now clear when a session switches from a Codex model to a non-Codex model, instead of retaining a stale `⚡` marker from the previous provider.

@@ -1,5 +1,170 @@
 # changes
 
+## 2026-08-29 - Bound Cursor serialized tool-result admissions
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: Cursor tool-result request views now use a conservative escaped/enveloped serialization bound and never amplify output with markers.
+
+### Why
+
+- Cursor duplicates history across JSON and protobuf envelopes, and JSON escaping makes raw-byte heuristics unsafe.
+
+### Why an extension could not handle it
+
+- AgentSession owns provider admission and the request-only transform boundary.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`
+
+## 2026-08-29 - Final shared-host bash callback coverage
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`
+- `packages/coding-agent/src/core/bash-executor.ts`
+
+### Why
+
+- Preserve callback rejection through shared-host cleanup.
+
+### Why an extension could not handle it
+
+- Core callback dispatch owns this boundary.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/agent-session.ts`
+- `packages/coding-agent/src/core/bash-executor.ts`
+
+## 2026-08-29 - Complete shared-host shell callback propagation
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` now observes asynchronous bash output callbacks and preserves the original callback failure through cleanup.
+- `packages/coding-agent/src/modes/interactive/interactive-host-runtime.ts` aborts shared-host commands when those callbacks reject and rethrows the original value at the client boundary.
+
+### Why
+
+- The shared-host execution path could otherwise resolve successfully after an asynchronous callback rejection and leave its large-output spill file behind.
+
+### Why an extension could not handle it
+
+- The callback is dispatched by the core session and RPC host boundary before extension code can finalize execution cleanup.
+
+### Expected merge conflict zones
+
+- LOW: bash callback dispatch in `agent-session.ts` and shared-host execution routing.
+
+## 2026-08-29 - Bound bash callback settlement and cleanup
+
+### What changed
+
+- `packages/coding-agent/src/core/bash-executor.ts` bounds callback settlement on normal completion, reports callback abandonment as an execution error, and clears or unreferences its race timer.
+
+### Why
+
+- A never-settling output callback could hang a command indefinitely or leave a late callback failure and large-output spill unobserved.
+
+### Why an extension could not handle it
+
+- Bash callback settlement and spill-file cleanup are owned by the core executor lifecycle before extension code can observe the completed command.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/bash-executor.ts`: callback settlement timeout and final spill cleanup.
+
+## 2026-08-29 - GLM-5.3 model resolver defaults
+
+### What changed
+
+- `packages/coding-agent/src/core/model-resolver.ts`: retain the GLM-5.3 Z.AI global and China default model and prompt-preset resolution introduced by this PR.
+
+### Why
+
+- The new Z.AI model family must remain the default for both coding-plan provider variants after synchronizing with upstream changes.
+
+### Why an extension could not handle it
+
+- Provider defaults and model-pattern resolution are core resolver behavior that runs before extension hooks.
+
+### Expected merge conflict zones
+
+- `packages/coding-agent/src/core/model-resolver.ts`: provider default mappings and model pattern resolution.
+
+## 2026-08-29 - Make externally owned compaction delegation sticky
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: remember the provider and model id after an automatic compaction is rejected by an external owner, suppressing repeated automatic attempts until that key changes, compaction is accepted, or runtime ownership is reconfigured by reload/registry refresh. Manual compaction remains admitted.
+- Added `test/suite/regressions/1174-sticky-delegated-compaction.test.ts` covering repeated turns, manual compaction, and model changes.
+
+### Why
+
+- A provider-owned compaction lane previously caused the core to emit a new automatic compaction attempt on every turn, repeatedly producing rejection events and repainting the same error.
+
+### Why an extension could not handle it
+
+- Automatic compaction admission and lifecycle state are private `AgentSession` control flow that runs before extension hooks are emitted.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: compaction state, automatic admission methods, rejection handling, model selection invalidation, and tree navigation.
+
+## 2026-08-29 - Experimental bash eval-only policy
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: adds the `experimental.bashEvalOnly` setting and its getter.
+- `packages/coding-agent/src/core/agent-session.ts`: resolves the policy from settings in the constructor and on reload, hides the `bash` and `powershell` tools while the registered `eval` tool is present, executes them through the registry without activation, publishes per-tool eval-cell hints, adds system-prompt guidance, and retains withheld tools so disarming restores direct access.
+
+### Why
+
+- Codemode can keep invoking `bash` and `powershell` from eval cells while preventing those tools from being advertised as direct model tools. The policy is inert when codemode's `eval` tool is unavailable, so shell access is never lost.
+
+### Why an extension could not handle it
+
+- Active tool visibility, lazy activation, the wrapped registry, and the agent-loop removed-tool hint map are coordinated inside `AgentSession`; an extension cannot atomically enforce these boundaries.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: active-tool selection, tool registry refresh, reload, and system-prompt assembly.
+## 2026-08-29 - Withheld tools are filtered at the advertisement seam
+
+### What changed
+
+- `agent-session.ts`: names in `temporarilyDisabledToolNames` are dropped from `definitionRegistry`
+  (which becomes `_toolDefinitions`, and therefore the prompt snippets and guidelines) and from the
+  DEFAULT `nextActiveToolNames` selection. `_baseToolDefinitions` stays unfiltered, so
+  `_toolRegistry` remains whole, and an explicit `activeToolNames` request still activates the tool.
+
+### Why
+
+- Filtering `_baseToolDefinitions` also emptied `_toolRegistry`, which `getRegisteredTool` serves.
+  That method is documented to resolve "from the full registry ... independent of the active set"
+  precisely because the Cursor exec bridge drives its own native read/bash/grep/ls frames regardless
+  of what the request advertised, so every Cursor grep frame would have answered
+  `Tool "grep" is not available in this session`. Withholding now happens only where the
+  model-facing surface is derived, leaving programmatic name-based resolution working.
+- The active-name filter applies to the default selection only. A caller that passes
+  `activeToolNames` has named the tool deliberately; overriding that would have broken
+  `filesystem-policy`'s contract that policies reach all six built-in file tools, and the
+  `defaultTools` explicit-precedence guard.
+
+### Why an extension could not handle it
+
+- `_toolDefinitions`, `_toolRegistry`, and the active tool names are private session state built in
+  one pass inside `AgentSession`; no extension hook runs between their construction and first use,
+  so the split between the advertised surface and the resolvable registry can only be made here.
+
+### Expected merge conflict zones
+
+- `agent-session.ts`: the `definitionRegistry` construction and the `nextActiveToolNames` filter
+  both gained a `temporarilyDisabledToolNames` guard alongside the existing `isAllowedTool` call.
+  Upstream edits to either filter will conflict; keep the upstream predicate change and re-apply
+  the withheld-name guard next to it.
+
 - Model runtime credential admission counts the combined canonical environment and policy slot lane, admitting rotation for more than one live slot without acquiring leases during preflight.
 
 ## 2026-08-28 - Credential pool parity follow-ups

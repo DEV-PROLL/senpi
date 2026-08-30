@@ -1,5 +1,7 @@
+// allow: SIZE_OK - one cohesive streaming-output state machine owns decoding, truncation, spill, and terminal cleanup.
 import { randomBytes } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TailWindow } from "./tail-window.ts";
@@ -52,7 +54,6 @@ export class OutputAccumulator {
 	private tempFilePath: string | undefined;
 	private tempFileStream: WriteStream | undefined;
 	private tempFileError: Error | undefined;
-	private tempFileErrorListener: ((error: Error) => void) | undefined;
 
 	constructor(options: OutputAccumulatorOptions = {}) {
 		this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
@@ -146,35 +147,68 @@ export class OutputAccumulator {
 			return;
 		}
 		if (this.tempFileError) {
-			if (this.tempFileErrorListener) stream.off("error", this.tempFileErrorListener);
-			stream.destroy();
+			await new Promise<void>((resolve) => {
+				if (stream.closed) {
+					resolve();
+					return;
+				}
+				stream.once("close", resolve);
+				stream.destroy();
+			});
+			try {
+				await this.removeTempFile();
+			} catch (unlinkError) {
+				throw new AggregateError([this.tempFileError, unlinkError], "Output spill cleanup failed");
+			}
 			throw this.tempFileError;
 		}
 
-		await new Promise<void>((resolve, reject) => {
-			let settled = false;
-			const cleanup = () => {
-				stream.off("error", onError);
-				if (this.tempFileErrorListener) stream.off("error", this.tempFileErrorListener);
-				stream.off("close", onClose);
-			};
-			const settle = (error?: Error) => {
-				if (settled) return;
-				settled = true;
-				cleanup();
-				if (error) reject(error);
-				else resolve();
-			};
-			const onError = (error: Error) => {
-				this.tempFileError ??= error;
-			};
-			const onClose = () => {
-				settle(this.tempFileError);
-			};
-			stream.on("error", onError);
-			stream.once("close", onClose);
-			stream.end();
-		});
+		try {
+			await new Promise<void>((resolve, reject) => {
+				let finished = false;
+				let closed = false;
+				let streamError: Error | undefined;
+				const settle = () => {
+					if (!closed) {
+						return;
+					}
+					stream.off("finish", onFinish);
+					stream.off("error", onError);
+					stream.off("close", onClose);
+					if (streamError) {
+						reject(streamError);
+					} else if (finished) {
+						resolve();
+					} else {
+						reject(new Error("Output spill stream closed before finish"));
+					}
+				};
+				const onError = (error: Error) => {
+					streamError ??= error;
+				};
+				const onFinish = () => {
+					finished = true;
+				};
+				const onClose = () => {
+					closed = true;
+					if (!finished && !stream.destroyed) {
+						stream.destroy();
+					}
+					settle();
+				};
+				stream.once("error", onError);
+				stream.once("finish", onFinish);
+				stream.once("close", onClose);
+				stream.end();
+			});
+		} catch (error) {
+			try {
+				await this.removeTempFile();
+			} catch (unlinkError) {
+				throw new AggregateError([error, unlinkError], "Output spill cleanup failed");
+			}
+			throw error;
+		}
 	}
 
 	getLastLineBytes(): number {
@@ -229,14 +263,22 @@ export class OutputAccumulator {
 		}
 		this.tempFilePath = defaultTempFilePath(this.tempFilePrefix);
 		this.tempFileStream = createWriteStream(this.tempFilePath);
-		this.tempFileErrorListener = (error) => {
+		this.tempFileStream.on("error", (error) => {
 			this.tempFileError ??= error;
-		};
-		this.tempFileStream.on("error", this.tempFileErrorListener);
+		});
 		for (const chunk of this.rawChunks) {
 			this.tempFileStream.write(chunk);
 		}
 		this.rawChunks = [];
+	}
+
+	async removeTempFile(): Promise<void> {
+		if (!this.tempFilePath) {
+			return;
+		}
+		const path = this.tempFilePath;
+		await rm(path, { force: true });
+		this.tempFilePath = undefined;
 	}
 
 	private takeTempFileStream(): WriteStream | undefined {

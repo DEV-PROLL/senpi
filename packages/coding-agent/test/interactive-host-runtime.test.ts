@@ -1256,6 +1256,44 @@ describe("interactive host runtime", () => {
 		}
 	});
 
+	it.each([
+		["host async callback failed", "host async callback failed"],
+		[{ host: "callback", failure: true }, "host callback object failed"],
+		[new Error("host callback error"), "host callback error"],
+	])("propagates shared-host async bash callback failures (%s)", async (callbackError, _label) => {
+		const qa = scratch("rbc");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const runtime = await createInteractiveHostRuntime(
+			await createAgentSessionRuntimeFixture({
+				cwd: qa.cwd,
+				agentDir: qa.agentDir,
+				sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+				settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+			}),
+			{ socket: qa.socket, ensureHost: async () => undefined },
+		);
+		let unhandledRejection: unknown;
+		const onUnhandledRejection = (reason: unknown) => {
+			unhandledRejection = reason;
+		};
+		process.once("unhandledRejection", onUnhandledRejection);
+		try {
+			await expect(
+				runtime.session.executeBash(`head -c 100001 /dev/zero | tr '\\0' x`, async () => {
+					throw callbackError;
+				}),
+			).rejects.toBe(callbackError);
+			expect(unhandledRejection).toBeUndefined();
+		} finally {
+			process.removeListener("unhandledRejection", onUnhandledRejection);
+			await runtime.dispose();
+			await fake.close();
+		}
+	});
+
 	it("preserves mixed queue chronology through the proxy clear", async () => {
 		const qa = scratch("queue-order");
 		const fake = await startFakeModelServer();

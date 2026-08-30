@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionEvent, AgentSessionEventListener } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
@@ -85,6 +86,12 @@ export async function createInteractiveHostRuntime(
 			opened.state,
 			options.onWarning,
 		);
+		if (opened.state.isBashRunning && !opened.attached) {
+			// Only a newly opened session can have an execution orphaned by a
+			// previous connection. An attach is an observer of the same live runtime;
+			// aborting it would cancel work owned by the surviving attachment.
+			await client.abortBash().catch(() => {});
+		}
 		await remoteSession.refresh();
 		return new RemoteInteractiveRuntime(localRuntime, remoteSession, client) as unknown as AgentSessionRuntime;
 	} catch (cause) {
@@ -254,7 +261,60 @@ function createRemoteSessionProxy(
 		});
 	};
 	let state = { ...initialState };
-	const bashChunks = new Map<string, (chunk: string) => void>();
+	const waitForBashCallbacks = async (promises: Set<Promise<void>>, allowAbandonment: boolean): Promise<boolean> => {
+		if (promises.size === 0) return true;
+		const settled = Promise.allSettled([...promises]).then(() => true);
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const bounded = new Promise<false>((resolve) => {
+			timeout = setTimeout(resolve, allowAbandonment ? 100 : 5_000, false);
+			timeout.unref?.();
+		});
+		try {
+			return await Promise.race([settled, bounded]);
+		} finally {
+			if (timeout) clearTimeout(timeout);
+		}
+	};
+	const executionNamespace = randomUUID();
+	const cleanupRemoteBashOutput = async (path: string): Promise<void> => {
+		let cleanupTimeout: ReturnType<typeof setTimeout> | undefined;
+		try {
+			await Promise.race([
+				client.cleanupBashOutput(path),
+				new Promise<never>((_, reject) => {
+					cleanupTimeout = setTimeout(() => reject(new Error("RPC cleanup timed out")), 1_000);
+				}),
+			]);
+			return;
+		} catch (transportError) {
+			// Spill paths are shared host filesystem paths. If the RPC transport is
+			// already unavailable, remove locally as a bounded best-effort fallback;
+			// a later reconnect is not required to prevent this callback failure from
+			// permanently leaking the host-owned artifact.
+			try {
+				await rm(path, { force: true });
+				return;
+			} catch (localError) {
+				onWarning?.({
+					type: "interactive_host_action_failed",
+					message: `Warning: failed to clean up shared bash output spill: ${localError instanceof Error ? localError.message : String(localError)}`,
+					cause: new AggregateError([transportError, localError]),
+				});
+			}
+		} finally {
+			if (cleanupTimeout) clearTimeout(cleanupTimeout);
+		}
+	};
+	let nextBashExecutionId = 0;
+	const bashExecutions = new Map<
+		string,
+		{
+			chunk?: (chunk: string) => void | PromiseLike<void>;
+			promises: Set<Promise<void>>;
+			error: unknown;
+			hasError: boolean;
+		}
+	>();
 	let hostUiHandler: InteractiveHostUiHandler | undefined;
 	const pendingUiRequests: import("../rpc/rpc-types.ts").RpcExtensionUIRequest[] = [];
 	let localBashAbortController: AbortController | undefined;
@@ -302,7 +362,29 @@ function createRemoteSessionProxy(
 			hostBashRunning = false;
 			updateBashState();
 		}
-		if (wireEvent.type === "bash_execution_update" && wireEvent.id) bashChunks.get(wireEvent.id)?.(wireEvent.delta);
+		if (wireEvent.type === "bash_execution_update" && wireEvent.id) {
+			const execution = bashExecutions.get(wireEvent.id);
+			if (execution?.chunk && !execution.hasError) {
+				try {
+					const callbackPromise = Promise.resolve(execution.chunk(wireEvent.delta)).catch((error) => {
+						if (!execution.hasError) {
+							execution.error = error;
+							execution.hasError = true;
+							void client.abortBash().catch(() => {});
+						}
+						throw error;
+					});
+					execution.promises.add(callbackPromise);
+					void callbackPromise.catch(() => {}).finally(() => execution.promises.delete(callbackPromise));
+				} catch (error) {
+					if (!execution.hasError) {
+						execution.error = error;
+						execution.hasError = true;
+						void client.abortBash().catch(() => {});
+					}
+				}
+			}
+		}
 		if (wireEvent.type === "agent_start") state = { ...state, isStreaming: true };
 		if (wireEvent.type === "compaction_start") state = { ...state, isCompacting: true };
 		if (wireEvent.type === "compaction_end") state = { ...state, isCompacting: false };
@@ -516,7 +598,7 @@ function createRemoteSessionProxy(
 			if (property === "executeBash")
 				return async (
 					command: string,
-					onChunk?: (chunk: string) => void,
+					onChunk?: (chunk: string) => void | PromiseLike<void>,
 					options?: { excludeFromContext?: boolean; operations?: BashOperations | Record<string, unknown> },
 				) => {
 					if (options?.operations && typeof options.operations.exec === "function") {
@@ -544,16 +626,32 @@ function createRemoteSessionProxy(
 							updateBashState();
 						}
 					}
-					const bashId = randomUUID();
-					if (onChunk) bashChunks.set(bashId, onChunk);
+					const executionId = `bash-${executionNamespace}-${++nextBashExecutionId}`;
+					const execution = {
+						chunk: onChunk,
+						promises: new Set<Promise<void>>(),
+						error: undefined as unknown,
+						hasError: false,
+					};
+					bashExecutions.set(executionId, execution);
 					try {
-						return await client.bash(command, {
+						const result = await client.bash(command, {
 							excludeFromContext: options?.excludeFromContext,
+							executionId,
 							operations: options?.operations as Record<string, unknown> | undefined,
-							bashId,
 						});
+						const callbacksSettled = await waitForBashCallbacks(execution.promises, false);
+						if (!callbacksSettled) {
+							if (result.fullOutputPath) await cleanupRemoteBashOutput(result.fullOutputPath);
+							throw new Error("Bash output callback did not settle within 5000ms");
+						}
+						if (execution.hasError) {
+							if (result.fullOutputPath) await cleanupRemoteBashOutput(result.fullOutputPath);
+							throw execution.error;
+						}
+						return result;
 					} finally {
-						bashChunks.delete(bashId);
+						bashExecutions.delete(executionId);
 					}
 				};
 			if (property === "abortBash")
