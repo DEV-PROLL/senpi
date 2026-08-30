@@ -158,7 +158,8 @@ export function admitContextToolResults(
 			const part = content[target];
 			if (part.type !== "text") break;
 			const text = part.text ?? "";
-			const omissionIndex = text.indexOf("\n[tool-result admission:");
+			const omissionIndex = text.indexOf("[tool-result admission:");
+			if (omissionIndex === 1 || omissionIndex === 0) break;
 			const prefix = omissionIndex >= 0 ? text.slice(0, omissionIndex) : text;
 			const suffix = omissionIndex >= 0 ? text.slice(omissionIndex) : "";
 			const nextText = `${prefix.slice(0, Math.floor(prefix.length / 2))}${suffix}`;

@@ -142,6 +142,33 @@ describe("ideal compaction extension wiring decisions", () => {
 		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(cap);
 	});
 
+	it("keeps tiny-cap omission metadata reachable", () => {
+		const cap = 60;
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "tiny",
+				toolName: "test",
+				isError: false,
+				timestamp: 0,
+				content: [
+					{ type: "text" as const, text: "a".repeat(10_000) },
+					{ type: "text" as const, text: "b".repeat(10_000) },
+				],
+			},
+		];
+		const projected = admitContextToolResults(messages, 1_200, true, cap)[0] as {
+			content: Array<{ type: string; text?: string }>;
+		};
+		const text = projected.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text ?? "")
+			.join("\n");
+		expect(text).toContain("tool-result admission:");
+		expect(text.match(/tool-result-[^\s;]+/g)).toHaveLength(2);
+		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeGreaterThan(cap);
+	});
+
 	it.each([60, 200, 1000, 10000])("keeps aggregate admission bounded at cap %i across oversized parts", (cap) => {
 		for (let count = 1; count <= 4; count++) {
 			const messages = [
@@ -164,7 +191,18 @@ describe("ideal compaction extension wiring decisions", () => {
 				.filter((part) => part.type === "text")
 				.map((part) => part.text ?? "")
 				.join("\n");
-			expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(cap);
+			const paths = [...text.matchAll(/full output at (\S+)/g)].map((match) => match[1]);
+			for (const path of paths) expect(text).toContain(path);
+			const omissionCost = text.includes("tool-result admission:")
+				? estimateTokens({
+						role: "user",
+						content: text.slice(text.indexOf("[tool-result admission:")),
+						timestamp: 0,
+					})
+				: 0;
+			expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(
+				Math.max(cap, omissionCost + 1),
+			);
 		}
 	});
 
