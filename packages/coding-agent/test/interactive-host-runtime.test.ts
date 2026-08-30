@@ -76,7 +76,11 @@ function spawnHost(
 		{
 			cwd: qa.cwd,
 			env: {
-				...process.env,
+				...Object.fromEntries(
+					Object.entries(process.env).filter(
+						([key]) => key !== "SENPI_BRAND" && !key.endsWith("_CODING_AGENT_DIR") && !key.endsWith("_CODING_AGENT_SESSION_DIR"),
+					),
+				),
 				...hermeticProviderEnv(),
 				PI_OFFLINE: "1",
 				PI_TELEMETRY: "0",
