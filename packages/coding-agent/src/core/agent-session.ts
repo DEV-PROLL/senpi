@@ -1095,6 +1095,8 @@ export class AgentSession {
 	private readonly _evalOnlyToolNamesOverride?: ReadonlySet<string>;
 	/** Policy tools withheld from the model, retained so disarming can restore direct access. */
 	private readonly _withheldEvalOnlyToolNames = new Set<string>();
+	/** Eval-only hint names this session published, so a disarm can withdraw exactly those. */
+	private readonly _publishedEvalOnlyHintNames = new Set<string>();
 	/** Active-tool selection as requested by callers, before eval-only filtering. */
 	private _requestedActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
@@ -3053,12 +3055,25 @@ export class AgentSession {
 		return names.length > 0 ? new Set(names) : undefined;
 	}
 
-	/** Publish per-tool eval-only redirect hints so a direct call names its own eval helper. */
+	/**
+	 * Publish per-tool eval-only redirect hints so a direct call names its own eval helper.
+	 *
+	 * Hints published here are tracked so a disarm - or a shrinking armed set, e.g. bash+workflow
+	 * down to workflow only - withdraws the stale ones. Only tracked names are ever deleted, so
+	 * hints owned by other publishers survive.
+	 */
 	private _publishEvalOnlyToolHints(): void {
-		if (!this._isEvalOnlyPolicyArmed()) return;
-		for (const name of this._evalOnlyToolNames ?? []) {
+		const armed = this._isEvalOnlyPolicyArmed() ? (this._evalOnlyToolNames ?? new Set<string>()) : undefined;
+		for (const name of this._publishedEvalOnlyHintNames) {
+			if (armed?.has(name)) continue;
+			delete this.agent.removedToolHints[name];
+		}
+		this._publishedEvalOnlyHintNames.clear();
+		if (!armed) return;
+		for (const name of armed) {
 			this.agent.removedToolHints[name] =
 				`Run ${name} inside an eval cell via ${evalHelperCall(name)}; hooks and permissions still apply.`;
+			this._publishedEvalOnlyHintNames.add(name);
 		}
 	}
 
@@ -3318,6 +3333,15 @@ export class AgentSession {
 		if (armed.has("workflow")) {
 			sentences.push(
 				`The workflow tool runs ONLY inside eval cells via ${evalHelperCall("workflow")}; hooks and permissions still apply.`,
+			);
+		}
+		// SDK embedders can arm names outside the built-in groups; they still need eval guidance.
+		const otherHelpers = [...armed]
+			.filter((name) => !EVAL_ONLY_SHELL_TOOL_NAMES.includes(name) && name !== "workflow")
+			.map(evalHelperCall);
+		if (otherHelpers.length > 0) {
+			sentences.push(
+				`These tools run ONLY inside eval cells via ${otherHelpers.join(" or ")}; hooks and permissions still apply.`,
 			);
 		}
 		return sentences.length > 0 ? `${prompt}\n\n${sentences.join("\n\n")}` : prompt;

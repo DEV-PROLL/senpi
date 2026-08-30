@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { describe, expect, it, vi } from "vitest";
@@ -18,6 +20,12 @@ function textOf(result: { content: Array<{ type: string; text?: string }> }): st
 function armedNames(harness: Harness): string[] {
 	const session = harness.session as unknown as { _evalOnlyToolNames?: ReadonlySet<string> };
 	return [...(session._evalOnlyToolNames ?? [])];
+}
+
+/** Arm the policy directly, standing in for an SDK embedder's evalOnlyToolNames override. */
+function arm(harness: Harness, names: string[]): void {
+	const session = harness.session as unknown as { _evalOnlyToolNames: ReadonlySet<string> };
+	session._evalOnlyToolNames = new Set(names);
 }
 
 interface WorkflowHarnessOptions {
@@ -202,6 +210,218 @@ describe("experimental workflow eval-only policy", () => {
 			expect(harness.session.systemPrompt).toContain("tool.bash(");
 			expect(harness.session.systemPrompt).toContain("tool.powershell(");
 			expect(harness.session.systemPrompt).toContain("tool.workflow(");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("explains eval-only names an SDK override armed outside the built-in groups", async () => {
+		// Given: an embedder arms a custom tool name that is neither a shell tool nor workflow
+		const { harness } = await createWorkflowHarness();
+		try {
+			arm(harness, ["custom"]);
+
+			// When: the active tool set is rebuilt under that policy
+			harness.session.setActiveToolsByName(["read", "edit", "write"]);
+
+			// Then: the prompt still names the generic eval helper for that tool
+			expect(harness.session.systemPrompt).toContain(
+				"These tools run ONLY inside eval cells via tool.custom({ ... }); hooks and permissions still apply.",
+			);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("keeps the shell and workflow sentences when a custom override name is armed alongside them", async () => {
+		// Given: an override arming a shell tool, workflow, and a custom name at once
+		const { harness } = await createWorkflowHarness();
+		try {
+			arm(harness, ["bash", "workflow", "custom"]);
+
+			// When: the active tool set is rebuilt under that policy
+			harness.session.setActiveToolsByName(["read", "edit", "write"]);
+
+			// Then: all three sentences are present, with the built-in wording unchanged
+			const prompt = harness.session.systemPrompt;
+			expect(prompt).toContain(
+				'Shell commands run ONLY inside eval cells via tool.bash({ command: "..." }); hooks and permissions still apply.',
+			);
+			expect(prompt).toContain(
+				'The workflow tool runs ONLY inside eval cells via tool.workflow({ action: "..." }); hooks and permissions still apply.',
+			);
+			expect(prompt).toContain(
+				"These tools run ONLY inside eval cells via tool.custom({ ... }); hooks and permissions still apply.",
+			);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("drops hints for names that leave the armed set when the policy shrinks", async () => {
+		// Given: a session armed for both shell tools and workflow
+		const { harness } = await createWorkflowHarness();
+		try {
+			arm(harness, ["bash", "powershell", "workflow"]);
+			harness.session.setActiveToolsByName(["read", "edit", "write"]);
+			expect(harness.agent.removedToolHints.workflow).toContain(WORKFLOW_HINT);
+			expect(harness.agent.removedToolHints.bash).toBeDefined();
+
+			// When: the armed set shrinks to workflow only
+			arm(harness, ["workflow"]);
+			harness.session.setActiveToolsByName(["read", "edit", "write"]);
+
+			// Then: the shell hints are withdrawn while workflow keeps its hint
+			expect(harness.agent.removedToolHints.bash).toBeUndefined();
+			expect(harness.agent.removedToolHints.powershell).toBeUndefined();
+			expect(harness.agent.removedToolHints.workflow).toContain(WORKFLOW_HINT);
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("leaves hints published by other owners untouched when the policy disarms", async () => {
+		// Given: an armed session plus an unrelated hint published by someone else
+		const { harness } = await createWorkflowHarness();
+		try {
+			arm(harness, ["workflow"]);
+			harness.session.setActiveToolsByName(["read", "edit", "write"]);
+			harness.agent.removedToolHints.somethingElse = "owned by another publisher";
+
+			// When: the policy disarms
+			(harness.session as unknown as { _evalOnlyToolNames?: ReadonlySet<string> })._evalOnlyToolNames = undefined;
+			harness.session.setActiveToolsByName(["read", "workflow", "edit", "write"]);
+
+			// Then: only the policy's own hint is removed
+			expect(harness.agent.removedToolHints.workflow).toBeUndefined();
+			expect(harness.agent.removedToolHints.somethingElse).toBe("owned by another publisher");
+		} finally {
+			harness.cleanup();
+		}
+	});
+});
+
+describe("experimental workflow eval-only policy across reload", () => {
+	async function createReloadHarness(options: {
+		flagOn?: boolean;
+		settings?: Record<string, unknown>;
+	}): Promise<Harness> {
+		const extensionFactory: ExtensionFactory = (pi) => {
+			pi.registerTool({
+				name: "eval",
+				label: "Eval",
+				description: "Evaluate code",
+				parameters: Type.Object({}),
+				execute: async () => ({ content: [{ type: "text", text: "eval" }], details: {} }),
+			});
+			pi.registerTool({
+				name: "workflow",
+				label: "Workflow",
+				description: "Run a workflow action",
+				parameters: Type.Object({ action: Type.String() }),
+				execute: async (_toolCallId, params) => ({
+					content: [{ type: "text", text: `workflow-ran:${params.action}` }],
+					details: {},
+				}),
+			});
+		};
+		const settings = options.settings ?? (options.flagOn ? { experimental: { workflowEvalOnly: true } } : undefined);
+		return await createHarness({
+			fileSettings: true,
+			...(settings ? { settings } : {}),
+			initialActiveToolNames: ["read", "bash", "powershell", "workflow", "edit"],
+			extensionFactories: [extensionFactory],
+		});
+	}
+
+	function writeSettings(harness: Harness, contents: Record<string, unknown>): void {
+		writeFileSync(join(harness.tempDir, "agent", "settings.json"), JSON.stringify(contents));
+	}
+
+	it("arms the policy when the workflow flag is turned on and the session reloads", async () => {
+		// Given: a session started with the flag off, so workflow is directly available
+		const harness = await createReloadHarness({ flagOn: false });
+		try {
+			expect(harness.session.getActiveToolNames()).toContain("workflow");
+
+			// When: the flag is turned on and the session reloads
+			writeSettings(harness, { experimental: { workflowEvalOnly: true } });
+			await harness.session.reload();
+
+			// Then: workflow is withheld and the eval guidance is appended
+			expect(armedNames(harness)).toEqual(["workflow"]);
+			expect(harness.session.getActiveToolNames()).not.toContain("workflow");
+			expect(harness.agent.removedToolHints.workflow).toContain(WORKFLOW_HINT);
+			expect(harness.session.systemPrompt).toContain("tool.workflow(");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("disarms and clears the workflow hint when the flag is turned off and the session reloads", async () => {
+		// Given: an armed session that has already published the workflow hint
+		const harness = await createReloadHarness({ flagOn: true });
+		try {
+			expect(harness.session.getActiveToolNames()).not.toContain("workflow");
+			expect(harness.agent.removedToolHints.workflow).toContain(WORKFLOW_HINT);
+
+			// When: the flag is removed and the session reloads
+			writeSettings(harness, {});
+			await harness.session.reload();
+
+			// Then: workflow comes back and its stale redirect hint is withdrawn
+			expect(harness.session.getActiveToolNames()).toContain("workflow");
+			expect(harness.agent.removedToolHints.workflow).toBeUndefined();
+			expect(harness.session.systemPrompt).not.toContain("tool.workflow(");
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("keeps shell tools armed when only the workflow flag is turned off across a reload", async () => {
+		// Given: a session armed for the union of both groups
+		const harness = await createReloadHarness({
+			settings: { experimental: { bashEvalOnly: true, workflowEvalOnly: true } },
+		});
+		try {
+			expect(new Set(armedNames(harness))).toEqual(new Set(["bash", "powershell", "workflow"]));
+			expect(harness.agent.removedToolHints.workflow).toContain(WORKFLOW_HINT);
+
+			// When: only the workflow flag is turned off and the session reloads
+			writeSettings(harness, { experimental: { bashEvalOnly: true } });
+			await harness.session.reload();
+
+			// Then: shell tools stay withheld while workflow returns without a stale hint
+			expect(new Set(armedNames(harness))).toEqual(new Set(["bash", "powershell"]));
+			const active = harness.session.getActiveToolNames();
+			expect(active).toContain("workflow");
+			expect(active).not.toContain("bash");
+			expect(harness.agent.removedToolHints.workflow).toBeUndefined();
+			expect(harness.agent.removedToolHints.bash).toBeDefined();
+		} finally {
+			harness.cleanup();
+		}
+	});
+
+	it("retains the withheld workflow tool across a reload so a later disarm restores it", async () => {
+		// Given: an armed session whose workflow request is already filtered out
+		const harness = await createReloadHarness({ flagOn: true });
+		try {
+			expect(harness.session.getActiveToolNames()).not.toContain("workflow");
+
+			// When: the session reloads while still armed
+			await harness.session.reload();
+
+			// Then: workflow stays hidden but the unfiltered request still carries it
+			expect(harness.session.getActiveToolNames()).not.toContain("workflow");
+			const retained = (harness.session as unknown as { _requestedActiveToolNames?: string[] })
+				._requestedActiveToolNames;
+			expect(retained).toContain("workflow");
+
+			// And: a later disarm restores it
+			writeSettings(harness, {});
+			await harness.session.reload();
+			expect(harness.session.getActiveToolNames()).toContain("workflow");
 		} finally {
 			harness.cleanup();
 		}
