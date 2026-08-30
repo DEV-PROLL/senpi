@@ -1585,6 +1585,9 @@ export class AgentSession {
 
 	/** Emit an event to all listeners */
 	private _emitEntryAppended(entryId: string): void {
+		// Durable entry notifications synchronize the shared-host RPC proxy. Keep
+		// them off local event streams so ordinary lifecycle ordering stays stable.
+		if (this._extensionMode !== "rpc") return;
 		const entry = this.sessionManager.getEntry(entryId);
 		if (entry) this._emit({ type: "entry_appended", entry });
 	}
