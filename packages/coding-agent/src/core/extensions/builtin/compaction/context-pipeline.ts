@@ -26,6 +26,9 @@ export function buildCompactionContext(input: {
 	emergencyPruneLatch: EmergencyPruneLatch;
 	reminder?: string;
 }) {
+	if (input.laneOwnsCompaction) {
+		return repairOrphanedToolResults(convertToLlm(input.event.messages));
+	}
 	const admittedMessages = admitContextToolResults(
 		input.event.messages,
 		input.contextWindow,
