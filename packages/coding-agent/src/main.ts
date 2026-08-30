@@ -51,6 +51,7 @@ import {
 import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
 import { envValue } from "./core/brand.ts";
+import { shouldJoinSharedHost } from "./core/shared-host-policy.ts";
 import { type CredentialAccountSummary, summarizeCredentialAccounts } from "./core/credential-accounts.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
@@ -1105,7 +1106,19 @@ export async function main(args: string[], options?: MainOptions) {
 	});
 	time("createAgentSessionRuntime");
 	let selectedRuntime = runtime;
-	if (appMode === "interactive" && !isTruthyEnvFlag(envValue("DISABLE_SHARED_HOST"))) {
+	if (isTruthyEnvFlag(envValue("DISABLE_SHARED_HOST"))) {
+		console.error(
+			chalk.yellow(
+				"DISABLE_SHARED_HOST is obsolete: the shared session host is now off by default. Set ENABLE_SHARED_HOST=1 or experimental.sharedHost to opt in.",
+			),
+		);
+	}
+	if (
+		shouldJoinSharedHost(appMode, {
+			enableEnv: isTruthyEnvFlag(envValue("ENABLE_SHARED_HOST")),
+			settingEnabled: runtime.services.settingsManager.getExperimentalSharedHost(),
+		})
+	) {
 		const socket = envValue("RPC_SOCKET") ?? resolve(agentDir, "rpc", "rpc.sock");
 		selectedRuntime = await createInteractiveHostRuntime(runtime, {
 			socket,
