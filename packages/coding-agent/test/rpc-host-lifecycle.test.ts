@@ -21,9 +21,11 @@ import { processMatchesPidFile, readProcessStartTime } from "../src/modes/app-se
 import { createHostDaemonPaths, ensureHost, type HostLifecyclePolicyInput } from "../src/modes/rpc/host-ensure.ts";
 import {
 	DEFAULT_HOST_IDLE_EXIT_MS,
+	findInternalSupervisorArgs,
 	HOST_COLD_START_ENV,
 	HOST_IDLE_EXIT_MS_ENV,
 	IdleExitDecider,
+	INTERNAL_SUPERVISOR_FLAG,
 	resolveHostChildLaunch,
 	resolveHostPolicy,
 } from "../src/modes/rpc/host-lifecycle.ts";
@@ -339,6 +341,51 @@ describe("host watchdog configuration", () => {
 		expect(await reason).toContain("closed");
 		expect(existsSync(scratchDir)).toBe(false);
 	}, 15_000);
+});
+
+describe("findInternalSupervisorArgs", () => {
+	it("dispatches when the sentinel leads argv", () => {
+		expect(findInternalSupervisorArgs([INTERNAL_SUPERVISOR_FLAG, "--socket", "/tmp/qa.sock"])).toEqual([
+			"--socket",
+			"/tmp/qa.sock",
+		]);
+	});
+
+	it("dispatches through a rebranded wrapper's injected --extension prefix", () => {
+		// packages/omo-native prepends this pair to every non-early command, which
+		// is exactly the argv shape that used to miss the route entirely.
+		expect(
+			findInternalSupervisorArgs([
+				"--extension",
+				"/opt/branded/plugin",
+				INTERNAL_SUPERVISOR_FLAG,
+				"--socket",
+				"/tmp/qa.sock",
+			]),
+		).toEqual(["--socket", "/tmp/qa.sock"]);
+	});
+
+	it("refuses a sentinel that follows a positional operand", () => {
+		expect(
+			findInternalSupervisorArgs(["explain this", INTERNAL_SUPERVISOR_FLAG, "--socket", "/tmp/x"]),
+		).toBeUndefined();
+	});
+
+	it("refuses a sentinel escaped behind --", () => {
+		expect(findInternalSupervisorArgs(["--", INTERNAL_SUPERVISOR_FLAG, "--socket", "/tmp/x"])).toBeUndefined();
+	});
+
+	it("refuses a sentinel behind an unknown flag", () => {
+		expect(findInternalSupervisorArgs(["--print", INTERNAL_SUPERVISOR_FLAG])).toBeUndefined();
+	});
+
+	it("refuses a dangling prefix flag with no value", () => {
+		expect(findInternalSupervisorArgs(["--extension"])).toBeUndefined();
+	});
+
+	it("returns undefined when the sentinel is absent", () => {
+		expect(findInternalSupervisorArgs(["--mode", "rpc"])).toBeUndefined();
+	});
 });
 
 describe("resolveHostChildLaunch", () => {

@@ -47,6 +47,7 @@ async function main() {
 	let fake;
 	let tui;
 	let output = "";
+	let supervisorStopped = false;
 	try {
 		if (!binaryPath || !existsSync(binaryPath)) {
 			throw new Error(`--binary must name an existing compiled binary (got: ${binaryPath ?? "<missing>"})`);
@@ -93,6 +94,7 @@ async function main() {
 		stopTui(tui);
 		tui = undefined;
 		await stopSupervisor(paths, socketPath);
+		supervisorStopped = true;
 		transcript.push("assert supervisor-sigterm=clean pidfile-socket-removed");
 		transcript.push("PASS compiled-host");
 	} catch (error) {
@@ -106,6 +108,13 @@ async function main() {
 		process.exitCode = 1;
 	} finally {
 		if (tui) stopTui(tui);
+		// The supervisor is detached and outlives this process, so every exit path -
+		// including a failed run - must reap it or the QA leaks a live host and a
+		// bound socket into the developer's machine.
+		if (!supervisorStopped && scratch) {
+			const reaped = await reapSupervisor(createHostDaemonPaths(scratch.agentDir));
+			transcript.push(`cleanup-supervisor=${reaped}`);
+		}
 		await fake?.stop().catch(() => undefined);
 		await cleanupAllAndWait();
 		transcript.push("cleanup=tui,supervisor,sockets,scratch-removed");
@@ -211,6 +220,32 @@ async function stopSupervisor(paths, socketPath) {
 		await delay(100);
 	}
 	throw new Error(`supervisor ${pid} did not clean up within 10s (socket=${existsSync(socketPath)} pidfile=${existsSync(paths.pidFile)})`);
+}
+
+/**
+ * Best-effort teardown for a supervisor left behind by a failed run. Escalates
+ * to SIGKILL so a wedged supervisor cannot survive the QA process.
+ */
+async function reapSupervisor(paths) {
+	let pid;
+	try {
+		pid = JSON.parse(readFileSync(paths.pidFile, "utf8")).pid;
+	} catch {
+		return "none";
+	}
+	for (const signal of ["SIGTERM", "SIGKILL"]) {
+		try {
+			process.kill(pid, signal);
+		} catch {
+			return `already-gone(${pid})`;
+		}
+		const deadline = Date.now() + 5_000;
+		while (Date.now() <= deadline) {
+			if (!alive(pid)) return `${signal}(${pid})`;
+			await delay(100);
+		}
+	}
+	return `survived(${pid})`;
 }
 
 function alive(pid) {

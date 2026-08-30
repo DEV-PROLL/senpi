@@ -173,6 +173,41 @@ export interface SupervisorLaunch {
 	readonly agentDir?: string;
 }
 
+/** Hidden internal launch route: wire-invisible, never advertised by the public CLI surface. */
+export const INTERNAL_SUPERVISOR_FLAG = "--internal-rpc-host-supervisor";
+
+/**
+ * Engine-global flags a rebranded wrapper may legitimately prepend when it
+ * re-dispatches this binary. `packages/omo-native` injects `--extension <dir>`
+ * for every non-early command, which pushed the sentinel off argv[0].
+ */
+const INJECTABLE_PREFIX_FLAGS = new Set(["--extension"]);
+
+/**
+ * Returns the internal supervisor payload when argv selects that route.
+ *
+ * The route dispatches when the sentinel is argv[0] OR is preceded only by
+ * known injectable prefix flags and their values - the one perturbation
+ * wrappers legitimately perform. Everything else disqualifies it: a positional
+ * operand, `--`, or an unknown flag before the sentinel all return undefined,
+ * so a user-supplied value that happens to equal the sentinel can never reach
+ * the supervisor.
+ *
+ * The skipped prefix is deliberately NOT forwarded to the host: a wrapper
+ * re-injects its own prefix on every re-entry, so the host child receives it
+ * from the wrapper rather than twice from here.
+ */
+export function findInternalSupervisorArgs(argv: readonly string[]): readonly string[] | undefined {
+	for (let index = 0; index < argv.length; index++) {
+		const arg = argv[index];
+		if (arg === INTERNAL_SUPERVISOR_FLAG) return argv.slice(index + 1);
+		// A prefix flag only counts when its value is actually present.
+		if (!INJECTABLE_PREFIX_FLAGS.has(arg) || index + 1 >= argv.length) return undefined;
+		index++;
+	}
+	return undefined;
+}
+
 /** `--socket <path>` selects the public socket; every other argument is forwarded to the host CLI. */
 export function parseSupervisorArgs(argv: readonly string[]): SupervisorLaunch | undefined {
 	const hostArgs: string[] = [];
