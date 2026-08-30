@@ -2,6 +2,27 @@
 
 ## 2026-08-30 - Require agentDir for the RPC project-trust gate
 
+## 2026-08-30 - Carry the replacement identity as durableSessionId
+
+### What changed
+
+- `rpc-types.ts` / `connection-handler.ts`: `session_replaced` now carries `durableSessionId` instead of `sessionId`.
+
+### Why
+
+- Top-level `sessionId` is the per-connection routing handle, and `tagSessionRecord()` applies it last (`{ ...value, sessionId: routingSessionId }`). A multi-session host therefore overwrote the durable identity in the payload, leaving the event with no identity at all - the exact information it exists to deliver. In classic mode the untagged payload key also broke the pin that no classic line carries a top-level `sessionId`. Renaming to the vocabulary the D6 table already uses for `list_sessions` fixes both modes and keeps `sessionId` meaning exactly one thing on the wire.
+
+### Why an extension could not handle it
+
+- The event is emitted by the connection handler beneath the extension API; no extension hook can rewrite an outbound wire record.
+
+### Expected merge conflict zones
+
+- LOW: the `session_replaced` payload in `rebindSession()` and its interface in `rpc-types.ts`.
+
+
+## 2026-08-30 - Reschedule the retained-queue drain when an enqueue races its settling
+
 - `connection-handler.ts` now requires an authoritative `agentDir` when projecting RPC session state and reads project trust only from a fresh `ProjectTrustStore` lookup for the session's current cwd.
 - The old `settingsManager.isProjectTrusted()` fallback is removed because that verdict can belong to a previous cwd after a session replacement. Missing `agentDir` now throws an explicit RPC session invariant error rather than silently selecting a stale trust verdict.
 - RPC test doubles now provide temporary agent directories and seeded trust-store entries.
