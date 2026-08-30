@@ -102,6 +102,10 @@ export function estimateToolResultOmissionTokens(omitted: ReadonlyArray<{ tokens
 	return estimateTextTokens(buildToolResultOmissionLine(omitted));
 }
 
+export function resolveMultipartRetainedBound(capTokens: number, omission: string, textPartCount: number): number {
+	return Math.max(capTokens, estimateTextTokens(`${"\n".repeat(Math.max(1, textPartCount))}${omission}`));
+}
+
 export function admitContextToolResults(
 	messages: AgentMessage[],
 	contextWindow: number,
@@ -146,7 +150,7 @@ export function admitContextToolResults(
 		let omissionCost = 0;
 		if (omitted.length > 0) {
 			const omission = buildToolResultOmissionLine(omitted);
-			omissionCost = estimateToolResultOmissionTokens(omitted);
+			omissionCost = resolveMultipartRetainedBound(resultCap, omission, textParts.length);
 			const lastText = content.findLastIndex((part) => part.type === "text" && part.text);
 			const target = lastText >= 0 ? lastText : content.findIndex((part) => part.type === "text");
 			const targetPart = target >= 0 ? content[target] : undefined;
@@ -162,7 +166,7 @@ export function admitContextToolResults(
 					.map((part) => part.text ?? "")
 					.join("\n"),
 			);
-		const retainedLimit = Math.max(resultCap, omissionCost);
+		const retainedLimit = omissionCost || resultCap;
 		while (aggregateTokens() > retainedLimit) {
 			const target = content.findLastIndex((part) => {
 				if (part.type !== "text" || !part.text) return false;

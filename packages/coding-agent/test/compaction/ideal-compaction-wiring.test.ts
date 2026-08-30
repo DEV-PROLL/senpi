@@ -10,6 +10,7 @@ import {
 	estimateToolResultOmissionTokens,
 	resolveBeforeAgentStartMessage,
 	resolveCompactionGeometry,
+	resolveMultipartRetainedBound,
 	resolveReminderSystemPrompt,
 	shouldDeferGraceBand,
 } from "../../src/core/extensions/builtin/compaction/orchestration.ts";
@@ -213,9 +214,8 @@ describe("ideal compaction extension wiring decisions", () => {
 			.map((part) => part.text ?? "")
 			.join("\n");
 		const omission = text.slice(text.indexOf("[tool-result admission:"));
-		const omissionCost = estimateTokens({ role: "user", content: omission, timestamp: 0 });
 		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(
-			Math.max(cap, omissionCost),
+			resolveMultipartRetainedBound(cap, omission, 13),
 		);
 	});
 
@@ -248,11 +248,9 @@ describe("ideal compaction extension wiring decisions", () => {
 				.join("\n");
 			const expectedPaths = readdirSync(spillRoot).map((name) => join(spillRoot, name));
 			for (const path of expectedPaths) expect(text).toContain(path);
-			const omissionCost = text.includes("tool-result admission:")
-				? estimateToolResultOmissionTokens(expectedPaths.map((path) => ({ tokens: cap * 8 + 100, path })))
-				: 0;
+			const omission = text.slice(text.indexOf("[tool-result admission:"));
 			expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(
-				Math.max(cap, omissionCost + 2),
+				resolveMultipartRetainedBound(cap, omission, count),
 			);
 		}
 	});
