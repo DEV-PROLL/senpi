@@ -16,6 +16,24 @@
 
 - LOW: reconnect warning and replacement handling in `interactive-host-runtime.ts`.
 
+## 2026-08-30 - Shared-host rendered component integration
+
+### What changed
+
+- `interactive-mode.ts` and `interactive-host-runtime.ts` retain the shared-host rendered-component capability and session-width integration while the RPC host owns per-connection filtering and lifecycle.
+
+### Why
+
+- Interactive clients use the shared host through the runtime bridge and must advertise the same capability and width semantics as direct RPC clients.
+
+### Why an extension could not handle it
+
+- The integration is host startup and session mirror infrastructure, outside extension lifecycle hooks.
+
+### Expected merge conflict zones
+
+- LOW: shared-host client setup in `interactive-host-runtime.ts` and interactive startup wiring in `interactive-mode.ts`.
+
 ## 2026-08-30 - Reconcile the shared-host mirror to the host entry list
 
 ### What changed

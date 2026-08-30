@@ -162,6 +162,11 @@ export class SessionCommandRouter {
 			});
 			const openedSession = opened;
 			const entry = this.registry.getForCommand(openedSession.sessionId, "open_session");
+			if (owner !== undefined)
+				this.writer.setConnectionCapabilities(
+					owner,
+					this.pendingCapabilities.get(owner) ?? this.connectionOptions?.capabilities ?? [],
+				);
 			// A client that dies without close_session (terminal closed, SIGKILL, dropped
 			// SSH) still holds this handle's attachment and its path reservation. Remember
 			// which connection owns it so releaseConnection() can close exactly that.
@@ -201,9 +206,12 @@ export class SessionCommandRouter {
 									if (connectionId !== undefined) widths?.delete(connectionId);
 								},
 								setCapabilities: (connectionId, capabilities) => {
-									if (connectionId !== undefined)
+									if (connectionId !== undefined) {
 										this.writer.setConnectionCapabilities(connectionId, capabilities);
+										for (const binding of this.bindings.values()) binding.rerenderComponents?.();
+									}
 								},
+								hasRenderedComponents: () => this.writer.hasCapableConnection(),
 
 								connectionId: () => this.writer.currentConnection(),
 								onChange: () => {
@@ -249,6 +257,7 @@ export class SessionCommandRouter {
 	 */
 	async releaseConnection(connectionId: string): Promise<void> {
 		this.releasedConnections.add(connectionId);
+		this.writer.clearConnectionCapabilities(connectionId);
 		for (const widths of this.widths.values()) widths.delete(connectionId);
 		for (const binding of this.bindings.values()) binding.rerenderComponents?.();
 		const opens = this.opensByConnection.get(connectionId);
@@ -326,7 +335,6 @@ export class SessionCommandRouter {
 			const owner = this.writer.currentConnection();
 			if (owner !== undefined) {
 				this.widths.get(command.sessionId)?.delete(owner);
-				this.writer.clearConnectionCapabilities(owner);
 				for (const binding of this.bindings.values()) binding.rerenderComponents?.();
 			}
 			if (owner !== undefined) {

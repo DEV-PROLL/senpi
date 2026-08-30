@@ -100,6 +100,7 @@ export interface RpcConnectionOptions {
 		setWidth: (connectionId: string | undefined, width: number) => void;
 		clearWidth: (connectionId: string | undefined) => void;
 		setCapabilities?: (connectionId: string | undefined, capabilities: readonly string[]) => void;
+		hasRenderedComponents?: () => boolean;
 		connectionId: () => string | undefined;
 		onChange?: () => void;
 	};
@@ -270,8 +271,10 @@ export function createRpcConnectionHandler(
 	const routingSessionId = options.sessionId;
 	const clientWidth = () => options.sharedWidth?.getWidth() ?? 80;
 	const hasRenderedComponents = () =>
-		options.sharedWidth !== undefined || (clientCapabilities?.includes(RENDERED_COMPONENTS_CAPABILITY) ?? false);
+		(options.sharedWidth?.hasRenderedComponents?.() ?? false) ||
+		(clientCapabilities?.includes(RENDERED_COMPONENTS_CAPABILITY) ?? false);
 	const liveRenderers = new Map<string, LiveComponentRenderer>();
+	const retainedRendererFactories = new Map<string, () => void>();
 	const footerProviders = new Map<string, FooterDataProvider>();
 	const disposeRenderer = (key: string) => {
 		liveRenderers.get(key)?.dispose();
@@ -520,6 +523,7 @@ export function createRpcConnectionHandler(
 
 		setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
 			disposeRenderer(key);
+			retainedRendererFactories.delete(key);
 			if (content === undefined || Array.isArray(content)) {
 				output({
 					type: "extension_ui_request",
@@ -531,84 +535,96 @@ export function createRpcConnectionHandler(
 				} as RpcExtensionUIRequest);
 				return;
 			}
-			if (!hasRenderedComponents()) return;
-			const renderer = createLiveComponentRenderer({
-				factory: content as (
-					tui: import("@earendil-works/pi-tui").TUI,
-					thm: Theme,
-				) => import("@earendil-works/pi-tui").Component,
-				getWidth: clientWidth,
-				emit: (widgetLines) =>
-					output({
-						type: "extension_ui_request",
-						id: crypto.randomUUID(),
-						method: "setWidget",
-						widgetKey: key,
-						widgetLines,
-						widgetPlacement: options?.placement,
-						[RENDERED_COMPONENT_RECORD]: true,
-					} as RpcExtensionUIRequest),
+			retainedRendererFactories.set(key, () => {
+				const renderer = createLiveComponentRenderer({
+					factory: content as (
+						tui: import("@earendil-works/pi-tui").TUI,
+						thm: Theme,
+					) => import("@earendil-works/pi-tui").Component,
+					getWidth: clientWidth,
+					emit: (widgetLines) =>
+						output({
+							type: "extension_ui_request",
+							id: crypto.randomUUID(),
+							method: "setWidget",
+							widgetKey: key,
+							widgetLines,
+							widgetPlacement: options?.placement,
+							[RENDERED_COMPONENT_RECORD]: true,
+						} as RpcExtensionUIRequest),
+				});
+				if (renderer) liveRenderers.set(key, renderer);
 			});
-			if (renderer) liveRenderers.set(key, renderer);
+			if (hasRenderedComponents()) retainedRendererFactories.get(key)!();
 		},
 
 		setFooter(factory: unknown): void {
-			disposeRenderer("__footer__");
-			if (!hasRenderedComponents()) return;
+			const key = "__footer__";
+			disposeRenderer(key);
+			retainedRendererFactories.delete(key);
 			if (factory === undefined) {
-				output({
-					type: "extension_ui_request",
-					id: crypto.randomUUID(),
-					method: "setFooter",
-					widgetLines: undefined,
-				} as RpcExtensionUIRequest);
-				return;
-			}
-			const provider = options.footerDataProviderFactory?.(session) ?? createFooterDataProvider(session);
-			const renderer = createLiveComponentRenderer({
-				factory: factory as never,
-				factoryArgs: [provider],
-				getWidth: clientWidth,
-				emit: (widgetLines) =>
+				if (hasRenderedComponents())
 					output({
 						type: "extension_ui_request",
 						id: crypto.randomUUID(),
 						method: "setFooter",
-						widgetLines,
-						[RENDERED_COMPONENT_RECORD]: true,
-					} as RpcExtensionUIRequest),
+						widgetLines: undefined,
+					} as RpcExtensionUIRequest);
+				return;
+			}
+			retainedRendererFactories.set(key, () => {
+				const provider = options.footerDataProviderFactory?.(session) ?? createFooterDataProvider(session);
+				const renderer = createLiveComponentRenderer({
+					factory: factory as never,
+					factoryArgs: [provider],
+					getWidth: clientWidth,
+					emit: (widgetLines) =>
+						output({
+							type: "extension_ui_request",
+							id: crypto.randomUUID(),
+							method: "setFooter",
+							widgetLines,
+							[RENDERED_COMPONENT_RECORD]: true,
+						} as RpcExtensionUIRequest),
+				});
+				if (renderer) {
+					liveRenderers.set(key, renderer);
+					footerProviders.set(key, provider);
+				} else provider.dispose();
 			});
-			if (renderer) {
-				liveRenderers.set("__footer__", renderer);
-				footerProviders.set("__footer__", provider);
-			} else provider.dispose();
+			if (hasRenderedComponents()) retainedRendererFactories.get(key)!();
 		},
 
 		setHeader(factory: unknown): void {
-			disposeRenderer("__header__");
-			if (!hasRenderedComponents()) return;
+			const key = "__header__";
+			disposeRenderer(key);
+			retainedRendererFactories.delete(key);
 			if (factory === undefined) {
-				output({
-					type: "extension_ui_request",
-					id: crypto.randomUUID(),
-					method: "setHeader",
-					widgetLines: undefined,
-				} as RpcExtensionUIRequest);
-				return;
-			}
-			const renderer = createLiveComponentRenderer({
-				factory: factory as never,
-				getWidth: clientWidth,
-				emit: (widgetLines) =>
+				if (hasRenderedComponents())
 					output({
 						type: "extension_ui_request",
 						id: crypto.randomUUID(),
 						method: "setHeader",
-						widgetLines,
-						[RENDERED_COMPONENT_RECORD]: true,
-					} as RpcExtensionUIRequest),
+						widgetLines: undefined,
+					} as RpcExtensionUIRequest);
+				return;
+			}
+			retainedRendererFactories.set(key, () => {
+				const renderer = createLiveComponentRenderer({
+					factory: factory as never,
+					getWidth: clientWidth,
+					emit: (widgetLines) =>
+						output({
+							type: "extension_ui_request",
+							id: crypto.randomUUID(),
+							method: "setHeader",
+							widgetLines,
+							[RENDERED_COMPONENT_RECORD]: true,
+						} as RpcExtensionUIRequest),
+				});
+				if (renderer) liveRenderers.set(key, renderer);
 			});
-			if (renderer) liveRenderers.set("__header__", renderer);
+			if (hasRenderedComponents()) retainedRendererFactories.get(key)!();
 		},
 
 		setTitle(title: string): void {
@@ -1625,6 +1641,11 @@ export function createRpcConnectionHandler(
 			await handleInputLine(line);
 		},
 		rerenderComponents() {
+			if (!hasRenderedComponents()) {
+				disposeAllRenderers();
+				return;
+			}
+			for (const [key, createRenderer] of retainedRendererFactories) if (!liveRenderers.has(key)) createRenderer();
 			for (const renderer of liveRenderers.values()) renderer.rerender();
 		},
 		isShutdownRequested() {

@@ -117,6 +117,7 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 		const id = `socket-${++nextConnection}`;
 		const sink = socketSink(socket);
 		writer.registerConnection(id, sink);
+		writer.setConnectionCapabilities(id, parseClientCapabilities(envValue("RPC_CLIENT_CAPABILITIES")));
 		const detachReader = attachJsonlLineReader(
 			socket,
 			(line) => {

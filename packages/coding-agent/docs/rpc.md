@@ -69,7 +69,12 @@ Clients may send `set_client_info` with `{ sessionId, width, capabilities? }`. A
 that connection to receive factory-rendered `setWidget`, `setHeader`, and `setFooter` records. Those records are filtered
 per connection; array/undefined widget records and dialog requests retain their existing delivery semantics. Width is
 shared per session using the minimum of attached clients, and a closed or dropped connection no longer contributes its
-width or capability registration.
+width or capability registration. Snapshot replay preserves rendered-component provenance and applies the same capability
+filter to late joiners; a client that registers `rendered_components` while a snapshot is active receives its retained
+factory-rendered records. Capability registration is connection-wide across that socket's sessions: closing one session
+removes only that session's width contribution, while socket disposal removes the capability registration. When the last
+capable connection leaves a still-attached binding, live component renderers and footer data providers are disposed but
+their factories are retained; a later capable connection recreates and re-renders them.
 
 ### Session auto-titling
 

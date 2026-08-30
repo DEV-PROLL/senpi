@@ -1,8 +1,27 @@
 # changes
 
+## 2026-08-30 - Shared-host rendered component capability lifecycle
+
+### What changed
+
+- `widget-line-renderer.ts`, `connection-handler.ts`, `rpc-types.ts`, `custom-capability.ts`, `host-ensure.ts`, `session-binding.ts`, `session-command-router.ts`, `session-event-writer.ts`, and `multi-session-host.ts` implement per-connection rendered-component delivery, capability-aware snapshot replay, shared width registration, and renderer/provider teardown and recreation.
+
+### Why
+
+- Shared socket clients can join or leave independently, so factory-rendered UI provenance, capability state, and live renderer resources must follow connection lifecycle without affecting surviving sessions or leaking footer watchers.
+
+### Why an extension could not handle it
+
+- These behaviors are transport routing, snapshot storage, and renderer ownership semantics beneath extension APIs; extensions cannot observe or control socket capability registration and disposal.
+
+### Expected merge conflict zones
+
+- LOW: the shared-host RPC connection options and capability routing in `connection-handler.ts`, `session-binding.ts`, and `session-command-router.ts`; socket registration in `multi-session-host.ts`; snapshot fanout in `session-event-writer.ts`; protocol declarations in `rpc-types.ts` and `custom-capability.ts`; host lifecycle in `host-ensure.ts`; renderer behavior in `widget-line-renderer.ts`.
+
 ## 2026-08-30 - Shared-host rendered components
 
 - Added the `rendered_components` capability gate for factory-rendered widgets, headers, and footers. Shared-session component widths use the minimum reported width across attached connections, defaulting to 80 and dropping disconnected connections. Footer factories receive a session-backed readonly footer data provider. Interactive host startup records are buffered until the normal event listener is installed.
+- Snapshot replay retains rendered-component provenance and filters it per joining connection. Capability registration remains connection-wide across sessions and is cleared only when the socket is released; closing one session removes only its width contribution. Shared bindings retain component factories while disposing live renderers and footer providers when no capable connection remains, recreating them for a later capable connection.
 
 ## 2026-08-30 - Deliver session events across a deferred rebind
 

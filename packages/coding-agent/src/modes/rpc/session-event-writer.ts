@@ -77,7 +77,7 @@ export class SessionEventWriter {
 		string,
 		{ connection: SessionEventWriterConnection; actor: SocketEventSinkActor }
 	>();
-	private readonly sessionSnapshots = new Map<string, string[]>();
+	private readonly sessionSnapshots = new Map<string, Array<{ line: string; rendered: boolean }>>();
 	private readonly connectionContext = new AsyncLocalStorage<string>();
 	private readonly connectionCapabilities = new Map<string, Set<string>>();
 	private readonly controlQueue: RecordQueue = { latestByKey: new Map(), ready: false };
@@ -134,7 +134,9 @@ export class SessionEventWriter {
 		});
 		this.connections.set(id, { connection, actor });
 		this.connectionCapabilities.set(id, new Set());
-		for (const snapshot of this.sessionSnapshots.values()) for (const line of snapshot) actor.enqueue(line);
+		const rendered = this.connectionCapabilities.get(id)?.has("rendered_components") ?? false;
+		for (const snapshot of this.sessionSnapshots.values())
+			for (const record of snapshot) if (!record.rendered || rendered) actor.enqueue(record.line);
 	}
 
 	unregisterConnection(id: string): void {
@@ -146,11 +148,23 @@ export class SessionEventWriter {
 	}
 
 	setConnectionCapabilities(id: string, capabilities: readonly string[]): void {
-		if (this.connections.has(id)) this.connectionCapabilities.set(id, new Set(capabilities));
+		const registered = this.connections.get(id);
+		if (!registered) return;
+		const wasCapable = this.connectionCapabilities.get(id)?.has("rendered_components") ?? false;
+		this.connectionCapabilities.set(id, new Set(capabilities));
+		if (!wasCapable && capabilities.includes("rendered_components"))
+			for (const snapshot of this.sessionSnapshots.values())
+				for (const record of snapshot) if (record.rendered) registered.actor.enqueue(record.line);
 	}
 
 	clearConnectionCapabilities(id: string): void {
 		if (this.connections.has(id)) this.connectionCapabilities.set(id, new Set());
+	}
+
+	hasCapableConnection(): boolean {
+		for (const capabilities of this.connectionCapabilities.values())
+			if (capabilities.has("rendered_components")) return true;
+		return false;
 	}
 
 	/** Execute a connection's command with its response destination in context. */
@@ -176,7 +190,7 @@ export class SessionEventWriter {
 		const tagged = { ...value, sessionId } as RpcRecord;
 		const { [RENDERED_COMPONENT_RECORD]: _rendered, ...wireTagged } = tagged;
 		const line = serializeJsonLine(wireTagged);
-		this.rememberSnapshot(sessionId, wireTagged, line);
+		this.rememberSnapshot(sessionId, tagged, line);
 		const targets = isTargeted
 			? [targetId]
 			: record[RENDERED_COMPONENT_RECORD] && this.connections.size > 0
@@ -311,10 +325,11 @@ export class SessionEventWriter {
 
 	private rememberSnapshot(sessionId: string, value: RpcRecord, line: string): void {
 		const event = value.assistantMessageEvent as Record<string, unknown> | undefined;
+		const record = { line, rendered: value[RENDERED_COMPONENT_RECORD] === true };
 		if (value.type === "message_start" || (value.type === "message_update" && event?.type === "text_start")) {
-			this.sessionSnapshots.set(sessionId, [line]);
+			this.sessionSnapshots.set(sessionId, [record]);
 		} else if (this.sessionSnapshots.has(sessionId)) {
-			this.sessionSnapshots.get(sessionId)!.push(line);
+			this.sessionSnapshots.get(sessionId)!.push(record);
 		}
 		if (value.type === "message_end") this.sessionSnapshots.delete(sessionId);
 	}
