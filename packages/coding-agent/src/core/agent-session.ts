@@ -4491,15 +4491,22 @@ export class AgentSession {
 		return this._setModel(model, true);
 	}
 
-	assertModelUsable(model: Model<Api> | undefined = this.model): void {
+	assertModelUsable(model: Model<Api> | undefined = this.model, liveContextTokens = 0): void {
 		if (!model) return;
 		const projection = projectModelUsabilityBudget({
 			model,
 			systemPrompt: this.agent.state.systemPrompt,
 			tools: this.agent.state.tools,
+			liveContextTokens,
 			compaction: this.settingsManager.getCompactionSettings(),
 		});
 		if (!projection.usable) throw new ModelUsabilityBudgetError(projection);
+	}
+
+	private _getDownswitchLiveContextTokens(model: Model<Api>): number {
+		const currentModel = this.model;
+		if (!currentModel || currentModel.contextWindow <= model.contextWindow) return 0;
+		return this.getContextUsage()?.tokens ?? 0;
 	}
 
 	/**
@@ -4514,7 +4521,7 @@ export class AgentSession {
 		model: Model<Api>,
 		updateGlobalDefaults: boolean,
 	): Promise<SystemPromptChangeEvent | undefined> {
-		this.assertModelUsable(model);
+		this.assertModelUsable(model, this._getDownswitchLiveContextTokens(model));
 		if (!(await this._modelRuntime.checkAuth(model.provider))) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
@@ -4650,6 +4657,7 @@ export class AgentSession {
 			nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		}
 		const next = favoriteModels[nextIndex];
+		this.assertModelUsable(next.model, this._getDownswitchLiveContextTokens(next.model));
 		const invalidatesCompaction =
 			this._modelSelectionChangesContext(currentModel, next.model) ||
 			currentModel?.provider !== next.model.provider ||
