@@ -976,7 +976,8 @@ export function createRpcConnectionHandler(
 			case "new_session": {
 				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
 				const result = await runtimeHost.newSession(options);
-				if (!result.cancelled && session !== runtimeHost.session) await rebindSession();
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "new_session", result);
 			}
 
@@ -1222,13 +1223,15 @@ export function createRpcConnectionHandler(
 
 			case "switch_session": {
 				const result = await runtimeHost.switchSession(command.sessionPath, { cwdOverride: command.cwdOverride });
-				if (!result.cancelled && session !== runtimeHost.session) await rebindSession();
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "switch_session", result);
 			}
 
 			case "fork": {
 				const result = await runtimeHost.fork(command.entryId, { position: command.position });
-				if (!result.cancelled && session !== runtimeHost.session) await rebindSession();
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "fork", { text: result.selectedText, cancelled: result.cancelled });
 			}
 
@@ -1238,7 +1241,8 @@ export function createRpcConnectionHandler(
 					return error(id, "clone", "Cannot clone session: no current entry selected");
 				}
 				const result = await runtimeHost.fork(leafId, { position: "at" });
-				if (!result.cancelled && session !== runtimeHost.session) await rebindSession();
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "clone", { cancelled: result.cancelled });
 			}
 
@@ -1272,7 +1276,8 @@ export function createRpcConnectionHandler(
 
 			case "import_jsonl": {
 				const result = await runtimeHost.importFromJsonl(command.inputPath, command.cwdOverride);
-				if (!result.cancelled && session !== runtimeHost.session) await rebindSession();
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "import_jsonl", result);
 			}
 
