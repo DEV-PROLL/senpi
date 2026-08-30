@@ -351,10 +351,10 @@ describe("RPC Unix-socket multi-connection host", () => {
 					value.widgetKey === "factory-widget",
 			);
 			const factoryHeader = peer.peer.waitFor(
-				(value) => value.type === "extension_ui_request" && value.method === "setHeader",
+				(value) => value.type === "extension_ui_request" && value.method === "setHeader" && Array.isArray(value.widgetLines),
 			);
 			const factoryFooter = peer.peer.waitFor(
-				(value) => value.type === "extension_ui_request" && value.method === "setFooter",
+				(value) => value.type === "extension_ui_request" && value.method === "setFooter" && Array.isArray(value.widgetLines),
 			);
 			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
 			const sessionId = openedSessionId(opened);
