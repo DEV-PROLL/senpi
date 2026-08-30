@@ -4507,7 +4507,7 @@ export class AgentSession {
 	}
 
 	assertModelUsable(model: Model<Api> | undefined = this.model, liveContextTokens = 0): void {
-		if (!model) return;
+		if (!model || model.contextWindow <= 0) return;
 		const projection = projectModelUsabilityBudget({
 			model,
 			systemPrompt: this.agent.state.systemPrompt,
