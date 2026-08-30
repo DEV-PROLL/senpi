@@ -27,7 +27,7 @@ export function createLiveComponentRenderer(options: {
 			if (disposed) return;
 			try {
 				const lines = component.render(options.getWidth());
-				if (lastLines && lines.length === lastLines.length && lines.every((line, i) => line === lastLines![i])) return;
+				if (lastLines && lines.length === lastLines.length && lines.every((line: string, i: number) => line === lastLines![i])) return;
 				lastLines = [...lines];
 				options.emit(lines);
 			} catch (error) {
