@@ -157,8 +157,14 @@ describe("ideal compaction extension wiring decisions", () => {
 		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(cap);
 	});
 
-	it("keeps tiny-cap omission metadata reachable", () => {
-		const cap = 60;
+	it.each(["short", "long"])("keeps tiny-cap omission metadata reachable (%s path)", (pathKind) => {
+		const spillDir = pathKind === "short" ? "/tmp/x" : admissionDir;
+		rmSync(spillDir, { recursive: true, force: true });
+		const probeParts = [
+			{ tokens: 80_000, path: join(spillDir, "tool-result-probe-a.txt") },
+			{ tokens: 80_000, path: join(spillDir, "tool-result-probe-b.txt") },
+		];
+		const cap = Math.max(1, estimateToolResultOmissionTokens(probeParts) - 1);
 		const messages = [
 			{
 				role: "toolResult" as const,
@@ -172,7 +178,7 @@ describe("ideal compaction extension wiring decisions", () => {
 				],
 			},
 		];
-		const projected = admitContextToolResults(messages, 1_200, true, cap)[0] as {
+		const projected = admitContextToolResults(messages, 1_200, true, cap, spillDir)[0] as {
 			content: Array<{ type: string; text?: string }>;
 		};
 		const text = projected.content
