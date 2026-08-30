@@ -154,8 +154,8 @@ describe("Regression: compaction state during model fallback", () => {
 			let switchedToSmallerModel = false;
 			const harness = await createHarness({
 				models: [
-					{ id: "large", contextWindow: 1_000, maxTokens: 64 },
-					{ id: "small", contextWindow: 100, maxTokens: 64 },
+					{ id: "large", contextWindow: 20_000, maxTokens: 64 },
+					{ id: "small", contextWindow: 10_000, maxTokens: 64 },
 				],
 				settings: {
 					compaction: {
