@@ -20,7 +20,6 @@ import { FooterComponent } from "../src/modes/interactive/components/footer.ts";
 import {
 	createInteractiveHostRuntime,
 	INTERACTIVE_HOST_FALLBACK_WARNING,
-	INTERACTIVE_HOST_RECONNECTING_WARNING,
 } from "../src/modes/interactive/interactive-host-runtime.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { RpcClient } from "../src/modes/rpc/rpc-client.ts";
