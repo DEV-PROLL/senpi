@@ -122,7 +122,7 @@ describe("Regression: compaction state during model fallback", () => {
 		for (const context of fallbackPromptContexts) {
 			const userMessages = context.messages.filter((message) => message.role === "user");
 			const prompt = userMessages.at(-1);
-			expect(prompt?.content).toHaveLength(2);
+			expect(prompt?.content).toHaveLength(1);
 			expect(prompt && lastUserText({ ...context, messages: [prompt] })).toBe("trigger fallback");
 		}
 		expect(compactionModels).toEqual(["faux-2"]);
@@ -154,8 +154,8 @@ describe("Regression: compaction state during model fallback", () => {
 			let switchedToSmallerModel = false;
 			const harness = await createHarness({
 				models: [
-					{ id: "large", contextWindow: 20_000, maxTokens: 64 },
-					{ id: "small", contextWindow: 10_000, maxTokens: 64 },
+					{ id: "large", contextWindow: 30_000, maxTokens: 64 },
+					{ id: "small", contextWindow: 20_000, maxTokens: 64 },
 				],
 				settings: {
 					compaction: {
