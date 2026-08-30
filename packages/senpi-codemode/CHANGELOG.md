@@ -32,6 +32,9 @@
 - Destructuring patterns carrying interior line comments now persist their bindings, and declarations
   with a dangling trailing comma are left untransformed so the original syntax error surfaces instead
   of being silently "repaired".
+- Rewritten destructuring assignments are emitted with a leading defensive semicolon so they can no
+  longer ASI-merge into a preceding unterminated expression statement as a bogus call
+  (`foo()\n({…} = …)` previously became `foo()({…} = …)`).
 
 ### Removed
 

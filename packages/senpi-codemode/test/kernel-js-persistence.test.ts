@@ -304,6 +304,22 @@ footer\`)`,
 		});
 	});
 
+	it("emits destructuring assignments that cannot merge with the previous expression statement", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			const run = await runJavaScriptCell(
+				kernel,
+				[
+					"var persistenceAsiPrev = [0]",
+					"persistenceAsiPrev.pop()",
+					"const { length: persistenceAsiLen } = []",
+					"persistenceAsiLen",
+				].join("\n"),
+			);
+
+			expect(parseJavaScriptResult(run.result)).toBe(0);
+		});
+	});
+
 	it("rejects declarations with a dangling trailing comma", async () => {
 		await withJavaScriptKernel(async (kernel) => {
 			const run = await runJavaScriptCell(kernel, "const persistenceDangling = 1,");

@@ -273,7 +273,7 @@ function rewriteDeclaration(code, declarationStart, start, end, keyword) {
 		if (target === undefined) return undefined;
 		const initializer = initializerStart < 0 ? "undefined" : segment.slice(initializerStart + 1).trim();
 		assignments.push(
-			`${target.startsWith("{") || target.startsWith("[") ? `(${target} = ${initializer})` : `${target} = ${initializer}`};`,
+			`${target.startsWith("{") || target.startsWith("[") ? `;(${target} = ${initializer})` : `${target} = ${initializer}`};`,
 		);
 	}
 	if (assignments.length === 0) return undefined;
