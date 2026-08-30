@@ -633,17 +633,17 @@ export function createRemoteSessionProxy(
 				return async (message: string, options?: Parameters<AgentSession["prompt"]>[1]) => {
 					try {
 						await client.prompt(message, {
-						...(options?.images ? { images: options.images } : {}),
-						...(options?.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
-						...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-						...(options?.sessionTitlePrompt !== undefined
-							? { sessionTitlePrompt: options.sessionTitlePrompt }
-							: {}),
-						...(options?.expandPromptTemplates !== undefined
-							? { expandPromptTemplates: options.expandPromptTemplates }
-							: {}),
-						...(options?.promptDisposition ? { promptDisposition: options.promptDisposition } : {}),
-						...(options?.preflightResult ? { preflightResult: options.preflightResult } : {}),
+							...(options?.images ? { images: options.images } : {}),
+							...(options?.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
+							...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+							...(options?.sessionTitlePrompt !== undefined
+								? { sessionTitlePrompt: options.sessionTitlePrompt }
+								: {}),
+							...(options?.expandPromptTemplates !== undefined
+								? { expandPromptTemplates: options.expandPromptTemplates }
+								: {}),
+							...(options?.promptDisposition ? { promptDisposition: options.promptDisposition } : {}),
+							...(options?.preflightResult ? { preflightResult: options.preflightResult } : {}),
 						});
 					} catch (error) {
 						if (!isTransportGoneError(error)) throw error;

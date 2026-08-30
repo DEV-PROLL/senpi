@@ -112,9 +112,13 @@ export class RpcTransportGoneError extends Error {
 }
 
 export function isTransportGoneError(error: unknown): error is RpcTransportGoneError {
-	return error instanceof RpcTransportGoneError ||
+	return (
+		error instanceof RpcTransportGoneError ||
 		(error instanceof Error &&
-			(error.message === "Client not started" || error.message.startsWith("RPC transport is not writable.") || error.message === "RPC socket closed"));
+			(error.message === "Client not started" ||
+				error.message.startsWith("RPC transport is not writable.") ||
+				error.message === "RPC socket closed"))
+	);
 }
 
 export class RpcClient {
