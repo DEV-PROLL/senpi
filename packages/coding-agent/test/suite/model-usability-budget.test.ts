@@ -5,6 +5,7 @@ import {
 	projectModelUsabilityBudget,
 } from "../../src/core/extensions/builtin/compaction/model-usability-budget.ts";
 import { createAgentSession } from "../../src/core/sdk.ts";
+import { SessionManager } from "../../src/core/session-manager.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
 function seedLiveContext(harness: Harness, tokens: number): void {
@@ -116,7 +117,7 @@ describe("model usability budget", () => {
 		expect(error.projection).toMatchObject({
 			model: "faux/372k",
 			contextWindow: 372_000,
-			liveContextTokens: 321_000,
+			liveContextTokens: 318_384,
 			outputReserveTokens: 32_000,
 			compactionReserveTokens: 16_384,
 			safetyMarginTokens: 8_192,
@@ -209,6 +210,74 @@ describe("model usability budget", () => {
 				contextWindow: 16_000,
 			},
 		});
+	});
+
+	it("rejects a resumed session whose restored transcript exceeds the startup budget", async () => {
+		// given
+		const harness = await createHarness({
+			models: [{ id: "startup", contextWindow: 100_000, maxTokens: 4_000 }],
+		});
+		harnesses.push(harness);
+		const sessionManager = harness.sessionManager;
+		sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "restored transcript ".repeat(200_000) }],
+			timestamp: Date.now(),
+		});
+		const model = harness.getModel();
+
+		// when / then
+		const error = await createAgentSession({
+			cwd: harness.tempDir,
+			agentDir: join(harness.tempDir, "sdk-agent"),
+			model,
+			sessionManager,
+		}).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		);
+		expect(error).toMatchObject({
+			name: "ModelUsabilityBudgetError",
+			projection: {
+				model: `${model.provider}/${model.id}`,
+				liveContextTokens: expect.any(Number),
+				usable: false,
+			},
+		});
+	});
+
+	it("keeps fresh and fitting resumed sessions accepted", async () => {
+		// given
+		const harness = await createHarness({
+			models: [{ id: "startup", contextWindow: 100_000, maxTokens: 4_000 }],
+		});
+		harnesses.push(harness);
+		const model = harness.getModel();
+
+		// when / then
+		const fresh = await createAgentSession({
+			cwd: harness.tempDir,
+			agentDir: join(harness.tempDir, "fresh-agent"),
+			model,
+			sessionManager: SessionManager.inMemory(harness.tempDir),
+		});
+		expect(fresh.session.agent.state.messages).toHaveLength(0);
+		fresh.session.dispose();
+
+		const fittingSessionManager = SessionManager.inMemory(harness.tempDir);
+		fittingSessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "small restored transcript" }],
+			timestamp: Date.now(),
+		});
+		const fitting = await createAgentSession({
+			cwd: harness.tempDir,
+			agentDir: join(harness.tempDir, "fitting-agent"),
+			model,
+			sessionManager: fittingSessionManager,
+		});
+		expect(fitting.session.agent.state.messages).toHaveLength(1);
+		fitting.session.dispose();
 	});
 
 	it("accepts the exact minimum and rejects one token below it", async () => {
