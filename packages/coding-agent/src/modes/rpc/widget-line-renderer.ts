@@ -31,6 +31,9 @@ export function createLiveComponentRenderer(options: {
 				lastLines = [...lines];
 				options.emit(lines);
 			} catch (error) {
+				// Allow a recovered render to be emitted even when it matches the last
+				// successful frame; the fault means the client may have lost that frame.
+				lastLines = undefined;
 				options.onRenderFault?.(error);
 			}
 		};
