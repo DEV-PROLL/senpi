@@ -1,12 +1,6 @@
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import xterm from "@xterm/headless";
-import {
-	MAX_PENDING_WRITE_CHARS,
-	type OperationSettler,
-	type ScreenOperation,
-	settleOperation,
-	trackSettler,
-} from "./screen-operations.ts";
+import { MAX_PENDING_WRITE_CHARS, type ScreenOperation, settleOperation, trackSettler } from "./screen-operations.ts";
 import {
 	decodeInput,
 	normalizeDimension,
@@ -89,13 +83,13 @@ export class TerminalScreen {
 		if (this.disposed) return Promise.resolve();
 		const nextCols = normalizeDimension(cols, this.terminal.cols);
 		const nextRows = normalizeDimension(rows, this.terminal.rows);
-		return this.enqueue({
-			kind: "resize",
-			cols: nextCols,
-			rows: nextRows,
-			replay: this.history.join(""),
-			settlers: [],
-		});
+		const tail = this.operations[this.operations.length - 1];
+		if (tail !== undefined && tail.kind === "resize") {
+			tail.cols = nextCols;
+			tail.rows = nextRows;
+			return trackSettler(tail.settlers);
+		}
+		return this.enqueue({ kind: "resize", cols: nextCols, rows: nextRows, settlers: [] });
 	}
 
 	flush(): Promise<void> {
@@ -160,30 +154,18 @@ export class TerminalScreen {
 	}
 
 	/**
-	 * Collapse every queued write into one replay of the bounded history.
-	 * Dropped feeds settle with the replay's outcome: their payloads already
-	 * live in `history`, so the replayed screen state includes them. Queued
-	 * resizes are kept; the replay lands at the queue tail so it repaints
-	 * after the final dimensions apply.
+	 * Route an over-cap feed to the queue's replay operation instead of
+	 * enqueueing another write. The feed's payload already lives in `history`,
+	 * and a replay renders `history` at run time, so settling with the replay's
+	 * outcome loses nothing. Settlers attach one at a time; no unbounded spread
+	 * or snapshot string is ever built here.
 	 */
 	private coalesceBacklogIntoReplay(): Promise<void> {
-		const orphanedSettlers: OperationSettler[] = [];
-		for (let index = this.operations.length - 1; index >= 0; index -= 1) {
-			const operation = this.operations[index];
-			if (operation === undefined || operation.kind !== "write") continue;
-			orphanedSettlers.push(...operation.settlers);
-			operation.settlers.length = 0;
-			this.operations.splice(index, 1);
-		}
-		this.pendingWriteChars = 0;
 		const tail = this.operations[this.operations.length - 1];
-		const replayPayload = this.history.join("");
 		if (tail !== undefined && tail.kind === "replay") {
-			tail.payload = replayPayload;
-			tail.settlers.push(...orphanedSettlers);
 			return trackSettler(tail.settlers);
 		}
-		return this.enqueue({ kind: "replay", payload: replayPayload, settlers: orphanedSettlers });
+		return this.enqueue({ kind: "replay", settlers: [] });
 	}
 
 	private async drain(): Promise<void> {
@@ -213,14 +195,34 @@ export class TerminalScreen {
 				await this.raceDisposal(this.write(operation.payload));
 				return;
 			case "replay":
+				this.absorbQueuedWrites(operation);
 				this.terminal.reset();
-				await this.raceDisposal(this.write(operation.payload));
+				await this.raceDisposal(this.write(this.history.join("")));
 				return;
 			case "resize":
+				this.absorbQueuedWrites(operation);
 				this.terminal.dispose();
 				this.terminal = this.createTerminal(operation.cols, operation.rows);
-				await this.raceDisposal(this.write(operation.replay));
+				await this.raceDisposal(this.write(this.history.join("")));
 				return;
+		}
+	}
+
+	/**
+	 * A replay or resize renders the full bounded `history` at run time, which
+	 * already contains every queued write's payload; running those writes
+	 * afterwards would duplicate their content on the fresh screen. Absorb
+	 * them instead: remove the queued writes and settle them with this
+	 * operation's outcome.
+	 */
+	private absorbQueuedWrites(into: ScreenOperation): void {
+		for (let index = this.operations.length - 1; index >= 0; index -= 1) {
+			const operation = this.operations[index];
+			if (operation === undefined || operation.kind !== "write") continue;
+			this.pendingWriteChars -= operation.payload.length;
+			for (const settler of operation.settlers) into.settlers.push(settler);
+			operation.settlers.length = 0;
+			this.operations.splice(index, 1);
 		}
 	}
 

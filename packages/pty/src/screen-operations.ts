@@ -11,15 +11,13 @@ export interface WriteOperation {
 
 export interface ReplayOperation {
 	readonly kind: "replay";
-	payload: string;
 	readonly settlers: OperationSettler[];
 }
 
 export interface ResizeOperation {
 	readonly kind: "resize";
-	readonly cols: number;
-	readonly rows: number;
-	readonly replay: string;
+	cols: number;
+	rows: number;
 	readonly settlers: OperationSettler[];
 }
 

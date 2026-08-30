@@ -246,6 +246,66 @@ describe("TerminalScreen", () => {
 		}
 	}, 30_000);
 
+	it("coalesces an over-cap flood without unbounded settler spreads", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		xterm.Terminal.prototype.write = function heldWrite(): void {};
+
+		try {
+			const screen = new TerminalScreen({ cols: 20, rows: 4, scrollback: 10 });
+			const chunk = "zzzz";
+			const roundSize = 262_145;
+			const outcomes: Promise<void>[] = [];
+			for (let round = 0; round < 2; round += 1) {
+				for (let index = 0; index < roundSize; index += 1) {
+					outcomes.push(screen.feed(chunk));
+				}
+			}
+			screen.dispose();
+
+			const results = await Promise.allSettled(outcomes);
+			expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	}, 60_000);
+
+	it("merges queued resizes instead of storing a replay snapshot per resize", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		let capturing = false;
+		let capturedWrites = 0;
+
+		xterm.Terminal.prototype.write = function patchedWrite(
+			this: XtermTerminalType,
+			data: string | Uint8Array,
+			callback?: () => void,
+		): void {
+			if (capturing) capturedWrites += 1;
+			originalWrite.call(this, data, callback);
+		};
+
+		try {
+			const screen = new TerminalScreen({ cols: 40, rows: 4, scrollback: 10 });
+			await screen.feed("seed");
+			capturing = true;
+
+			const outcomes: Promise<void>[] = [];
+			for (let index = 0; index < 100; index += 1) {
+				outcomes.push(screen.resize(10 + (index % 5), 4));
+			}
+			await Promise.all(outcomes);
+
+			const snapshot = screen.snapshot();
+			expect(snapshot.cols).toBe(10 + (99 % 5));
+			expect(snapshot.visibleGrid[0]).toBe("seed");
+			// 100 queued resizes must collapse into at most two replay renders:
+			// the in-flight head resize plus one merged tail resize.
+			expect(capturedWrites).toBeLessThanOrEqual(2);
+			screen.dispose();
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	});
+
 	it("delivers write rejections to the owning caller and keeps the queue usable", async () => {
 		const originalWrite = xterm.Terminal.prototype.write;
 
