@@ -29,11 +29,7 @@ export function resolveCompactionGeometry(input: {
 }): CompactionGeometry {
 	const thresholdTokens = input.contextWindow * policy.computeEffectiveThreshold(input.contextWindow, input.lastYield);
 	return {
-		reserveTokens: policy.resolveEffectiveReserveTokens(
-			input.contextWindow,
-			input.settings.reserveTokens,
-			input.settings.reserveScalingEnabled !== false,
-		),
+		reserveTokens: policy.resolveEffectiveReserveTokens(input.contextWindow, input.settings),
 		thresholdTokens,
 		leadTokens: resolveSpeculationLeadTokens(thresholdTokens, input.settings.speculativeLeadTokens),
 	};
