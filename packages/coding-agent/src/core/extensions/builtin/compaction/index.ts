@@ -852,7 +852,7 @@ export default function compactionExtension(
 			contextWindow,
 			thresholdTokens,
 			leadTokens,
-			compactionGeneration: speculativeGeneration,
+			compactionEpoch: speculativeGeneration,
 			state: reminderState,
 		});
 		reminderState = reminder.nextState;

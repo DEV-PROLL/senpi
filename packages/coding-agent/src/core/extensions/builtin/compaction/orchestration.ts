@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { copyContextProvenance } from "@earendil-works/pi-ai";
 import { type CompactionPreparation, estimateTokens } from "../../../compaction/index.ts";
+import type { BeforeAgentStartEventResult } from "../../types.ts";
 import { type IdleCompactionDecision, shouldWarmAtIdle } from "./idle.ts";
 import * as policy from "./policy.ts";
 import { isWarmResultStale, isWithinGraceBand, resolveSpeculationLeadTokens } from "./speculation-lead.ts";
@@ -57,6 +58,25 @@ export function injectTokenBudgetReminder(messages: AgentMessage[], reminder?: s
 		return messages.map((candidate, candidateIndex) => (candidateIndex === index ? reminded : candidate));
 	}
 	return messages;
+}
+
+export function resolveBeforeAgentStartMessage(input: {
+	message?: BeforeAgentStartEventResult["message"];
+	reminder?: string;
+	reminderEnabled?: boolean;
+}): BeforeAgentStartEventResult["message"] | undefined {
+	if (!input.reminder || input.reminderEnabled === false) return input.message;
+	if (!input.message) return undefined;
+	return { ...input.message, content: `${input.message.content}\n\n${input.reminder}` };
+}
+
+export function resolveReminderSystemPrompt(input: {
+	systemPrompt: string;
+	reminder?: string;
+	reminderEnabled?: boolean;
+}): string | undefined {
+	if (!input.reminder || input.reminderEnabled === false) return undefined;
+	return `${input.systemPrompt}\n\n${input.reminder}`;
 }
 
 export function resolveIdleWarmAction(

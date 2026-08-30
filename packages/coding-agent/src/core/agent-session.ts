@@ -108,11 +108,11 @@ import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "
 import { areExperimentalFeaturesEnabled } from "./experimental.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
-import { resolveReserveTokens } from "./extensions/builtin/compaction/policy.ts";
 import {
 	ModelUsabilityBudgetError,
 	projectModelUsabilityBudget,
 } from "./extensions/builtin/compaction/model-usability-budget.ts";
+import { resolveReserveTokens } from "./extensions/builtin/compaction/policy.ts";
 import { CODEX_RESPONSES_API, type ServiceTier } from "./extensions/builtin/service-tier.ts";
 import { deriveExtensionRegistrationId } from "./extensions/builtin/tool-search/engine/marker.ts";
 import { getToolSearchService } from "./extensions/builtin/tool-search/service.ts";
