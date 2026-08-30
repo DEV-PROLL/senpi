@@ -1,5 +1,7 @@
 # RPC Mode
 
+Shared-host clients may advertise the `rendered_components` capability to receive factory-rendered widget, header, and footer records. In a shared session, component rendering uses the minimum width reported by currently attached connections, defaulting to 80 when none report a width; disconnected connections no longer contribute.
+
 The shared Unix socket host uses `<agentDir>/rpc-host-daemon/host.pid` and `settings.json` as its ownership state. Clients attach to a compatible existing host regardless of which client surface started it; only incompatible unmanaged owners are refused.
 
 RPC mode enables headless operation of the coding agent via a JSON protocol over stdin/stdout. This is useful for embedding the agent in other applications, IDEs, or custom UIs.
@@ -60,6 +62,18 @@ Socket event visibility is an all-sessions broadcast: every connected client rec
 every open session, each tagged with its routing `sessionId`. Correlated responses and extension UI requests are sent
 only to the connection that issued the command. This lets a non-owner observe a foreign turn without requiring a
 separate subscription protocol.
+
+### Client information and rendered components
+
+Clients may send `set_client_info` with `{ sessionId, width, capabilities? }`. Advertising `rendered_components` registers
+that connection to receive factory-rendered `setWidget`, `setHeader`, and `setFooter` records. Those records are filtered
+per connection; array/undefined widget records and dialog requests retain their existing delivery semantics. Width is
+shared per session using the minimum of attached clients, and a closed or dropped connection no longer contributes its
+width or capability registration. Snapshot replay preserves rendered-component provenance and applies the same capability
+filter to late joiners; a client that registers `rendered_components` while a snapshot is active receives its retained
+factory-rendered records. On a shared socket host, `rendered_components` is registration-only: it is never inherited from the host environment and must be sent in `set_client_info` for each client connection. Registration applies to the sessions attached by that connection; closing one session removes only that session's width and capability association, while socket disposal removes all associations. Clients must re-register `width` and `capabilities` after every reconnect. When the last
+capable connection leaves a still-attached binding, live component renderers and footer data providers are disposed but
+their factories are retained; a later capable connection recreates and re-renders them.
 
 ### Session auto-titling
 
@@ -1668,13 +1682,13 @@ Extensions can request user interaction via `ctx.ui.select()`, `ctx.ui.confirm()
 There are two categories of extension UI methods:
 
 - **Dialog methods** (`select`, `confirm`, `input`, `editor`): emit an `extension_ui_request` on stdout and block until the client sends back an `extension_ui_response` on stdin with the matching `id`.
-- **Fire-and-forget methods** (`notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`): emit an `extension_ui_request` on stdout but do not expect a response. The client can display the information or ignore it.
+- **Fire-and-forget methods** (`notify`, `setStatus`, `setWidget`, `setHeader`, `setFooter`, `setTitle`, `set_editor_text`): emit an `extension_ui_request` on stdout but do not expect a response. The client can display the information or ignore it.
 
 If a dialog method includes a `timeout` field, the agent-side will auto-resolve with a default value when the timeout expires. The client does not need to track timeouts.
 
 Some `ExtensionUIContext` methods are not supported or degraded in RPC mode because they require direct TUI access:
 - `custom()` returns `undefined`
-- `setWorkingMessage()`, `setWorkingIndicator()`, `setFooter()`, `setHeader()`, `setEditorComponent()`, `setToolsExpanded()` are no-ops
+- `setWorkingMessage()`, `setWorkingIndicator()`, `setEditorComponent()`, `setToolsExpanded()` are no-ops. `setFooter()` and `setHeader()` render factory components for clients advertising `rendered_components`.
 - `getEditorText()` returns `""`
 - `getToolsExpanded()` returns `false`
 - `pasteToEditor()` delegates to `setEditorText()` (no paste/collapse handling)
@@ -1801,7 +1815,22 @@ Set or clear a widget (block of text lines) displayed above or below the editor.
 }
 ```
 
-Send `widgetLines: undefined` (or omit it) to clear the widget. The `widgetPlacement` field is `"aboveEditor"` (default) or `"belowEditor"`. Only string arrays are supported in RPC mode; component factories are ignored.
+Send `widgetLines: undefined` (or omit it) to clear the widget. The `widgetPlacement` field is `"aboveEditor"` (default) or `"belowEditor"`. Component factories are rendered by the host using the attached client's terminal width.
+
+#### setHeader / setFooter
+
+Set or clear the extension header or footer using rendered text lines. Clients that do not understand these additive methods ignore them.
+
+```json
+{
+  "type": "extension_ui_request",
+  "id": "uuid-10",
+  "method": "setHeader",
+  "widgetLines": ["Header line"]
+}
+```
+
+Omit `widgetLines` to restore the built-in surface. Attached clients send `set_client_info` with their terminal width after attach and on resize; hosts default to width 80 when no width is supplied.
 
 #### setTitle
 

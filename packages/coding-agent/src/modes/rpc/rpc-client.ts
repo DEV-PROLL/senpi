@@ -318,6 +318,10 @@ export class RpcClient {
 	// Command Methods
 	// =========================================================================
 
+	async setClientInfo(width: number, capabilities?: string[]): Promise<void> {
+		await this.send({ type: "set_client_info", width, capabilities }, this.sessionId !== undefined);
+	}
+
 	async openSession(options: {
 		sessionPath?: string;
 		cwd?: string;

@@ -1,5 +1,28 @@
 # changes
 
+## 2026-08-30 - Shared-host rendered component capability lifecycle
+
+### What changed
+
+- `widget-line-renderer.ts`, `connection-handler.ts`, `rpc-types.ts`, `custom-capability.ts`, `host-ensure.ts`, `session-binding.ts`, `session-command-router.ts`, `session-event-writer.ts`, and `multi-session-host.ts` implement per-connection rendered-component delivery, capability-aware snapshot replay, shared width registration, and renderer/provider teardown and recreation.
+
+### Why
+
+- Shared socket clients can join or leave independently, so factory-rendered UI provenance, capability state, and live renderer resources must follow connection lifecycle without affecting surviving sessions or leaking footer watchers.
+
+### Why an extension could not handle it
+
+- These behaviors are transport routing, snapshot storage, and renderer ownership semantics beneath extension APIs; extensions cannot observe or control socket capability registration and disposal.
+
+### Expected merge conflict zones
+
+- LOW: the shared-host RPC connection options and capability routing in `connection-handler.ts`, `session-binding.ts`, and `session-command-router.ts`; socket registration in `multi-session-host.ts`; snapshot fanout in `session-event-writer.ts`; protocol declarations in `rpc-types.ts` and `custom-capability.ts`; host lifecycle in `host-ensure.ts`; renderer behavior in `widget-line-renderer.ts`.
+
+## 2026-08-30 - Shared-host rendered components
+
+- Added the `rendered_components` capability gate for factory-rendered widgets, headers, and footers. Shared-session component widths use the minimum reported width across attached connections, defaulting to 80 and dropping disconnected connections. Footer factories receive a session-backed readonly footer data provider. Interactive host startup records are buffered until the normal event listener is installed.
+- Snapshot replay retains rendered-component provenance and filters it by each connection's session attachment and capability registration. Shared socket hosts never seed `rendered_components` from the host environment; clients register it with `set_client_info`, and must re-register width plus capabilities after reconnect. Shared bindings retain component factories while disposing live renderers and footer providers when no capable connection remains, recreating them for a later capable connection.
+
 ## 2026-08-30 - Deliver session events across a deferred rebind
 
 ### What changed
@@ -877,10 +900,17 @@ events.
 records. The extension and RPC guides document `pi.rpc.emit`, capability environment variables, the
 wire shape, multi-session tagging, and payload validation responsibilities.
 
+## 2026-08-30 - Render shared-host extension components
+
+- Added live server-side rendering for extension component factories used by `setWidget`, `setHeader`, and `setFooter`.
+- Added additive `setHeader`/`setFooter` extension UI requests and the `set_client_info { width }` command so attached clients can keep component layout responsive.
+- Factory widgets no longer degrade to `custom_unsupported`; that notice remains reserved for `ctx.ui.custom()`.
+
 ## 2026-08-25 - Preserve upstream RPC public queue API
 
 ### What changed
 
+- `rpc-client.ts`: the interactive client buffers events received during `open_session` so startup widget/header/footer records emitted while attaching are replayed (session-filtered) instead of dropped.
 - `packages/coding-agent/src/modes/rpc/rpc-client.ts` and `packages/coding-agent/src/modes/rpc/rpc-types.ts` expose upstream queue-clearing commands while retaining fork RPC protocol structure.
 
 ### Why

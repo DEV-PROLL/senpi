@@ -30,6 +30,8 @@
 
 ### New Features
 
+- Shared RPC hosts now render factory widgets, headers, and footers only for connections advertising the per-connection `rendered_components` capability; clients register that capability and session-minimum width through `set_client_info` ([#1219](https://github.com/code-yeongyu/senpi/pull/1219)).
+
 ### Breaking Changes
 
 ### Added
