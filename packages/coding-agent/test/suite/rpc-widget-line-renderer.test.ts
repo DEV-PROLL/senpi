@@ -21,7 +21,7 @@ afterEach(() => {
 type Factory = (tui: TUI, thm: Theme) => Component & { dispose?(): void };
 
 function widthEchoFactory(): Factory {
-	return (_tui, _thm) => ({ render: (width: number) => [`w:${width}`] });
+	return (_tui, _thm) => ({ invalidate() {}, render: (width: number) => [`w:${width}`] });
 }
 
 describe("createLiveComponentRenderer", () => {
@@ -43,7 +43,7 @@ describe("createLiveComponentRenderer", () => {
 		const renderer = createLiveComponentRenderer({
 			factory: (tui) => {
 				capturedTui = tui;
-				return { render: () => [value] };
+				return { invalidate() {}, render: () => [value] };
 			},
 			getWidth: () => 80,
 			emit: (lines) => emitted.push(lines),
@@ -67,7 +67,7 @@ describe("createLiveComponentRenderer", () => {
 		createLiveComponentRenderer({
 			factory: (tui) => {
 				capturedTui = tui;
-				return { render: () => ["static"] };
+				return { invalidate() {}, render: () => ["static"] };
 			},
 			getWidth: () => 80,
 			emit: (lines) => emitted.push(lines),
@@ -97,7 +97,7 @@ describe("createLiveComponentRenderer", () => {
 		const renderer = createLiveComponentRenderer({
 			factory: (tui) => {
 				capturedTui = tui;
-				return { render: () => ["live"], dispose };
+				return { invalidate() {}, render: () => ["live"], dispose };
 			},
 			getWidth: () => 80,
 			emit: (lines) => emitted.push(lines),
@@ -136,6 +136,7 @@ describe("createLiveComponentRenderer", () => {
 			factory: (tui) => {
 				capturedTui = tui;
 				return {
+					invalidate() {},
 					render: () => {
 						if (broken) throw new Error("render boom");
 						return ["ok"];
@@ -163,7 +164,7 @@ describe("createLiveComponentRenderer", () => {
 		createLiveComponentRenderer({
 			factory: (_tui, thm) => {
 				receivedTheme = thm;
-				return { render: () => [""] };
+				return { invalidate() {}, render: () => [""] };
 			},
 			getWidth: () => 80,
 			emit: () => {},
