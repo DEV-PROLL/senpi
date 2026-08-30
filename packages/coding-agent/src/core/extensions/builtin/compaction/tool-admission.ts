@@ -8,7 +8,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { estimateTokens } from "../../../compaction/index.ts";
 
@@ -20,7 +20,6 @@ const TAIL_BUDGET_FRACTION = 0.2;
 const MAX_SHRINK_PASSES = 8;
 
 export const TOOL_ADMISSION_MARKER_PREFIX = "[tool result truncated:";
-const knownSpillPaths = new Set<string>();
 
 /**
  * A whole line of the exact shape emitted by `buildMarker`. Anchored per line (`m` flag)
@@ -39,6 +38,7 @@ export interface AdmitToolResultInput {
 	text: string;
 	contextWindow: number;
 	spillDir: string;
+	capTokens?: number;
 }
 
 export interface AdmitToolResultOutput {
@@ -71,7 +71,6 @@ function spillToFile(spillDir: string, text: string): string {
 		`tool-result-${Number.parseInt(digest.slice(0, 10), 16)}-${digest.slice(10, 16)}.txt`,
 	);
 	writeFileSync(spillPath, text, "utf-8");
-	knownSpillPaths.add(spillPath);
 	return spillPath;
 }
 
@@ -94,10 +93,7 @@ function buildExcerpt(text: string, budgetChars: number, totalTokens: number, sp
  */
 export function admitToolResult(input: AdmitToolResultInput): AdmitToolResultOutput {
 	const { text, contextWindow, spillDir } = input;
-	const marker = text.match(TOOL_ADMISSION_MARKER_LINE)?.[0];
-	const markerPath = marker?.match(/full output at (.+) - read it with/)?.[1];
-	if (markerPath && knownSpillPaths.has(markerPath) && existsSync(markerPath)) return { text, spilled: false };
-	const capTokens = resolveToolResultAdmissionCapTokens(contextWindow);
+	const capTokens = input.capTokens ?? resolveToolResultAdmissionCapTokens(contextWindow);
 	const totalTokens = estimateTextTokens(text);
 	if (totalTokens <= capTokens) return { text, spilled: false };
 

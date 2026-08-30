@@ -106,17 +106,29 @@ describe("admitToolResult", () => {
 		expect(readdirSync(spillDir)).toHaveLength(1);
 		expect(containsToolAdmissionMarker(first.text)).toBe(true);
 
-		// The excerpt still exceeds the 8192-token cap of a 64K window, so a naive
-		// startsWith() bypass would spill it a second time and corrupt the pointer chain.
-		expect(estimateTextTokens(first.text)).toBeGreaterThan(resolveToolResultAdmissionCapTokens(64_000));
-
+		// A smaller model may require a second admission pass; admission is based on
+		// current content and never trusts the marker or its spill path as state.
 		const second = admitToolResult({ text: first.text, contextWindow: 64_000, spillDir });
 
-		expect(second.spilled).toBe(false);
-		expect(second.spillPath).toBeUndefined();
-		expect(second.text).toBe(first.text);
-		expect(readdirSync(spillDir)).toHaveLength(1);
-		expect(readFileSync(first.spillPath as string, "utf-8")).toBe(text);
+		expect(second.spilled).toBe(true);
+		expect(second.text).not.toBe(first.text);
+		expect(estimateTextTokens(second.text)).toBeLessThanOrEqual(
+			Math.ceil(resolveToolResultAdmissionCapTokens(64_000) * 1.1),
+		);
+	});
+
+	it("truncates a legitimate marker replay with a different oversized payload", () => {
+		const spillDir = join(tmpRoot, "spill");
+		const cap = resolveToolResultAdmissionCapTokens(200_000);
+		const original = admitToolResult({ text: `original\n${"o".repeat(cap * 8)}`, contextWindow: 200_000, spillDir });
+		const marker = original.text.split("\n").find((line) => line.startsWith(TOOL_ADMISSION_MARKER_PREFIX));
+		const replay = `${marker}\n${"different".repeat(cap * 8)}`;
+
+		const result = admitToolResult({ text: replay, contextWindow: 200_000, spillDir });
+
+		expect(result.spilled).toBe(true);
+		expect(result.text).not.toBe(replay);
+		expect(estimateTextTokens(result.text)).toBeLessThanOrEqual(Math.ceil(cap * 1.1));
 	});
 
 	it("still admits ordinary output that merely mentions the marker prefix", () => {
