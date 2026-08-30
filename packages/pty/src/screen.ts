@@ -1,6 +1,14 @@
 import type { Terminal as XtermTerminalType } from "@xterm/headless";
 import xterm from "@xterm/headless";
-import { MAX_PENDING_WRITE_CHARS, type ScreenOperation, settleOperation, trackSettler } from "./screen-operations.ts";
+import {
+	MAX_PENDING_WRITE_CHARS,
+	type ReplayOperation,
+	type ResizeOperation,
+	type ScreenOperation,
+	settleOperation,
+	sharedSettler,
+	trackSettler,
+} from "./screen-operations.ts";
 import {
 	decodeInput,
 	normalizeDimension,
@@ -48,6 +56,7 @@ export class TerminalScreen {
 	private readonly history: string[] = [];
 	private historyLength = 0;
 	private readonly operations: ScreenOperation[] = [];
+	private historyHeadChunks = 0;
 	private pendingWriteChars = 0;
 	private draining = false;
 	private disposed = false;
@@ -76,7 +85,8 @@ export class TerminalScreen {
 			return this.coalesceBacklogIntoReplay();
 		}
 		this.pendingWriteChars += payload.length;
-		return this.enqueue({ kind: "write", payload, settlers: [] });
+		const operation: ScreenOperation = { kind: "write", payload, settlers: [] };
+		return this.enqueue(operation, trackSettler(operation.settlers));
 	}
 
 	resize(cols: number, rows: number): Promise<void> {
@@ -87,14 +97,24 @@ export class TerminalScreen {
 		if (tail !== undefined && tail.kind === "resize") {
 			tail.cols = nextCols;
 			tail.rows = nextRows;
-			return trackSettler(tail.settlers);
+			tail.historyMark = this.historyEnd();
+			return sharedSettler(tail);
 		}
-		return this.enqueue({ kind: "resize", cols: nextCols, rows: nextRows, settlers: [] });
+		const operation: ResizeOperation = {
+			kind: "resize",
+			cols: nextCols,
+			rows: nextRows,
+			historyMark: this.historyEnd(),
+			settled: null,
+			settlers: [],
+		};
+		return this.enqueue(operation, sharedSettler(operation));
 	}
 
 	flush(): Promise<void> {
 		if (this.disposed) return Promise.resolve();
-		return this.enqueue({ kind: "write", payload: "", settlers: [] });
+		const operation: ScreenOperation = { kind: "write", payload: "", settlers: [] };
+		return this.enqueue(operation, trackSettler(operation.settlers));
 	}
 
 	snapshot(): TerminalScreenSnapshot {
@@ -146,26 +166,32 @@ export class TerminalScreen {
 		});
 	}
 
-	private enqueue(operation: ScreenOperation): Promise<void> {
+	private enqueue(operation: ScreenOperation, settled: Promise<void>): Promise<void> {
 		this.operations.push(operation);
-		const settled = trackSettler(operation.settlers);
 		void this.drain();
 		return settled;
 	}
 
 	/**
-	 * Route an over-cap feed to the queue's replay operation instead of
-	 * enqueueing another write. The feed's payload already lives in `history`,
-	 * and a replay renders `history` at run time, so settling with the replay's
-	 * outcome loses nothing. Settlers attach one at a time; no unbounded spread
-	 * or snapshot string is ever built here.
+	 * Route an over-cap feed to the queue's tail replay instead of enqueueing
+	 * another write. The feed's payload already lives in `history` and the
+	 * replay renders history up to its mark, so advancing the mark and sharing
+	 * the replay's promise loses nothing while keeping the queue, its settler
+	 * memory, and the replay payload all O(1) per queued operation.
 	 */
 	private coalesceBacklogIntoReplay(): Promise<void> {
 		const tail = this.operations[this.operations.length - 1];
 		if (tail !== undefined && tail.kind === "replay") {
-			return trackSettler(tail.settlers);
+			tail.historyMark = this.historyEnd();
+			return sharedSettler(tail);
 		}
-		return this.enqueue({ kind: "replay", settlers: [] });
+		const operation: ReplayOperation = {
+			kind: "replay",
+			historyMark: this.historyEnd(),
+			settled: null,
+			settlers: [],
+		};
+		return this.enqueue(operation, sharedSettler(operation));
 	}
 
 	private async drain(): Promise<void> {
@@ -195,35 +221,30 @@ export class TerminalScreen {
 				await this.raceDisposal(this.write(operation.payload));
 				return;
 			case "replay":
-				this.absorbQueuedWrites(operation);
 				this.terminal.reset();
-				await this.raceDisposal(this.write(this.history.join("")));
+				await this.raceDisposal(this.write(this.renderHistory(operation.historyMark)));
 				return;
 			case "resize":
-				this.absorbQueuedWrites(operation);
 				this.terminal.dispose();
 				this.terminal = this.createTerminal(operation.cols, operation.rows);
-				await this.raceDisposal(this.write(this.history.join("")));
+				await this.raceDisposal(this.write(this.renderHistory(operation.historyMark)));
 				return;
 		}
 	}
 
 	/**
-	 * A replay or resize renders the full bounded `history` at run time, which
-	 * already contains every queued write's payload; running those writes
-	 * afterwards would duplicate their content on the fresh screen. Absorb
-	 * them instead: remove the queued writes and settle them with this
-	 * operation's outcome.
+	 * Render only the history recorded up to the operation's mark. Feeds made
+	 * after the mark keep their own queued writes and land after this barrier,
+	 * preserving FIFO order; feeds before it drained ahead of the barrier and
+	 * are reproduced exactly by the replayed prefix.
 	 */
-	private absorbQueuedWrites(into: ScreenOperation): void {
-		for (let index = this.operations.length - 1; index >= 0; index -= 1) {
-			const operation = this.operations[index];
-			if (operation === undefined || operation.kind !== "write") continue;
-			this.pendingWriteChars -= operation.payload.length;
-			for (const settler of operation.settlers) into.settlers.push(settler);
-			operation.settlers.length = 0;
-			this.operations.splice(index, 1);
-		}
+	private renderHistory(historyMark: number): string {
+		const end = Math.max(0, historyMark - this.historyHeadChunks);
+		return this.history.slice(0, end).join("");
+	}
+
+	private historyEnd(): number {
+		return this.historyHeadChunks + this.history.length;
 	}
 
 	/** A disposed terminal may never invoke its parse callback; do not hang. */
@@ -256,6 +277,7 @@ export class TerminalScreen {
 		while (this.historyLength > this.maxReplayHistoryLength && this.history.length > 1) {
 			const removed = this.history.shift();
 			if (removed === undefined) return;
+			this.historyHeadChunks += 1;
 			this.historyLength -= removed.length;
 		}
 

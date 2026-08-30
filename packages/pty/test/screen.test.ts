@@ -306,6 +306,88 @@ describe("TerminalScreen", () => {
 		}
 	});
 
+	it("shares one promise across all feeds coalesced into the same replay", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		xterm.Terminal.prototype.write = function heldWrite(): void {};
+
+		try {
+			const screen = new TerminalScreen({ cols: 20, rows: 4, scrollback: 10 });
+			const chunk = "y".repeat(65_536);
+			const promises = Array.from({ length: 20 }, () => screen.feed(chunk));
+
+			const coalesced = promises.slice(17);
+			for (const promise of coalesced) {
+				expect(promise).toBe(coalesced[0]);
+			}
+			expect(promises[0]).not.toBe(coalesced[0]);
+
+			screen.dispose();
+			await expect(Promise.all(promises)).resolves.toBeDefined();
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	});
+
+	it("shares one promise across resizes merged into the same queued resize", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		xterm.Terminal.prototype.write = function heldWrite(): void {};
+
+		try {
+			const screen = new TerminalScreen({ cols: 20, rows: 4, scrollback: 10 });
+			const first = screen.resize(10, 4);
+			const queued = screen.resize(11, 4);
+			const mergedA = screen.resize(12, 4);
+			const mergedB = screen.resize(13, 4);
+
+			expect(mergedA).toBe(queued);
+			expect(mergedB).toBe(queued);
+			expect(first).not.toBe(queued);
+
+			screen.dispose();
+			await expect(Promise.all([first, queued, mergedA, mergedB])).resolves.toBeDefined();
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	});
+
+	it("keeps feeds after a queued resize behind that barrier", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		const sequence: Array<[string, number]> = [];
+
+		xterm.Terminal.prototype.write = function patchedWrite(
+			this: XtermTerminalType,
+			data: string | Uint8Array,
+			callback?: () => void,
+		): void {
+			const payload = typeof data === "string" ? data : new TextDecoder().decode(data);
+			sequence.push([payload, this.cols]);
+			originalWrite.call(this, data, callback);
+		};
+
+		try {
+			const screen = new TerminalScreen({ cols: 10, rows: 4, scrollback: 10 });
+			await Promise.all([
+				screen.feed("A"),
+				screen.resize(3, 4),
+				screen.feed("X"),
+				screen.resize(5, 4),
+				screen.feed("B"),
+			]);
+
+			expect(sequence).toEqual([
+				["A", 10],
+				["A", 3],
+				["X", 3],
+				["AX", 5],
+				["B", 5],
+			]);
+			expect(screen.snapshot().visibleGrid[0]).toBe("AXB");
+			screen.dispose();
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	});
+
 	it("delivers write rejections to the owning caller and keeps the queue usable", async () => {
 		const originalWrite = xterm.Terminal.prototype.write;
 

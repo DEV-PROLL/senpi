@@ -11,6 +11,8 @@ export interface WriteOperation {
 
 export interface ReplayOperation {
 	readonly kind: "replay";
+	historyMark: number;
+	settled: Promise<void> | null;
 	readonly settlers: OperationSettler[];
 }
 
@@ -18,6 +20,8 @@ export interface ResizeOperation {
 	readonly kind: "resize";
 	cols: number;
 	rows: number;
+	historyMark: number;
+	settled: Promise<void> | null;
 	readonly settlers: OperationSettler[];
 }
 
@@ -44,4 +48,16 @@ export function trackSettler(settlers: OperationSettler[]): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		settlers.push({ resolve, reject });
 	});
+}
+
+/**
+ * Every caller coalesced into the same replay or merged resize shares ONE
+ * promise and ONE settler, so a flood or resize storm cannot grow an
+ * operation's settler memory with the number of callers.
+ */
+export function sharedSettler(operation: ReplayOperation | ResizeOperation): Promise<void> {
+	if (operation.settled === null) {
+		operation.settled = trackSettler(operation.settlers);
+	}
+	return operation.settled;
 }
