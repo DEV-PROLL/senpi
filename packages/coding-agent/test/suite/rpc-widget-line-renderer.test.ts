@@ -127,6 +127,26 @@ describe("createLiveComponentRenderer", () => {
 		expect((faults[0] as Error).message).toBe("factory boom");
 	});
 
+	it("disposes after a render fault that scheduled another render", () => {
+		const emitted: string[][] = [];
+		let capturedTui: TUI | undefined;
+		const renderer = createLiveComponentRenderer({
+			factory: (tui) => {
+				capturedTui = tui;
+				tui.requestRender();
+				throw new Error("factory boom");
+			},
+			getWidth: () => 80,
+			emit: (lines) => emitted.push(lines),
+		});
+		expect(renderer).toBeUndefined();
+		expect(() => vi.runAllTimers()).not.toThrow();
+		expect(capturedTui).toBeDefined();
+		expect(emitted).toEqual([]);
+		renderer?.rerender();
+		expect(emitted).toEqual([]);
+	});
+
 	it("reports a later render fault without emitting and keeps the renderer alive", () => {
 		const emitted: string[][] = [];
 		const faults: unknown[] = [];

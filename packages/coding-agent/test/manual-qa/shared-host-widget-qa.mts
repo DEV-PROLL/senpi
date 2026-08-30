@@ -95,7 +95,7 @@ async function main(): Promise<void> {
 	const cli = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "cli.ts");
 	const spawned: HostProcess = spawn(process.execPath, [cli, "--mode", "rpc", "--multi-session", "--listen", `unix://${socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL], {
 		cwd,
-		env: { ...process.env, ...hermeticProviderEnv(), ANTHROPIC_API_KEY: MOCK_API_KEY, PI_OFFLINE: "1", PI_TELEMETRY: "0", SENPI_RUNTIME: "node", SENPI_CODING_AGENT_DIR: agentDir, SENPI_RPC_CLIENT_CAPABILITIES: "extension_events,custom_unsupported" },
+		env: { ...process.env, ...hermeticProviderEnv(), ANTHROPIC_API_KEY: MOCK_API_KEY, PI_OFFLINE: "1", PI_TELEMETRY: "0", SENPI_RUNTIME: "node", SENPI_CODING_AGENT_DIR: agentDir, SENPI_RPC_CLIENT_CAPABILITIES: "extension_events,custom_unsupported,rendered_components" },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	host = spawned;

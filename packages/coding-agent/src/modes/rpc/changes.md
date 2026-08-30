@@ -1,5 +1,9 @@
 # changes
 
+## 2026-08-30 - Shared-host rendered components
+
+- Added the `rendered_components` capability gate for factory-rendered widgets, headers, and footers. Shared-session component widths use the minimum reported width across attached connections, defaulting to 80 and dropping disconnected connections. Footer factories receive a session-backed readonly footer data provider. Interactive host startup records are buffered until the normal event listener is installed.
+
 ## 2026-08-30 - Deliver session events across a deferred rebind
 
 ### What changed

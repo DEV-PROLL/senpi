@@ -137,6 +137,8 @@ export async function createInteractiveHostRuntime(
 	try {
 		await startHost({ socket: options.socket, agentDir: options.agentDir });
 		await client.start();
+		const startupEvents: import("../rpc/rpc-client.ts").RpcClientEvent[] = [];
+		const stopBuffering = client.onEvent((event) => startupEvents.push(event));
 		const opened = await client.openSession({
 			sessionPath,
 			cwd: localRuntime.cwd,
@@ -150,11 +152,13 @@ export async function createInteractiveHostRuntime(
 			client,
 			opened.state,
 			options.onWarning,
-			(cause) => {
+(cause) => {
 				if (remoteRuntime?.isReconnecting) warnReconnect(cause);
 				else warnFallback(cause);
 			},
+			startupEvents,
 		);
+		stopBuffering();
 		if (opened.state.isBashRunning && !opened.attached) {
 			// Only a newly opened session can have an execution orphaned by a
 			// previous connection. An attach is an observer of the same live runtime;
@@ -447,7 +451,8 @@ export function createRemoteSessionProxy(
 	client: RpcClient,
 	initialState: ReturnType<typeof stateFromRpc>,
 	onWarning?: (warning: InteractiveHostWarning) => void,
-	onTransportGone?: (cause: unknown) => void,
+onTransportGone?: (cause: unknown) => void,
+	startupEvents: readonly import("../rpc/rpc-client.ts").RpcClientEvent[] = [],
 ): RemoteSessionProxy {
 	// Fire-and-forget setters keep the sync AgentSession signature, but their RPC
 	// failures must not vanish: the matching *_changed wire event confirms success,
@@ -557,7 +562,7 @@ export function createRemoteSessionProxy(
 	/** Non-zero while this runtime is driving its own replacement sequence. */
 	let localReplacementDepth = 0;
 	const listeners = new Set<AgentSessionEventListener>();
-	client.onEvent((wireEvent) => {
+	const handleWireEvent = (wireEvent: import("../rpc/rpc-client.ts").RpcClientEvent) => {
 		if ((wireEvent as { type?: string }).type === "extension_ui_request") {
 			const request = wireEvent as import("../rpc/rpc-types.ts").RpcExtensionUIRequest;
 			if (hostUiHandler)
@@ -707,7 +712,9 @@ export function createRemoteSessionProxy(
 		}
 		const event = hydrateMessageUpdate(wireEvent, streamingAssistant);
 		for (const listener of listeners) listener(event);
-	});
+	};
+	client.onEvent(handleWireEvent);
+	for (const event of startupEvents) handleWireEvent(event);
 	const performRefresh = async (): Promise<void> => {
 		// Captured before the first await: entries that arrive via `entry_appended`
 		// while this refresh is in flight are newer than the snapshot it reconciles

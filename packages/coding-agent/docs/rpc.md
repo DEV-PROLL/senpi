@@ -1,5 +1,7 @@
 # RPC Mode
 
+Shared-host clients may advertise the `rendered_components` capability to receive factory-rendered widget, header, and footer records. In a shared session, component rendering uses the minimum width reported by currently attached connections, defaulting to 80 when none report a width; disconnected connections no longer contribute.
+
 The shared Unix socket host uses `<agentDir>/rpc-host-daemon/host.pid` and `settings.json` as its ownership state. Clients attach to a compatible existing host regardless of which client surface started it; only incompatible unmanaged owners are refused.
 
 RPC mode enables headless operation of the coding agent via a JSON protocol over stdin/stdout. This is useful for embedding the agent in other applications, IDEs, or custom UIs.
@@ -1674,7 +1676,7 @@ If a dialog method includes a `timeout` field, the agent-side will auto-resolve 
 
 Some `ExtensionUIContext` methods are not supported or degraded in RPC mode because they require direct TUI access:
 - `custom()` returns `undefined`
-- `setWorkingMessage()`, `setWorkingIndicator()`, `setFooter()`, `setHeader()`, `setEditorComponent()`, `setToolsExpanded()` are no-ops
+- `setWorkingMessage()`, `setWorkingIndicator()`, `setEditorComponent()`, `setToolsExpanded()` are no-ops. `setFooter()` and `setHeader()` render factory components for clients advertising `rendered_components`.
 - `getEditorText()` returns `""`
 - `getToolsExpanded()` returns `false`
 - `pasteToEditor()` delegates to `setEditorText()` (no paste/collapse handling)

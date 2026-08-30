@@ -40,6 +40,7 @@ export class SessionCommandRouter {
 	>;
 	private readonly createBinding: typeof createRpcSessionBinding;
 	private readonly connectionOptions: Parameters<typeof createRpcSessionBinding>[4];
+	private readonly widths = new Map<string, Map<string, number>>();
 
 	constructor(
 		registry: RpcSessionRegistry,
@@ -168,7 +169,31 @@ export class SessionCommandRouter {
 						entry,
 						this.writer,
 						() => void this.close({ type: "close_session", sessionId: openedSession.sessionId }),
-						this.connectionOptions,
+						{
+							...this.connectionOptions,
+							sharedWidth: {
+								getWidth: () => {
+									const widths = this.widths.get(openedSession.sessionId);
+									return widths && widths.size ? Math.min(...widths.values()) : 80;
+								},
+								setWidth: (connectionId, width) => {
+									if (connectionId !== undefined) {
+										const widths = this.widths.get(openedSession.sessionId) ?? new Map<string, number>();
+										widths.set(connectionId, width);
+										this.widths.set(openedSession.sessionId, widths);
+									}
+								},
+								clearWidth: (connectionId) => {
+									const widths = this.widths.get(openedSession.sessionId);
+									if (connectionId !== undefined) widths?.delete(connectionId);
+								},
+
+								connectionId: () => this.writer.currentConnection(),
+								onChange: () => {
+									for (const binding of this.bindings.values()) binding.rerenderComponents?.();
+								},
+							},
+						},
 					),
 				);
 			}
@@ -207,6 +232,8 @@ export class SessionCommandRouter {
 	 */
 	async releaseConnection(connectionId: string): Promise<void> {
 		this.releasedConnections.add(connectionId);
+		for (const widths of this.widths.values()) widths.delete(connectionId);
+		for (const binding of this.bindings.values()) binding.rerenderComponents?.();
 		const opens = this.opensByConnection.get(connectionId);
 		if (opens) await Promise.all([...opens]);
 		const owned = this.sessionsByConnection.get(connectionId);

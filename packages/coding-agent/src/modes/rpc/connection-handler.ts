@@ -23,6 +23,7 @@ import { VERSION } from "../../config.ts";
 import type { AgentAbortSource } from "../../core/agent-abort-provenance.ts";
 import type { AgentSession, PromptDisposition } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
+import { FooterDataProvider } from "../../core/footer-data-provider.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
 import {
 	getCredentialAccounts,
@@ -59,6 +60,7 @@ import {
 	buildCustomUnsupportedRequest,
 	DEFAULT_CUSTOM_EXTENSION_LABEL,
 	EXTENSION_EVENTS_CAPABILITY,
+	RENDERED_COMPONENTS_CAPABILITY,
 } from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
 import { buildRpcCommandsForSession, createCommandsChangedEvent, rpcCommandListDigest } from "./rpc-command-surface.ts";
@@ -91,6 +93,13 @@ export interface RpcConnectionOptions {
 	disposeRuntime?: boolean;
 	/** Multi-session routing handle. Absent preserves classic wire output exactly. */
 	sessionId?: string;
+	sharedWidth?: {
+		getWidth: () => number;
+		setWidth: (connectionId: string | undefined, width: number) => void;
+		clearWidth: (connectionId: string | undefined) => void;
+		connectionId: () => string | undefined;
+		onChange?: () => void;
+	};
 }
 
 /**
@@ -98,6 +107,10 @@ export interface RpcConnectionOptions {
  * text (LF-terminated). `waitForBackpressure` lets the host apply flow control
  * (stdout drain in classic mode, or the transport's own `drain` signal).
  */
+function createFooterDataProvider(session: AgentSession): FooterDataProvider {
+	return new FooterDataProvider(session.sessionManager.getCwd());
+}
+
 export interface RpcConnectionSink {
 	writeRaw(chunk: string): void;
 	waitForBackpressure(): Promise<void>;
@@ -111,6 +124,7 @@ export interface RpcConnectionHandler {
 	readonly ready: Promise<void>;
 	/** Feed one inbound JSONL line (command or extension_ui_response). */
 	handleInputLine(line: string): Promise<void>;
+	rerenderComponents(): void;
 	/**
 	 * True once an extension requested shutdown via the shutdown handler. The
 	 * host polls this after each command and decides how to tear down.
@@ -251,7 +265,8 @@ export function createRpcConnectionHandler(
 ): RpcConnectionHandler {
 	const clientCapabilities = options.capabilities;
 	const routingSessionId = options.sessionId;
-	let clientWidth = 80;
+	const clientWidth = () => options.sharedWidth?.getWidth() ?? 80;
+	const hasRenderedComponents = clientCapabilities?.includes(RENDERED_COMPONENTS_CAPABILITY) ?? false;
 	const liveRenderers = new Map<string, LiveComponentRenderer>();
 	const disposeRenderer = (key: string) => {
 		liveRenderers.get(key)?.dispose();
@@ -507,12 +522,13 @@ export function createRpcConnectionHandler(
 				} as RpcExtensionUIRequest);
 				return;
 			}
+			if (!hasRenderedComponents) return;
 			const renderer = createLiveComponentRenderer({
 				factory: content as (
 					tui: import("@earendil-works/pi-tui").TUI,
 					thm: Theme,
 				) => import("@earendil-works/pi-tui").Component,
-				getWidth: () => clientWidth,
+				getWidth: clientWidth,
 				emit: (widgetLines) =>
 					output({
 						type: "extension_ui_request",
@@ -528,6 +544,7 @@ export function createRpcConnectionHandler(
 
 		setFooter(factory: unknown): void {
 			disposeRenderer("__footer__");
+			if (!hasRenderedComponents) return;
 			if (factory === undefined) {
 				output({
 					type: "extension_ui_request",
@@ -539,7 +556,8 @@ export function createRpcConnectionHandler(
 			}
 			const renderer = createLiveComponentRenderer({
 				factory: factory as never,
-				getWidth: () => clientWidth,
+				factoryArgs: [createFooterDataProvider(session)],
+				getWidth: clientWidth,
 				emit: (widgetLines) =>
 					output({
 						type: "extension_ui_request",
@@ -553,6 +571,7 @@ export function createRpcConnectionHandler(
 
 		setHeader(factory: unknown): void {
 			disposeRenderer("__header__");
+			if (!hasRenderedComponents) return;
 			if (factory === undefined) {
 				output({
 					type: "extension_ui_request",
@@ -564,7 +583,7 @@ export function createRpcConnectionHandler(
 			}
 			const renderer = createLiveComponentRenderer({
 				factory: factory as never,
-				getWidth: () => clientWidth,
+				getWidth: clientWidth,
 				emit: (widgetLines) =>
 					output({
 						type: "extension_ui_request",
@@ -1079,9 +1098,11 @@ export function createRpcConnectionHandler(
 			// =================================================================
 
 			case "set_client_info":
-				if (Number.isFinite(command.width) && command.width > 0 && command.width !== clientWidth) {
-					clientWidth = command.width;
-					for (const renderer of liveRenderers.values()) renderer.rerender();
+				if (Number.isFinite(command.width) && command.width > 0) {
+					if (options.sharedWidth) {
+						options.sharedWidth.setWidth(options.sharedWidth.connectionId(), command.width);
+						options.sharedWidth.onChange?.();
+					} else for (const renderer of liveRenderers.values()) renderer.rerender();
 				}
 				return success(id, "set_client_info");
 
@@ -1582,6 +1603,9 @@ export function createRpcConnectionHandler(
 		async handleInputLine(line: string) {
 			await ready;
 			await handleInputLine(line);
+		},
+		rerenderComponents() {
+			for (const renderer of liveRenderers.values()) renderer.rerender();
 		},
 		isShutdownRequested() {
 			return shutdownRequested;

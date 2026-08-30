@@ -7,11 +7,15 @@ export interface LiveComponentRenderer {
 }
 
 export function createLiveComponentRenderer(options: {
-	factory: (tui: TUI, theme: Theme) => Component & { dispose?(): void };
+	factory: (...args: [TUI, Theme, ...unknown[]]) => Component & { dispose?(): void };
+	/** Additional arguments are used by footer factories; widgets retain the 2-arg path. */
+	factoryArgs?: readonly unknown[];
 	getWidth: () => number;
 	emit: (lines: string[]) => void;
 	onRenderFault?: (error: unknown) => void;
 }): LiveComponentRenderer | undefined {
+	let disposed = false;
+	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
 		// RPC hosts do not necessarily pass through the interactive theme setup.
 		try {
@@ -20,8 +24,6 @@ export function createLiveComponentRenderer(options: {
 			initTheme("dark");
 		}
 		let component: Component & { dispose?(): void };
-		let disposed = false;
-		let timer: ReturnType<typeof setTimeout> | undefined;
 		let lastLines: string[] | undefined;
 		const render = () => {
 			if (disposed) return;
@@ -55,7 +57,7 @@ export function createLiveComponentRenderer(options: {
 				throw new Error(`RPC live component TUI member is unsupported: ${String(property)}`);
 			},
 		}) as unknown as TUI;
-		component = options.factory(tui, theme);
+		component = options.factory(tui, theme, ...(options.factoryArgs ?? []));
 		render();
 		return {
 			rerender: render,
@@ -68,6 +70,9 @@ export function createLiveComponentRenderer(options: {
 			},
 		};
 	} catch (error) {
+		disposed = true;
+		if (timer !== undefined) clearTimeout(timer);
+		timer = undefined;
 		options.onRenderFault?.(error);
 		return undefined;
 	}

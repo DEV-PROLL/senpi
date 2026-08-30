@@ -132,7 +132,7 @@ function spawnRpc(args: string[], qa: ReturnType<typeof scratch>): ChildProcessW
 			SENPI_RUNTIME: "node",
 			SENPI_CODING_AGENT_DIR: qa.agentDir,
 			SENPI_CODING_AGENT_SESSION_DIR: qa.sessionDir,
-			SENPI_RPC_CLIENT_CAPABILITIES: "extension_events,custom_unsupported",
+			SENPI_RPC_CLIENT_CAPABILITIES: "extension_events,custom_unsupported,rendered_components",
 		},
 		stdio: ["pipe", "pipe", "pipe"],
 	});
