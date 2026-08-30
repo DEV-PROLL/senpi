@@ -92,7 +92,7 @@ export async function createInteractiveHostRuntime(
 			// aborting it would cancel work owned by the surviving attachment.
 			await client.abortBash().catch(() => {});
 		}
-		await remoteSession.refresh();
+		if (opened.attached) await remoteSession.refresh();
 		return new RemoteInteractiveRuntime(localRuntime, remoteSession, client) as unknown as AgentSessionRuntime;
 	} catch (cause) {
 		await client.stop().catch(() => {});
