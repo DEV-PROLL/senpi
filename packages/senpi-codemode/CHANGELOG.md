@@ -14,6 +14,12 @@
 
 ### Fixed
 
+- The JavaScript kernel persistence transform no longer truncates declarations whose multi-line
+  initializers contain interior `//` comments (previously emitted unparseable code such as
+  `globalThis["jobs"] = {;`, failing cells with `Unexpected token ';'. Expected a property name.`),
+  and no longer re-evaluates comment-bearing initializers when persisting bindings — such
+  declarations are kept verbatim and their bindings persisted by reference.
+
 ### Removed
 
 ## [2026.8.29] - 2026-08-29

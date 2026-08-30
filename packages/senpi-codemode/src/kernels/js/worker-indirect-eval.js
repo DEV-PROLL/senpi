@@ -265,13 +265,15 @@ function rewriteDeclaration(code, declarationStart, start, end, keyword) {
 		const bindings = [];
 		collectPatternNames(pattern, bindings);
 		if (bindings.length === 0) return undefined;
+		if (preserveDeclaration) {
+			for (const name of bindings) assignments.push(`globalThis[${JSON.stringify(name)}] = ${name};`);
+			continue;
+		}
 		const target = rewriteBindingPattern(pattern);
 		if (target === undefined) return undefined;
 		const initializer = initializerStart < 0 ? "undefined" : segment.slice(initializerStart + 1).trim();
-		const [assignmentInitializer, comment] = splitTrailingLineComment(initializer);
-		const assignmentComment = preserveDeclaration ? "" : comment;
 		assignments.push(
-			`${target.startsWith("{") || target.startsWith("[") ? `(${target} = ${assignmentInitializer})` : `${target} = ${assignmentInitializer}`};${assignmentComment}`,
+			`${target.startsWith("{") || target.startsWith("[") ? `(${target} = ${initializer})` : `${target} = ${initializer}`};`,
 		);
 	}
 	if (assignments.length === 0) return undefined;
@@ -499,47 +501,6 @@ function applyTextEdits(code, edits) {
 		output = output.slice(0, edit.start) + edit.text + output.slice(edit.end);
 	}
 	return output;
-}
-
-function splitTrailingLineComment(source) {
-	let canStartRegex = true;
-	for (let index = 0; index < source.length; index += 1) {
-		const char = source[index];
-		const next = source[index + 1];
-		if (char === "/" && next === "/") return [source.slice(0, index).trimEnd(), source.slice(index)];
-		if (char === "/" && next === "*") {
-			index = skipBlockComment(source, index) - 1;
-			continue;
-		}
-		if (char === "'" || char === '"') {
-			index = skipQuotedLiteral(source, index) - 1;
-			canStartRegex = false;
-			continue;
-		}
-		if (char === "`") {
-			index = skipTemplateLiteral(source, index) - 1;
-			canStartRegex = false;
-			continue;
-		}
-		if (char === "/" && canStartRegex) {
-			index = skipRegexLiteral(source, index) - 1;
-			canStartRegex = false;
-			continue;
-		}
-		if (isIdentifierStart(char)) {
-			const end = readIdentifier(source, index);
-			canStartRegex = REGEX_PREFIX_KEYWORDS.has(source.slice(index, end));
-			index = end - 1;
-			continue;
-		}
-		if (isDecimalDigit(char)) {
-			index = skipNumberLiteral(source, index) - 1;
-			canStartRegex = false;
-			continue;
-		}
-		if (!/\s/u.test(char)) canStartRegex = isExpressionOperator(char) || char === "(" || char === "[" || char === "{";
-	}
-	return [source, ""];
 }
 
 function trimPattern(source) {

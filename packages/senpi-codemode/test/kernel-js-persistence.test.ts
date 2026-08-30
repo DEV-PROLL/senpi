@@ -186,4 +186,76 @@ footer\`)`,
 			expect(parseJavaScriptResult(run.result)).toBe(2);
 		});
 	});
+
+	it("persists object-literal declarations containing interior line comments", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			const first = await runJavaScriptCell(
+				kernel,
+				`const persistenceCommentedObject = {
+		  // interior comment
+		  value: 41,
+		}
+		return persistenceCommentedObject.value`,
+			);
+			const second = await runJavaScriptCell(kernel, "return persistenceCommentedObject.value + 1");
+
+			expect(parseJavaScriptResult(first.result)).toBe(41);
+			expect(parseJavaScriptResult(second.result)).toBe(42);
+		});
+	});
+
+	it("persists arrow-function declarations containing interior comments", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			const first = await runJavaScriptCell(
+				kernel,
+				`const persistenceCommentedArrow = () => {
+		  // helper note
+		  return 20
+		}
+		return persistenceCommentedArrow() + 1`,
+			);
+			const second = await runJavaScriptCell(kernel, "return persistenceCommentedArrow() + 2");
+
+			expect(parseJavaScriptResult(first.result)).toBe(21);
+			expect(parseJavaScriptResult(second.result)).toBe(22);
+		});
+	});
+
+	it("evaluates initializers with trailing comments exactly once", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			await runJavaScriptCell(kernel, "var persistenceEvalCount = 0");
+			const declared = await runJavaScriptCell(
+				kernel,
+				"const persistenceCountedValue = (persistenceEvalCount += 1) // trailing note\nreturn persistenceCountedValue",
+			);
+			const counted = await runJavaScriptCell(kernel, "return persistenceEvalCount");
+
+			expect(parseJavaScriptResult(declared.result)).toBe(1);
+			expect(parseJavaScriptResult(counted.result)).toBe(1);
+		});
+	});
+
+	it("persists destructured bindings declared with trailing comments", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			await runJavaScriptCell(
+				kernel,
+				"const { persistenceCommentedA, renamed: persistenceCommentedB } = { persistenceCommentedA: 1, renamed: 2 } // note",
+			);
+			const run = await runJavaScriptCell(kernel, "return [persistenceCommentedA, persistenceCommentedB]");
+
+			expect(parseJavaScriptResult(run.result)).toEqual([1, 2]);
+		});
+	});
+
+	it("persists multi-declarator declarations containing block comments", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			await runJavaScriptCell(
+				kernel,
+				"const persistenceMultiFirst = 1, persistenceMultiSecond = { /* block */ value: 2 }",
+			);
+			const run = await runJavaScriptCell(kernel, "return [persistenceMultiFirst, persistenceMultiSecond.value]");
+
+			expect(parseJavaScriptResult(run.result)).toEqual([1, 2]);
+		});
+	});
 });
