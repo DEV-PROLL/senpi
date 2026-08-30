@@ -761,6 +761,7 @@ export default function compactionExtension(
 			}
 			return;
 		}
+		if (compactEvent.rejectionCause === "external-owner") return;
 		if (!lanePolicy.disablesSenpiCompaction(ctx)) {
 			state = breaker.recordFailure(state, Date.now(), { route: compactEvent.reason });
 		}
