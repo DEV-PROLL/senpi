@@ -160,9 +160,12 @@ function loadedMcpStatus(server: McpWireStatusServer): RpcMcpServerStatus {
  */
 export function buildRpcSessionState(session: AgentSession, lastAbortSource?: AgentAbortSource): RpcSessionState {
 	const cwd = session.sessionManager.getCwd();
+	// Trust gates project-source settings (shell prefixes, project resources), so an
+	// unverifiable verdict must fail closed: no agentDir means no authoritative store to
+	// consult, and the session's own manager only counts when it says trusted outright.
 	const projectTrusted = session.agentDir
 		? new ProjectTrustStore(session.agentDir).get(cwd) === true
-		: (session.settingsManager?.isProjectTrusted?.() ?? true);
+		: session.settingsManager?.isProjectTrusted?.() === true;
 	return {
 		model: session.model,
 		thinkingLevel: session.thinkingLevel,
