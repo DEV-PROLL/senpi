@@ -1,6 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -40,8 +39,10 @@ afterEach(async () => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function scratch(label: string) {
-	const root = mkdtempSync(join(tmpdir(), `senpi-interactive-reconnect-${label}-`));
+function scratch(_label: string) {
+	// Keep the Unix socket path below macOS sun_path's 104-byte limit even on
+	// the bridge runner, whose os.tmpdir() path is comparatively long.
+	const root = mkdtempSync("/tmp/shr-");
 	roots.push(root);
 	const cwd = join(root, "cwd");
 	const agentDir = join(root, "agent");
@@ -179,28 +180,28 @@ describe("interactive host reconnect orchestration", () => {
 	it(
 		"reconnects the shared host after the accepted socket is killed without fallback",
 		async () => {
-		const qa = scratch("reconnect");
-		const local = await createLocalRuntime(qa);
-		const sessionPath = local.session.sessionFile!;
-		const host = new FakeHost(qa.socket, sessionPath, qa.cwd);
-		await host.listen();
-		const warnings: Array<{ message: string; cause: unknown }> = [];
-		const runtime = await createInteractiveHostRuntime(local, {
-			socket: qa.socket,
-			ensureHost: async () => undefined,
-			onWarning: (warning) => warnings.push(warning),
-		});
-		try {
-			expect(host.connections).toHaveLength(1);
-		host.connections[0]!.destroy();
-			await host.secondConnection.promise;
-			await host.secondOpenSession.promise;
-			expect(host.connections).toHaveLength(2);
-			expect(host.requests.filter((request) => request.type === "open_session")).toHaveLength(2);
-			expect(warnings).toEqual([]);
-		} finally {
-			await runtime.dispose();
-		}
+			const qa = scratch("reconnect");
+			const local = await createLocalRuntime(qa);
+			const sessionPath = local.session.sessionFile!;
+			const host = new FakeHost(qa.socket, sessionPath, qa.cwd);
+			await host.listen();
+			const warnings: Array<{ message: string; cause: unknown }> = [];
+			const runtime = await createInteractiveHostRuntime(local, {
+				socket: qa.socket,
+				ensureHost: async () => undefined,
+				onWarning: (warning) => warnings.push(warning),
+			});
+			try {
+				expect(host.connections).toHaveLength(1);
+				host.connections[0]!.destroy();
+				await host.secondConnection.promise;
+				await host.secondOpenSession.promise;
+				expect(host.connections).toHaveLength(2);
+				expect(host.requests.filter((request) => request.type === "open_session")).toHaveLength(2);
+				expect(warnings).toEqual([]);
+			} finally {
+				await runtime.dispose();
+			}
 		},
 		TEST_TIMEOUT,
 	);
@@ -259,41 +260,41 @@ describe("interactive host reconnect orchestration", () => {
 	it(
 		"sanitizes later proxy failures and deduplicates the fallback warning",
 		async () => {
-		const qa = scratch("sanitized");
-		const local = await createLocalRuntime(qa);
-		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
-		await host.listen();
-		const warnings: Array<{ message: string; cause: unknown }> = [];
-		let ensureHostCalls = 0;
-		const warning = deferred<void>();
-		const runtime = await createInteractiveHostRuntime(local, {
-			socket: qa.socket,
-			ensureHost: async () => {
-				ensureHostCalls++;
-				if (ensureHostCalls > 1) throw new Error("internal socket path / secret");
-				return undefined;
-			},
-			onWarning: (value) => {
-				warnings.push(value);
-				warning.resolve();
-			},
-		});
-		try {
+			const qa = scratch("sanitized");
+			const local = await createLocalRuntime(qa);
+			const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+			await host.listen();
+			const warnings: Array<{ message: string; cause: unknown }> = [];
+			let ensureHostCalls = 0;
+			const warning = deferred<void>();
+			const runtime = await createInteractiveHostRuntime(local, {
+				socket: qa.socket,
+				ensureHost: async () => {
+					ensureHostCalls++;
+					if (ensureHostCalls > 1) throw new Error("internal socket path / secret");
+					return undefined;
+				},
+				onWarning: (value) => {
+					warnings.push(value);
+					warning.resolve();
+				},
+			});
+			try {
 				await host.firstConnection.promise;
-			host.connections[0]!.destroy();
-			const action = runtime.session.steer("after disconnect");
+				host.connections[0]!.destroy();
+				const action = runtime.session.steer("after disconnect");
 				await expect(action).resolves.toBeUndefined();
-			await warning.promise;
-			await Promise.resolve();
-			expect(warnings).toHaveLength(2);
-			expect(warnings.map(({ message }) => message)).toEqual([
-			INTERACTIVE_HOST_RECONNECTING_WARNING,
-			INTERACTIVE_HOST_FALLBACK_WARNING,
-		]);
-			expect(warnings.every(({ message }) => !message.includes("internal socket path"))).toBe(true);
-		} finally {
-			await runtime.dispose();
-		}
+				await warning.promise;
+				await Promise.resolve();
+				expect(warnings).toHaveLength(2);
+				expect(warnings.map(({ message }) => message)).toEqual([
+					INTERACTIVE_HOST_RECONNECTING_WARNING,
+					INTERACTIVE_HOST_FALLBACK_WARNING,
+				]);
+				expect(warnings.every(({ message }) => !message.includes("internal socket path"))).toBe(true);
+			} finally {
+				await runtime.dispose();
+			}
 		},
 		TEST_TIMEOUT,
 	);
@@ -301,29 +302,29 @@ describe("interactive host reconnect orchestration", () => {
 	it(
 		"switches to the local runtime after reconnect exhaustion",
 		async () => {
-		const qa = scratch("fallback");
-		const local = await createLocalRuntime(qa);
-		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
-		await host.listen();
-		const warning = deferred<void>();
-		let ensureHostCalls = 0;
-		const runtime = await createInteractiveHostRuntime(local, {
-			socket: qa.socket,
-			ensureHost: async () => {
-				ensureHostCalls++;
-				if (ensureHostCalls > 1) throw new Error("reconnect failed");
-				return undefined;
-			},
-			onWarning: () => warning.resolve(),
-		});
-		try {
-			host.connections[0]!.destroy();
-			await warning.promise;
-			expect(runtime.session).toBe(local.session);
-			expect(host.requests.filter((request) => request.type === "get_state")).toHaveLength(0);
-		} finally {
-			await runtime.dispose();
-		}
+			const qa = scratch("fallback");
+			const local = await createLocalRuntime(qa);
+			const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+			await host.listen();
+			const warning = deferred<void>();
+			let ensureHostCalls = 0;
+			const runtime = await createInteractiveHostRuntime(local, {
+				socket: qa.socket,
+				ensureHost: async () => {
+					ensureHostCalls++;
+					if (ensureHostCalls > 1) throw new Error("reconnect failed");
+					return undefined;
+				},
+				onWarning: () => warning.resolve(),
+			});
+			try {
+				host.connections[0]!.destroy();
+				await warning.promise;
+				expect(runtime.session).toBe(local.session);
+				expect(host.requests.filter((request) => request.type === "get_state")).toHaveLength(0);
+			} finally {
+				await runtime.dispose();
+			}
 		},
 		TEST_TIMEOUT,
 	);
@@ -403,25 +404,25 @@ describe("interactive host reconnect orchestration", () => {
 	it(
 		"re-arms reconnect when the socket disconnects during a successful reconnect",
 		async () => {
-		const qa = scratch("race");
-		const local = await createLocalRuntime(qa);
-		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
-		await host.listen();
+			const qa = scratch("race");
+			const local = await createLocalRuntime(qa);
+			const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+			await host.listen();
 			const runtime = await createInteractiveHostRuntime(local, {
 				socket: qa.socket,
 				ensureHost: async () => undefined,
 			});
-		try {
-			host.connections[0]!.destroy();
-			await host.secondConnection.promise;
-			await host.secondOpenSession.promise;
-			// The reconnect has completed; a later disconnect must start another attempt.
-			host.connections[1]!.destroy();
-			await host.thirdConnection.promise;
-			expect(host.connections.length).toBeGreaterThanOrEqual(3);
-		} finally {
-			await runtime.dispose();
-		}
+			try {
+				host.connections[0]!.destroy();
+				await host.secondConnection.promise;
+				await host.secondOpenSession.promise;
+				// The reconnect has completed; a later disconnect must start another attempt.
+				host.connections[1]!.destroy();
+				await host.thirdConnection.promise;
+				expect(host.connections.length).toBeGreaterThanOrEqual(3);
+			} finally {
+				await runtime.dispose();
+			}
 		},
 		TEST_TIMEOUT,
 	);
@@ -429,35 +430,35 @@ describe("interactive host reconnect orchestration", () => {
 	it(
 		"dispose cancels an in-flight reconnect before reopening the session",
 		async () => {
-		const qa = scratch("dispose");
-		const local = await createLocalRuntime(qa);
-		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
-		await host.listen();
-		const reconnectStarted = deferred<void>();
-		const releaseReconnect = deferred<void>();
-		let ensureHostCalls = 0;
-		const runtime = await createInteractiveHostRuntime(local, {
-			socket: qa.socket,
-			ensureHost: async () => {
-				ensureHostCalls++;
-				if (ensureHostCalls > 1) {
-					reconnectStarted.resolve();
-					await releaseReconnect.promise;
-				}
-				return undefined;
-			},
-		});
-		try {
-			host.connections[0]!.destroy();
-			await reconnectStarted.promise;
-			const disposed = runtime.dispose();
-			releaseReconnect.resolve();
-			await disposed;
-			expect(host.requests.filter((request) => request.type === "open_session")).toHaveLength(1);
-		} finally {
-			releaseReconnect.resolve();
-			await runtime.dispose().catch(() => {});
-		}
+			const qa = scratch("dispose");
+			const local = await createLocalRuntime(qa);
+			const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+			await host.listen();
+			const reconnectStarted = deferred<void>();
+			const releaseReconnect = deferred<void>();
+			let ensureHostCalls = 0;
+			const runtime = await createInteractiveHostRuntime(local, {
+				socket: qa.socket,
+				ensureHost: async () => {
+					ensureHostCalls++;
+					if (ensureHostCalls > 1) {
+						reconnectStarted.resolve();
+						await releaseReconnect.promise;
+					}
+					return undefined;
+				},
+			});
+			try {
+				host.connections[0]!.destroy();
+				await reconnectStarted.promise;
+				const disposed = runtime.dispose();
+				releaseReconnect.resolve();
+				await disposed;
+				expect(host.requests.filter((request) => request.type === "open_session")).toHaveLength(1);
+			} finally {
+				releaseReconnect.resolve();
+				await runtime.dispose().catch(() => {});
+			}
 		},
 		TEST_TIMEOUT,
 	);
@@ -465,36 +466,36 @@ describe("interactive host reconnect orchestration", () => {
 	it(
 		"emits one sanitized fallback warning after bounded reconnect failure",
 		async () => {
-		const qa = scratch("fallback");
-		const local = await createLocalRuntime(qa);
-		const sessionPath = local.session.sessionFile!;
-		const host = new FakeHost(qa.socket, sessionPath, qa.cwd);
-		await host.listen();
-		const warnings: Array<{ message: string; cause: unknown }> = [];
-		let ensureHostCalls = 0;
-		const warning = deferred<void>();
-		const runtime = await createInteractiveHostRuntime(local, {
-			socket: qa.socket,
-			ensureHost: async () => {
-				ensureHostCalls++;
-				if (ensureHostCalls > 1) throw new Error("Client not started");
-				return undefined;
-			},
-			onWarning: (value) => {
-				warnings.push(value);
-				warning.resolve();
-			},
-		});
-		try {
-			host.connections[0]!.destroy();
-			await warning.promise;
-			expect(ensureHostCalls).toBe(4);
-			expect(warnings).toHaveLength(1);
-			expect(warnings[0]?.message).toBe(INTERACTIVE_HOST_FALLBACK_WARNING);
-			expect(warnings.every(({ message }) => !message.includes("Client not started"))).toBe(true);
-		} finally {
-			await runtime.dispose();
-		}
+			const qa = scratch("fallback");
+			const local = await createLocalRuntime(qa);
+			const sessionPath = local.session.sessionFile!;
+			const host = new FakeHost(qa.socket, sessionPath, qa.cwd);
+			await host.listen();
+			const warnings: Array<{ message: string; cause: unknown }> = [];
+			let ensureHostCalls = 0;
+			const warning = deferred<void>();
+			const runtime = await createInteractiveHostRuntime(local, {
+				socket: qa.socket,
+				ensureHost: async () => {
+					ensureHostCalls++;
+					if (ensureHostCalls > 1) throw new Error("Client not started");
+					return undefined;
+				},
+				onWarning: (value) => {
+					warnings.push(value);
+					warning.resolve();
+				},
+			});
+			try {
+				host.connections[0]!.destroy();
+				await warning.promise;
+				expect(ensureHostCalls).toBe(4);
+				expect(warnings).toHaveLength(1);
+				expect(warnings[0]?.message).toBe(INTERACTIVE_HOST_FALLBACK_WARNING);
+				expect(warnings.every(({ message }) => !message.includes("Client not started"))).toBe(true);
+			} finally {
+				await runtime.dispose();
+			}
 		},
 		TEST_TIMEOUT,
 	);
