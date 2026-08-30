@@ -910,6 +910,7 @@ wire shape, multi-session tagging, and payload validation responsibilities.
 
 ### What changed
 
+- `rpc-client.ts`: the interactive client buffers events received during `open_session` so startup widget/header/footer records emitted while attaching are replayed (session-filtered) instead of dropped.
 - `packages/coding-agent/src/modes/rpc/rpc-client.ts` and `packages/coding-agent/src/modes/rpc/rpc-types.ts` expose upstream queue-clearing commands while retaining fork RPC protocol structure.
 
 ### Why
