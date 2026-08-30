@@ -317,6 +317,25 @@ describe("multi-session RPC event writer", () => {
 		expect(records(lateCapable).some((record) => widgetLines(record)?.includes("factory"))).toBe(true);
 	});
 
+	it("scopes rendered delivery and capability presence to the attached session", async () => {
+		const a: string[] = [];
+		const b: string[] = [];
+		const writer = new SessionEventWriter(() => {});
+		writer.registerConnection("a", { writeRaw: (chunk) => a.push(chunk), waitForBackpressure: async () => {} });
+		writer.registerConnection("b", { writeRaw: (chunk) => b.push(chunk), waitForBackpressure: async () => {} });
+		writer.setConnectionCapabilities("a", ["rendered_components"]);
+		writer.attachConnectionToSession("a", "session-a");
+		writer.attachConnectionToSession("b", "session-b");
+		expect(writer.hasCapableConnection("session-a")).toBe(true);
+		expect(writer.hasCapableConnection("session-b")).toBe(false);
+		writer.enqueue("session-a", { type: "extension_ui_request", widgetLines: ["a"], __senpiRenderedComponent: true });
+		writer.enqueue("session-b", { type: "extension_ui_request", widgetLines: ["b"], __senpiRenderedComponent: true });
+		await writer.flush();
+		expect(records(a).some((record) => widgetLines(record)?.includes("a"))).toBe(true);
+		expect(records(a).some((record) => widgetLines(record)?.includes("b"))).toBe(false);
+		expect(records(b).some((record) => widgetLines(record)?.includes("b"))).toBe(false);
+	});
+
 	it("routes extension UI responses only to that session's pending map and rejects pending work on close", () => {
 		const a = new SessionExtensionUiRequests();
 		const b = new SessionExtensionUiRequests();

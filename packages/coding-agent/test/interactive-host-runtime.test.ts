@@ -20,6 +20,7 @@ import { FooterComponent } from "../src/modes/interactive/components/footer.ts";
 import {
 	createInteractiveHostRuntime,
 	createRemoteSessionProxy,
+	RemoteInteractiveRuntime,
 	INTERACTIVE_HOST_FALLBACK_WARNING,
 } from "../src/modes/interactive/interactive-host-runtime.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -157,6 +158,19 @@ async function waitForHost(child: ChildProcessWithoutNullStreams, socket: string
 }
 
 describe("interactive host runtime", () => {
+	it("re-registers rendered capability and last width after reconnect", async () => {
+		const setClientInfo = vi.fn(async () => {});
+		const runtime = new RemoteInteractiveRuntime(
+			{} as AgentSessionRuntime,
+			{} as never,
+			{ setClientInfo } as never,
+		);
+		runtime.setClientInfo(117);
+		await Promise.resolve();
+		await runtime.reRegisterClientInfo();
+		expect(setClientInfo).toHaveBeenNthCalledWith(1, 117, ["rendered_components"]);
+		expect(setClientInfo).toHaveBeenNthCalledWith(2, 117, ["rendered_components"]);
+	});
 	it("replays only own-session and untagged startup events", async () => {
 		const cwd = tmpdir();
 		const local = await createAgentSessionRuntimeFixture({

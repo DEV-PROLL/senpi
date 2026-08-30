@@ -457,7 +457,7 @@ describe("RPC Unix-socket multi-connection host", () => {
 				join(qa.agentDir, "extensions", "widget-factory.ts"),
 			],
 			qa,
-			"",
+			"rendered_components",
 		);
 		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
 		const peer = await connectPeer(qa.socketPath);
