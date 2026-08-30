@@ -4520,8 +4520,25 @@ export class AgentSession {
 
 	private _getDownswitchLiveContextTokens(model: Model<Api>): number {
 		const currentModel = this.model;
-		if (!currentModel || currentModel.contextWindow <= model.contextWindow) return 0;
-		return this.getContextUsage()?.tokens ?? 0;
+		if (!currentModel) return 0;
+		const compaction = this.settingsManager.getCompactionSettings();
+		const currentBudget = projectModelUsabilityBudget({
+			model: currentModel,
+			systemPrompt: this.agent.state.systemPrompt,
+			tools: this.agent.state.tools,
+			compaction,
+		});
+		const targetBudget = projectModelUsabilityBudget({
+			model,
+			systemPrompt: this.agent.state.systemPrompt,
+			tools: this.agent.state.tools,
+			compaction,
+		});
+		const currentUsableContext = currentBudget.contextWindow - currentBudget.requiredTokens;
+		const targetUsableContext = targetBudget.contextWindow - targetBudget.requiredTokens;
+		if (targetUsableContext > currentUsableContext) return 0;
+		const fixedPrefixTokens = currentBudget.systemPromptTokens + currentBudget.activeToolSchemaTokens;
+		return Math.max(0, (this.getContextUsage()?.tokens ?? 0) - fixedPrefixTokens);
 	}
 
 	/**
@@ -4629,7 +4646,16 @@ export class AgentSession {
 		this._emitServiceTierChangeIfNeeded(previousTier, previousFastMode);
 
 		if (!opts.emitModelSelect) return undefined;
-		return await this._emitModelSelect(model, previousModel, opts.modelSelectSource);
+		const previousSystemPrompt = this.agent.state.systemPrompt;
+		try {
+			const systemPromptChange = await this._emitModelSelect(model, previousModel, opts.modelSelectSource);
+			this.assertModelUsable(model, this._getDownswitchLiveContextTokens(model));
+			return systemPromptChange;
+		} catch (error) {
+			if (previousModel) this.agent.state.model = previousModel;
+			this.agent.state.systemPrompt = previousSystemPrompt;
+			throw error;
+		}
 	}
 
 	private _applyEphemeralThinkingLevel(level: ThinkingLevel): void {
