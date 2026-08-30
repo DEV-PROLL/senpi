@@ -292,6 +292,26 @@ footer\`)`,
 		});
 	});
 
+	it("persists bindings whose pattern carries an interior line comment", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			await runJavaScriptCell(
+				kernel,
+				"const { persistenceCommentedBinding // note\n} = { persistenceCommentedBinding: 7 };",
+			);
+			const run = await runJavaScriptCell(kernel, "return persistenceCommentedBinding");
+
+			expect(parseJavaScriptResult(run.result)).toBe(7);
+		});
+	});
+
+	it("rejects declarations with a dangling trailing comma", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			const run = await runJavaScriptCell(kernel, "const persistenceDangling = 1,");
+
+			expect(run.result.ok).toBe(false);
+		});
+	});
+
 	it("captures the last expression after nested template literals in interpolations", async () => {
 		await withJavaScriptKernel(async (kernel) => {
 			const run = await runJavaScriptCell(
