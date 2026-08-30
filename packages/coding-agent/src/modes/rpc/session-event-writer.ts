@@ -81,6 +81,7 @@ export class SessionEventWriter {
 	private readonly connectionContext = new AsyncLocalStorage<string>();
 	private readonly connectionCapabilities = new Map<string, Set<string>>();
 	private readonly connectionSessions = new Map<string, Set<string>>();
+	private readonly registeredCapabilityConnections = new Set<string>();
 	private readonly controlQueue: RecordQueue = { latestByKey: new Map(), ready: false };
 	private readonly readyQueues: RecordQueue[] = [];
 	private readonly sealedSessions = new Set<string>();
@@ -132,6 +133,7 @@ export class SessionEventWriter {
 				this.connections.delete(id);
 				this.connectionCapabilities.delete(id);
 				this.connectionSessions.delete(id);
+				this.registeredCapabilityConnections.delete(id);
 			}
 		});
 		this.connections.set(id, { connection, actor });
@@ -148,6 +150,7 @@ export class SessionEventWriter {
 		this.connections.delete(id);
 		this.connectionCapabilities.delete(id);
 		this.connectionSessions.delete(id);
+		this.registeredCapabilityConnections.delete(id);
 	}
 
 	attachConnectionToSession(id: string, sessionId: string): void {
@@ -168,13 +171,26 @@ export class SessionEventWriter {
 		if (!registered) return;
 		const wasCapable = this.connectionCapabilities.get(id)?.has("rendered_components") ?? false;
 		this.connectionCapabilities.set(id, new Set(capabilities));
+		this.registeredCapabilityConnections.add(id);
 		if (!wasCapable && capabilities.includes("rendered_components"))
 			for (const sessionId of this.connectionSessions.get(id) ?? [])
 				for (const record of this.sessionSnapshots.get(sessionId) ?? []) if (record.rendered) registered.actor.enqueue(record.line);
 	}
 
 	clearConnectionCapabilities(id: string): void {
-		if (this.connections.has(id)) this.connectionCapabilities.set(id, new Set());
+		if (this.connections.has(id)) {
+			this.connectionCapabilities.set(id, new Set());
+			this.registeredCapabilityConnections.delete(id);
+		}
+	}
+
+	hasRegisteredConnectionCapabilities(id: string): boolean {
+		return this.registeredCapabilityConnections.has(id);
+	}
+
+	getConnectionCapabilities(id: string): readonly string[] | undefined {
+		if (!this.registeredCapabilityConnections.has(id)) return undefined;
+		return [...(this.connectionCapabilities.get(id) ?? [])];
 	}
 
 	hasCapableConnection(sessionId: string): boolean {

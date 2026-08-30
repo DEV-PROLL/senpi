@@ -489,6 +489,40 @@ describe("RPC Unix-socket multi-connection host", () => {
 		}
 	});
 
+	it("preserves registered capabilities when one socket opens a second session", async () => {
+		const qa = scratch("cap-second");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		mkdirSync(join(qa.agentDir, "extensions"), { recursive: true });
+		writeFileSync(
+			join(qa.agentDir, "extensions", "widget-factory.ts"),
+			`export default function (pi) { pi.on("session_start", (_event, ctx) => ctx.ui.setWidget("factory", () => ({ render: (width) => [String(width)] }))); }`,
+		);
+		const child = spawnRpc(
+			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL, "--extension", join(qa.agentDir, "extensions", "widget-factory.ts")],
+			qa,
+			"rendered_components",
+		);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const peer = await connectPeer(qa.socketPath);
+		try {
+			const first = await peer.peer.request({ id: "open-a", type: "open_session", cwd: qa.cwd });
+			const sessionA = openedSessionId(first);
+			await peer.peer.request({ id: "info-a", type: "set_client_info", sessionId: sessionA, width: 80, capabilities: ["rendered_components"] });
+			await peer.peer.request({ id: "open-b", type: "open_session", cwd: qa.cwd });
+			const factoryAfterSecondOpen = peer.peer.waitFor(
+				(value) => value.type === "extension_ui_request" && value.widgetKey === "factory" && JSON.stringify(value.widgetLines) === JSON.stringify(["81"]),
+			);
+			await peer.peer.request({ id: "info-a-again", type: "set_client_info", sessionId: sessionA, width: 81 });
+			expect(await factoryAfterSecondOpen).toMatchObject({ sessionId: sessionA, widgetKey: "factory", widgetLines: ["81"] });
+		} finally {
+			peer.peer.close();
+			peer.socket.destroy();
+			await fake.close();
+			await stopChild(child);
+		}
+	});
+
 	it("uses the minimum reported width across attached peers and drops leavers", async () => {
 		const qa = scratch("widget-width-peers");
 		const fake = await startFakeModelServer();

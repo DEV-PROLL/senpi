@@ -163,10 +163,11 @@ export class SessionCommandRouter {
 			const openedSession = opened;
 			const entry = this.registry.getForCommand(openedSession.sessionId, "open_session");
 			if (owner !== undefined) {
-				this.writer.setConnectionCapabilities(
-					owner,
-					this.pendingCapabilities.get(owner) ?? this.connectionOptions?.capabilities ?? [],
-				);
+				if (!this.writer.hasRegisteredConnectionCapabilities(owner))
+					this.writer.setConnectionCapabilities(
+						owner,
+						this.pendingCapabilities.get(owner) ?? this.connectionOptions?.capabilities ?? [],
+					);
 				this.writer.attachConnectionToSession(owner, openedSession.sessionId);
 			}
 			// A client that dies without close_session (terminal closed, SIGKILL, dropped
@@ -210,6 +211,7 @@ export class SessionCommandRouter {
 								setCapabilities: (connectionId, capabilities) => {
 									if (connectionId !== undefined) {
 										this.writer.setConnectionCapabilities(connectionId, capabilities);
+										this.pendingCapabilities.set(connectionId, [...capabilities]);
 										for (const binding of this.bindings.values()) binding.rerenderComponents?.();
 									}
 								},
