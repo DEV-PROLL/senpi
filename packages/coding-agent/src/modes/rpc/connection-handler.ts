@@ -160,7 +160,9 @@ function loadedMcpStatus(server: McpWireStatusServer): RpcMcpServerStatus {
  */
 export function buildRpcSessionState(session: AgentSession, lastAbortSource?: AgentAbortSource): RpcSessionState {
 	const cwd = session.sessionManager.getCwd();
-	const projectTrusted = new ProjectTrustStore(session.agentDir).get(cwd) === true;
+	const projectTrusted = session.agentDir
+		? new ProjectTrustStore(session.agentDir).get(cwd) === true
+		: (session.settingsManager?.isProjectTrusted?.() ?? true);
 	return {
 		model: session.model,
 		thinkingLevel: session.thinkingLevel,
@@ -199,9 +201,9 @@ export function buildRpcSessionState(session: AgentSession, lastAbortSource?: Ag
 		messageCount: session.messages.length,
 		pendingMessageCount: session.pendingMessageCount,
 		usageTotals: session.sessionManager.getUsageTotals(),
-		contextUsage: session.getContextUsage(),
-		favoriteModels: session.favoriteModels.map((entry) => ({ ...entry })),
-		scopedModels: session.scopedModels.map((entry) => ({ ...entry })),
+		contextUsage: typeof session.getContextUsage === "function" ? session.getContextUsage() : undefined,
+		favoriteModels: session.favoriteModels?.map((entry) => ({ ...entry })) ?? [],
+		scopedModels: session.scopedModels?.map((entry) => ({ ...entry })) ?? [],
 	};
 }
 
