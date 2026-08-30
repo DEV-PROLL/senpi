@@ -44,7 +44,12 @@ export function createLiveComponentRenderer(options: {
 				render();
 			}, 0);
 		};
-		const tui = { requestRender } as unknown as TUI;
+		const tui = new Proxy({ requestRender } as Record<string, unknown>, {
+			get(target, property: string | symbol) {
+				if (property in target) return target[property as string];
+				throw new Error(`RPC live component TUI member is unsupported: ${String(property)}`);
+			},
+		}) as unknown as TUI;
 		component = options.factory(tui, theme);
 		render();
 		return {

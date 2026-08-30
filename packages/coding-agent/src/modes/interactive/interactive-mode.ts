@@ -742,6 +742,7 @@ type HostUiResponse =
  */
 type HostUiCapableRuntime = {
 	setHostUiHandler(callback?: (request: HostUiRequest) => Promise<HostUiResponse | undefined>): void;
+	setClientInfo?(width: number): void;
 };
 
 function linesFactory(lines: string[] | undefined): ((tui: TUI, thm: Theme) => Component) | undefined {
@@ -1471,6 +1472,7 @@ export class InteractiveMode {
 			throw error;
 		}
 		this.isInitialized = true;
+		(this.runtimeHost as Partial<HostUiCapableRuntime>).setClientInfo?.(this.ui.terminal.columns);
 
 		await this.themeController.applyFromSettings();
 
@@ -5786,6 +5788,14 @@ export class InteractiveMode {
 		const signals: NodeJS.Signals[] = ["SIGTERM"];
 		if (process.platform !== "win32") {
 			signals.push("SIGHUP");
+		}
+
+		if (process.platform !== "win32") {
+			const resizeHandler = () => {
+				(this.runtimeHost as Partial<HostUiCapableRuntime>).setClientInfo?.(this.ui.terminal.columns);
+			};
+			process.on("SIGWINCH", resizeHandler);
+			this.signalCleanupHandlers.push(() => process.off("SIGWINCH", resizeHandler));
 		}
 
 		for (const signal of signals) {

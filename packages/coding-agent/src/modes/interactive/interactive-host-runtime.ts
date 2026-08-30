@@ -283,6 +283,11 @@ export class RemoteInteractiveRuntime {
 	setHostUiHandler(callback?: InteractiveHostUiHandler): void {
 		this.#remoteSession.setHostUiHandler(callback);
 	}
+	setClientInfo(width: number): void {
+		void (this.#client as unknown as { send(command: { type: "set_client_info"; width: number }): Promise<unknown> })
+			.send({ type: "set_client_info", width })
+			.catch(() => {});
+	}
 	async dispose(): Promise<void> {
 		if (this.#state === "disposed") return;
 		this.#state = "disposed";
