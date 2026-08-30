@@ -250,6 +250,9 @@ export function createRpcConnectionHandler(
 ): RpcConnectionHandler {
 	const clientCapabilities = options.capabilities;
 	const routingSessionId = options.sessionId;
+	// True only while THIS connection's own command drives a replacement; the issuer
+	// already learns the new identity from its command response.
+	let replacementIssuedHere = false;
 	let session = runtimeHost.session;
 	let unsubscribe: (() => void) | undefined;
 	let unsubscribeBackpressure: (() => void) | undefined;
@@ -644,6 +647,15 @@ export function createRpcConnectionHandler(
 		await rebindSession(true);
 	});
 
+	const rebindAfterLocalReplacement = async (): Promise<void> => {
+		replacementIssuedHere = true;
+		try {
+			await rebindSession();
+		} finally {
+			replacementIssuedHere = false;
+		}
+	};
+
 	const rebindSession = async (deferRefresh = false): Promise<void> => {
 		unsubscribeLoadedSurfaces?.();
 		unsubscribeExtensionEvents?.();
@@ -651,7 +663,7 @@ export function createRpcConnectionHandler(
 		session = runtimeHost.session;
 		if (replacedSession) {
 			lastAbortSource = undefined;
-			if (routingSessionId !== undefined) {
+			if (routingSessionId !== undefined || !replacementIssuedHere) {
 				// A replacement can be driven by ANY attached client, so every connection must be
 				// told the live binding moved and given the new authoritative identity. Emitted
 				// before the derived-surface refresh so a client cannot act on the old identity in
@@ -980,7 +992,7 @@ export function createRpcConnectionHandler(
 				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
 				const result = await runtimeHost.newSession(options);
 				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
-					await rebindSession();
+					await rebindAfterLocalReplacement();
 				return success(id, "new_session", result);
 			}
 
@@ -1227,14 +1239,14 @@ export function createRpcConnectionHandler(
 			case "switch_session": {
 				const result = await runtimeHost.switchSession(command.sessionPath, { cwdOverride: command.cwdOverride });
 				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
-					await rebindSession();
+					await rebindAfterLocalReplacement();
 				return success(id, "switch_session", result);
 			}
 
 			case "fork": {
 				const result = await runtimeHost.fork(command.entryId, { position: command.position });
 				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
-					await rebindSession();
+					await rebindAfterLocalReplacement();
 				return success(id, "fork", { text: result.selectedText, cancelled: result.cancelled });
 			}
 
@@ -1245,7 +1257,7 @@ export function createRpcConnectionHandler(
 				}
 				const result = await runtimeHost.fork(leafId, { position: "at" });
 				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
-					await rebindSession();
+					await rebindAfterLocalReplacement();
 				return success(id, "clone", { cancelled: result.cancelled });
 			}
 
@@ -1280,7 +1292,7 @@ export function createRpcConnectionHandler(
 			case "import_jsonl": {
 				const result = await runtimeHost.importFromJsonl(command.inputPath, command.cwdOverride);
 				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
-					await rebindSession();
+					await rebindAfterLocalReplacement();
 				return success(id, "import_jsonl", result);
 			}
 
