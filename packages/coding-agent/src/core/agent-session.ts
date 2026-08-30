@@ -108,6 +108,10 @@ import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "
 import { areExperimentalFeaturesEnabled } from "./experimental.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
+import {
+	ModelUsabilityBudgetError,
+	projectModelUsabilityBudget,
+} from "./extensions/builtin/compaction/model-usability-budget.ts";
 import { CODEX_RESPONSES_API, type ServiceTier } from "./extensions/builtin/service-tier.ts";
 import { deriveExtensionRegistrationId } from "./extensions/builtin/tool-search/engine/marker.ts";
 import { getToolSearchService } from "./extensions/builtin/tool-search/service.ts";
@@ -4487,6 +4491,17 @@ export class AgentSession {
 		return this._setModel(model, true);
 	}
 
+	assertModelUsable(model: Model<Api> | undefined = this.model): void {
+		if (!model) return;
+		const projection = projectModelUsabilityBudget({
+			model,
+			systemPrompt: this.agent.state.systemPrompt,
+			tools: this.agent.state.tools,
+			compaction: this.settingsManager.getCompactionSettings(),
+		});
+		if (!projection.usable) throw new ModelUsabilityBudgetError(projection);
+	}
+
 	/**
 	 * Set the model for this session without changing the global model defaults.
 	 * The selection is still persisted in this session's history.
@@ -4499,6 +4514,7 @@ export class AgentSession {
 		model: Model<Api>,
 		updateGlobalDefaults: boolean,
 	): Promise<SystemPromptChangeEvent | undefined> {
+		this.assertModelUsable(model);
 		if (!(await this._modelRuntime.checkAuth(model.provider))) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
