@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { estimateTokens } from "../../src/core/compaction/index.ts";
 import { resolveCompactionSettings } from "../../src/core/compaction-settings-resolver.ts";
 import {
 	admitContextToolResult,
+	admitContextToolResults,
 	resolveBeforeAgentStartMessage,
 	resolveCompactionGeometry,
 	resolveReminderSystemPrompt,
@@ -83,6 +85,33 @@ describe("ideal compaction extension wiring decisions", () => {
 		const settings = resolveCompactionSettings({ keepRecentTokens: "bad" as never, speculativeFraction: Number.NaN });
 		expect(settings.keepRecentTokens).toBe(20_000);
 		expect(settings.speculativeFraction).toBe(0.75);
+	});
+
+	it("caps multipart tool text blocks with one aggregate budget and preserves images", () => {
+		const cap = 10_000;
+		const image = { type: "image" as const, data: "abc", mimeType: "image/png" };
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "tool-1",
+				toolName: "test",
+				content: [
+					{ type: "text" as const, text: "a".repeat(cap * 8) },
+					image,
+					{ type: "text" as const, text: "b".repeat(cap * 8) },
+				],
+				isError: false,
+				timestamp: 0,
+			},
+		];
+		const projected = admitContextToolResults(messages, 200_000, true)[0];
+		const projectedContent = (projected as { content: Array<{ type: string; text?: string }> }).content;
+		const text = projectedContent
+			.filter((part) => part.type === "text")
+			.map((part) => part.text ?? "")
+			.join("");
+		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(cap);
+		expect(projectedContent).toContainEqual(image);
 	});
 
 	it("bypasses admission when an exact marker line sits inside the output", () => {

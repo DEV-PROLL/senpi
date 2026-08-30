@@ -1,17 +1,21 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { CompactionPreparation } from "../../../compaction/index.ts";
+import { type CompactionPreparation, estimateTokens } from "../../../compaction/index.ts";
 import type { BeforeAgentStartEventResult } from "../../types.ts";
 import { type IdleCompactionDecision, shouldWarmAtIdle } from "./idle.ts";
 import * as policy from "./policy.ts";
 import { isWarmResultStale, isWithinGraceBand, resolveSpeculationLeadTokens } from "./speculation-lead.ts";
-import { admitToolResult } from "./tool-admission.ts";
+import { admitToolResult, resolveToolResultAdmissionCapTokens } from "./tool-admission.ts";
 
 export interface CompactionGeometry {
 	reserveTokens: number;
 	thresholdTokens: number;
 	leadTokens: number;
+}
+
+export function estimateTextTokens(text: string): number {
+	return estimateTokens({ role: "user", content: text, timestamp: 0 });
 }
 
 export function resolveCompactionGeometry(input: {
@@ -80,8 +84,9 @@ export function admitContextToolResult(
 	text: string,
 	contextWindow: number,
 	spillDir: string,
+	capTokens?: number,
 ): { text: string; admitted: boolean } {
-	const result = admitToolResult({ text, contextWindow, spillDir });
+	const result = admitToolResult({ text, contextWindow, spillDir, capTokens });
 	return { text: result.text, admitted: result.spilled };
 }
 
@@ -99,11 +104,21 @@ export function admitContextToolResults(
 			return admitted.admitted ? { ...message, content: [{ type: "text" as const, text: admitted.text }] } : message;
 		}
 		let changed = false;
+		let remainingTokens = resolveToolResultAdmissionCapTokens(contextWindow);
 		const content = message.content.map((part) => {
 			if (part.type !== "text" || !part.text) return part;
-			const admitted = admitContextToolResult(part.text, contextWindow, spillDir);
-			if (!admitted.admitted) return part;
+			const partTokens = estimateTextTokens(part.text);
+			if (partTokens <= remainingTokens) {
+				remainingTokens -= partTokens;
+				return part;
+			}
+			if (remainingTokens <= 0) {
+				changed = true;
+				return { ...part, text: "" };
+			}
+			const admitted = admitContextToolResult(part.text, contextWindow, spillDir, remainingTokens);
 			changed = true;
+			remainingTokens = 0;
 			return { ...part, text: admitted.text };
 		});
 		return changed ? { ...message, content } : message;
