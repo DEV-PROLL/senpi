@@ -485,9 +485,16 @@ function createRemoteSessionProxy(
 			projectTrusted: nextState.projectTrusted,
 		});
 		if (nextState.sessionFile) {
-			// SessionManager.open retains the explicit path even when the host has
-			// deferred creating the file for a setup-only session.
-			sessionManager = SessionManager.open(nextState.sessionFile, undefined, nextState.cwd);
+			// Keep the caller-owned manager identity when refreshing the same session.
+			// Navigation and host-side mutations must update every existing mirror, not
+			// leave the interactive runtime holding the pre-refresh snapshot.
+			if (sessionManager.getSessionFile() === nextState.sessionFile) {
+				sessionManager.reloadFromDisk?.();
+			} else {
+				// SessionManager.open retains the explicit path even when the host has
+				// deferred creating the file for a setup-only session.
+				sessionManager = SessionManager.open(nextState.sessionFile, undefined, nextState.cwd);
+			}
 			if (nextState.entries?.length && !sessionManager.getEntries().length) {
 				for (const entry of nextState.entries) sessionManager.appendEntry(entry);
 			}
