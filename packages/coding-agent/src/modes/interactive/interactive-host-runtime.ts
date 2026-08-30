@@ -10,12 +10,7 @@ import { SessionManager } from "../../core/session-manager.ts";
 import { SettingsManager } from "../../core/settings-manager.ts";
 import type { BashOperations } from "../../core/tools/bash.ts";
 import { type EnsuredHost, ensureHost } from "../rpc/host-ensure.ts";
-import {
-	isTransportGoneError,
-	RpcClient,
-	RpcTransportGoneError,
-	type RpcClientEvent,
-} from "../rpc/rpc-client.ts";
+import { isTransportGoneError, RpcClient, type RpcClientEvent } from "../rpc/rpc-client.ts";
 
 export const INTERACTIVE_HOST_FALLBACK_WARNING = "Warning: shared interactive host unavailable; continuing locally";
 export const INTERACTIVE_HOST_RECONNECTING_WARNING = "Warning: shared interactive host connection lost; reconnecting";
@@ -84,7 +79,11 @@ export async function createInteractiveHostRuntime(
 	const warnReconnect = (cause: unknown) => {
 		if (reconnectWarningShown) return;
 		reconnectWarningShown = true;
-		options.onWarning?.({ type: "interactive_host_action_failed", message: INTERACTIVE_HOST_RECONNECTING_WARNING, cause });
+		options.onWarning?.({
+			type: "interactive_host_action_failed",
+			message: INTERACTIVE_HOST_RECONNECTING_WARNING,
+			cause,
+		});
 	};
 	const warnFallback = (cause: unknown) => {
 		if (fallbackWarned) return;
@@ -100,7 +99,7 @@ export async function createInteractiveHostRuntime(
 		},
 	});
 	scheduleReconnect = () => {
-		if (!remoteSession || reconnecting || disposed) return;
+		if (!remoteSession || reconnecting || disposed || remoteRuntime?.isFallback) return;
 		remoteRuntime?.enterReconnecting();
 		reconnecting = (async () => {
 				let cause: unknown;
@@ -132,7 +131,7 @@ export async function createInteractiveHostRuntime(
 				}
 	})().finally(() => {
 		reconnecting = undefined;
-		if (disconnectQueued && !disposed) scheduleReconnect();
+			if (disconnectQueued && !disposed && !remoteRuntime?.isFallback) scheduleReconnect();
 	});
 	};
 	try {
@@ -192,8 +191,12 @@ export class RemoteInteractiveRuntime {
 	#rebindSession: (() => Promise<void>) | undefined;
 	#beforeSessionInvalidate: (() => void) | undefined;
 	#state: "connected" | "reconnecting" | "fallback" | "disposed" = "connected";
+	#fallbackHandoff: Promise<void> | undefined;
 	get isReconnecting(): boolean {
 		return this.#state === "reconnecting";
+	}
+	get isFallback(): boolean {
+		return this.#state === "fallback";
 	}
 
 	constructor(
@@ -217,29 +220,37 @@ export class RemoteInteractiveRuntime {
 		} catch (error) {
 			if (isTransportGoneError(error)) {
 				this.#onTransportGone(error);
-				throw new RpcTransportGoneError();
+				return { cancelled: true } as T;
 			}
 			throw error;
 		}
 	}
 
 	enterConnected(): void {
-		if (this.#state !== "disposed") this.#state = "connected";
+		if (this.#state !== "disposed" && this.#state !== "fallback") this.#state = "connected";
 	}
 
 	enterReconnecting(): void {
-		if (this.#state !== "disposed") this.#state = "reconnecting";
+		if (this.#state !== "disposed" && this.#state !== "fallback") this.#state = "reconnecting";
 	}
 
-	enterFallback(): void {
+	async enterFallback(): Promise<void> {
 		if (this.#state === "disposed" || this.#state === "fallback") return;
 		this.#state = "fallback";
 		this.#beforeSessionInvalidate?.();
-		void this.#rebindSession?.();
+		const rebind = this.#rebindSession?.();
+		if (rebind) {
+			this.#fallbackHandoff = rebind.catch((error) => {
+				this.#onTransportGone(error);
+			});
+			await this.#fallbackHandoff;
+		}
 	}
 
 	get session(): AgentSession {
-		return this.#state === "fallback" || this.#state === "disposed" ? this.#local.session : this.#remoteSession.session;
+		return this.#state === "fallback" || this.#state === "disposed"
+			? this.#local.session
+			: this.#remoteSession.session;
 	}
 	get services(): AgentSessionRuntime["services"] {
 		return this.#local.services;
@@ -263,6 +274,11 @@ export class RemoteInteractiveRuntime {
 	setRebindSession(callback?: () => Promise<void>): void {
 		this.#rebindSession = callback;
 		this.#local.setRebindSession(callback);
+		if (callback && this.#state === "fallback" && !this.#fallbackHandoff) {
+			this.#fallbackHandoff = callback().catch((error) => {
+				this.#onTransportGone(error);
+			});
+		}
 	}
 	setHostUiHandler(callback?: InteractiveHostUiHandler): void {
 		this.#remoteSession.setHostUiHandler(callback);
@@ -272,6 +288,7 @@ export class RemoteInteractiveRuntime {
 		this.#state = "disposed";
 		this.#lifecycle?.dispose();
 		await this.#lifecycle?.reconnecting?.catch(() => {});
+		await this.#fallbackHandoff?.catch(() => {});
 		const errors: unknown[] = [];
 		for (const cleanup of [
 			() => this.#remoteSession.abortLocalBash(),
@@ -297,7 +314,8 @@ export class RemoteInteractiveRuntime {
 		// multi-session host emits session_replaced while completing it, so the echo
 		// can arrive before the refresh/rebind sequence below starts and race it -
 		// newSession transports setup entries between two refreshes.
-		return this.#remoteSession.aroundLocalReplacement(async () => {
+		return this.#remoteSession
+			.aroundLocalReplacement(async () => {
 			const result = await this.#call(() => this.#client.newSession(options?.parentSession));
 			if (!result.cancelled) {
 				this.#beforeSessionInvalidate?.();
@@ -313,7 +331,8 @@ export class RemoteInteractiveRuntime {
 				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 			}
 			return result;
-		}).catch((error) => {
+			})
+			.catch((error) => {
 			if (isTransportGoneError(error)) return { cancelled: true };
 			throw error;
 		});
@@ -329,11 +348,14 @@ export class RemoteInteractiveRuntime {
 		if (this.#state === "fallback") return this.#local.switchSession(sessionPath, options);
 		// See newSession: the suppression must cover the command itself, since the
 		// host emits session_replaced while completing it.
-		return this.#remoteSession.aroundLocalReplacement(async () => {
-			const result = await this.#call(() => this.#client.switchSession(
+		return this.#remoteSession
+			.aroundLocalReplacement(async () => {
+				const result = await this.#call(() =>
+					this.#client.switchSession(
 				sessionPath,
 				options?.cwdOverride === undefined ? undefined : { cwdOverride: options.cwdOverride },
-			));
+					),
+				);
 			if (!result.cancelled) {
 				this.#beforeSessionInvalidate?.();
 				this.#remoteSession.abortLocalBash();
@@ -345,7 +367,8 @@ export class RemoteInteractiveRuntime {
 				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 			}
 			return result;
-		}).catch((error) => {
+			})
+			.catch((error) => {
 			if (isTransportGoneError(error)) return { cancelled: true };
 			throw error;
 		});
@@ -356,7 +379,8 @@ export class RemoteInteractiveRuntime {
 	): Promise<{ cancelled: boolean; selectedText?: string }> {
 		if (this.#state === "fallback") return this.#local.fork(entryId, options);
 		// See newSession: the suppression must cover the command itself.
-		return this.#remoteSession.aroundLocalReplacement(async () => {
+		return this.#remoteSession
+			.aroundLocalReplacement(async () => {
 			const result = await this.#call(() => this.#client.fork(entryId, options));
 			if (!result.cancelled) {
 				this.#beforeSessionInvalidate?.();
@@ -365,7 +389,8 @@ export class RemoteInteractiveRuntime {
 				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 			}
 			return { cancelled: result.cancelled, selectedText: result.text };
-		}).catch((error) => {
+			})
+			.catch((error) => {
 			if (isTransportGoneError(error)) return { cancelled: true };
 			throw error;
 		});
@@ -373,7 +398,8 @@ export class RemoteInteractiveRuntime {
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
 		if (this.#state === "fallback") return this.#local.importFromJsonl(inputPath, cwdOverride);
 		// See newSession: the suppression must cover the command itself.
-		return this.#remoteSession.aroundLocalReplacement(async () => {
+		return this.#remoteSession
+			.aroundLocalReplacement(async () => {
 			const result = await this.#call(() => this.#client.importJsonl(inputPath, cwdOverride));
 			if (!result.cancelled) {
 				this.#beforeSessionInvalidate?.();
@@ -381,7 +407,8 @@ export class RemoteInteractiveRuntime {
 				await this.#refreshAndRebind();
 			}
 			return result;
-		}).catch((error) => {
+			})
+			.catch((error) => {
 			if (isTransportGoneError(error)) return { cancelled: true };
 			throw error;
 		});
@@ -430,13 +457,13 @@ export function createRemoteSessionProxy(
 				cause: error,
 			});
 	};
-	const transportCall = async <T>(action: string, call: () => Promise<T>): Promise<T> => {
+	const transportCall = async <T>(action: string, call: () => Promise<T>, cancelledValue?: T): Promise<T> => {
 		try {
 			return await call();
 		} catch (error) {
 			if (!isTransportGoneError(error)) throw error;
 			reportActionFailure(action)(error);
-			throw new RpcTransportGoneError();
+			return cancelledValue as T;
 		}
 	};
 	let state = { ...initialState };
@@ -682,6 +709,7 @@ export function createRemoteSessionProxy(
 		// against, and must survive the rebuild below.
 		const idsAtRefreshStart = new Set(sessionManager.getEntries().map((entry) => entry.id));
 		const nextState = await transportCall("refresh", () => client.getState());
+		if (!nextState) return;
 		state = { ...stateFromRpc(nextState) };
 		nextQueuedInputOrder = Math.max(0, ...nextState.ordered.map((item) => item.enqueueOrder));
 		let messages: AgentSession["messages"];
@@ -731,7 +759,7 @@ export function createRemoteSessionProxy(
 			}
 			messages = sessionManager.buildSessionContext().messages;
 		} else {
-			messages = await transportCall("refresh", () => client.getMessages());
+			messages = await transportCall("refresh", () => client.getMessages(), []);
 		}
 		local.agent.state.messages.splice(0, local.agent.state.messages.length, ...structuredClone(messages));
 		streamingAssistant = undefined;
@@ -773,7 +801,8 @@ export function createRemoteSessionProxy(
 					}
 				};
 			if (property === "abort") return () => client.abort();
-			if (property === "abortCompaction") return () => void client.abortCompaction().catch(reportActionFailure("abortCompaction"));
+			if (property === "abortCompaction")
+				return () => void client.abortCompaction().catch(reportActionFailure("abortCompaction"));
 			if (property === "steer")
 				return (
 					message: string,
@@ -810,8 +839,8 @@ export function createRemoteSessionProxy(
 			if (property === "getLastAssistantText") return () => target.getLastAssistantText();
 			if (property === "setModel" || property === "setSessionModel")
 				return async (model: NonNullable<AgentSession["model"]>) => {
-					const next = await transportCall("setModel", () => client.setModel(model.provider, model.id));
-					return { systemPromptName: next.systemPromptName, model: next };
+					const next = await transportCall("setModel", () => client.setModel(model.provider, model.id), undefined);
+					return next ? { systemPromptName: next.systemPromptName, model: next } : undefined;
 				};
 			if (property === "setSessionThinkingLevel")
 				return (level: AgentSession["thinkingLevel"]) =>
@@ -836,20 +865,27 @@ export function createRemoteSessionProxy(
 					state = { ...state, scopedModels: [...models] };
 					void client.setScopedModels(models).catch(reportActionFailure("setScopedModels"));
 				};
-			if (property === "cycleModel") return (direction?: "forward" | "backward") => transportCall("cycleModel", () => client.cycleModel(direction));
+			if (property === "cycleModel")
+				return (direction?: "forward" | "backward") =>
+					transportCall("cycleModel", () => client.cycleModel(direction), undefined);
 			if (property === "setThinkingLevel")
 				return (level: AgentSession["thinkingLevel"]) =>
 					void client.setThinkingLevel(level).catch(reportActionFailure("setThinkingLevel"));
 			if (property === "cycleThinkingLevel")
-				return () => transportCall("cycleThinkingLevel", () => client.cycleThinkingLevel()).then((result) => result?.level);
-			if (property === "getAvailableThinkingLevels") return () => transportCall("getAvailableThinkingLevels", () => client.getAvailableThinkingLevels());
+				return () =>
+					transportCall("cycleThinkingLevel", () => client.cycleThinkingLevel(), undefined).then(
+						(result) => result?.level,
+					);
+			if (property === "getAvailableThinkingLevels")
+				return () => transportCall("getAvailableThinkingLevels", () => client.getAvailableThinkingLevels(), []);
 			if (property === "setSteeringMode")
 				return (mode: AgentSession["steeringMode"]) =>
 					void client.setSteeringMode(mode).catch(reportActionFailure("setSteeringMode"));
 			if (property === "setFollowUpMode")
 				return (mode: AgentSession["followUpMode"]) =>
 					void client.setFollowUpMode(mode).catch(reportActionFailure("setFollowUpMode"));
-			if (property === "compact") return (instructions?: string) => transportCall("compact", () => client.compact(instructions));
+			if (property === "compact")
+				return (instructions?: string) => transportCall("compact", () => client.compact(instructions));
 			if (property === "setAutoCompactionEnabled")
 				return (enabled: boolean) =>
 					void client.setAutoCompaction(enabled).catch(reportActionFailure("setAutoCompaction"));
@@ -875,7 +911,9 @@ export function createRemoteSessionProxy(
 								{ onChunk, signal: abortController.signal },
 							);
 							if (state.sessionId === sessionAtStart) {
-								await transportCall("recordBashResult", () => client.recordBashResult(command, result, options.excludeFromContext));
+								await transportCall("recordBashResult", () =>
+									client.recordBashResult(command, result, options.excludeFromContext),
+								);
 							}
 							return result;
 						} finally {
@@ -893,11 +931,16 @@ export function createRemoteSessionProxy(
 					};
 					bashExecutions.set(executionId, execution);
 					try {
-						const result = await transportCall("bash", () => client.bash(command, {
+						const result = await transportCall(
+							"bash",
+							() =>
+								client.bash(command, {
 							excludeFromContext: options?.excludeFromContext,
 							executionId,
 							operations: options?.operations as Record<string, unknown> | undefined,
-						}));
+								}),
+							{ output: "", exitCode: undefined, cancelled: true, truncated: false },
+						);
 						const callbacksSettled = await waitForBashCallbacks(execution.promises, false);
 						if (!callbacksSettled) {
 							if (result.fullOutputPath) await cleanupRemoteBashOutput(result.fullOutputPath);
@@ -918,19 +961,25 @@ export function createRemoteSessionProxy(
 					else void client.abortBash().catch(reportActionFailure("abortBash"));
 				};
 			if (property === "getContextUsage") return () => state.contextUsage;
-			if (property === "getSessionStats") return () => transportCall("getSessionStats", () => client.getSessionStats());
+			if (property === "getSessionStats")
+				return () => transportCall("getSessionStats", () => client.getSessionStats(), local.getSessionStats());
 			if (property === "exportToHtml")
 				return (outputPath?: string, options?: { themeName?: string }) =>
-					transportCall("exportToHtml", () => client.exportHtml(outputPath, options?.themeName)).then((result) => result.path);
+					transportCall("exportToHtml", () => client.exportHtml(outputPath, options?.themeName)).then(
+						(result) => result?.path,
+					);
 			if (property === "setSessionName")
 				return (name: string) => client.setSessionName(name).catch(reportActionFailure("setSessionName"));
 			if (property === "navigateTree")
 				return async (targetId: string, options?: Parameters<AgentSession["navigateTree"]>[1]) => {
-					const result = await transportCall("navigateTree", () => client.navigateTree(targetId, options));
+					const result = await transportCall("navigateTree", () => client.navigateTree(targetId, options), {
+						cancelled: true,
+					});
 					if (!result.cancelled) await refresh();
 					return result;
 				};
-			if (property === "getUserMessagesForForking") return () => transportCall("getUserMessagesForForking", () => client.getForkMessages());
+			if (property === "getUserMessagesForForking")
+				return () => transportCall("getUserMessagesForForking", () => client.getForkMessages(), []);
 			if (property === "subscribe")
 				return (listener: AgentSessionEventListener) => {
 					listeners.add(listener);
@@ -971,10 +1020,13 @@ export function createRemoteSessionProxy(
 			if (property === "set_label") return undefined;
 			if (property === "retryAttempt") return state.retryAttempt;
 			if (property === "isBashRunning") return state.isBashRunning;
-			if (property === "reload") return (_options?: Parameters<AgentSession["reload"]>[0]) => transportCall("reload", () => client.reload());
-			if (property === "checkReloadVeto") return () => transportCall("checkReloadVeto", () => client.checkReloadVeto());
+			if (property === "reload")
+				return (_options?: Parameters<AgentSession["reload"]>[0]) => transportCall("reload", () => client.reload());
+			if (property === "checkReloadVeto")
+				return () => transportCall("checkReloadVeto", () => client.checkReloadVeto());
 			if (property === "exportToJsonl")
-				return (outputPath?: string) => transportCall("exportToJsonl", () => client.exportJsonl(outputPath)).then((result) => result.path);
+				return (outputPath?: string) =>
+					transportCall("exportToJsonl", () => client.exportJsonl(outputPath)).then((result) => result?.path);
 			// The footer and other renderers read session.state.*; surface the
 			// host-authoritative fields there too, not only via the direct getters.
 			if (property === "state") {
@@ -1030,26 +1082,32 @@ export function createRemoteSessionProxy(
 			Object.defineProperty(context, "cwd", { value: state.cwd });
 			Object.defineProperty(context, "sessionManager", { value: remoteSessionManager });
 			context.sendMessage = (message, options) =>
-				transportCall("sendMessage", () => client.sendCustomMessage(message, {
+				transportCall("sendMessage", () =>
+					client.sendCustomMessage(message, {
 					triggerTurn: options?.triggerTurn,
 					deliverAs: options?.deliverAs,
-				}));
+					}),
+				);
 			context.sendUserMessage = (content, options) => {
 				if (typeof content === "string")
-					return transportCall("sendUserMessage", () => client.prompt(content, {
+					return transportCall("sendUserMessage", () =>
+						client.prompt(content, {
 						streamingBehavior: options?.deliverAs,
 						expandPromptTemplates: options?.expandPromptTemplates,
-					}));
+						}),
+					);
 				const text = content
 					.filter((part) => part.type === "text")
 					.map((part) => part.text)
 					.join("\n");
 				const images = content.filter((part) => part.type === "image");
-				return transportCall("sendUserMessage", () => client.prompt(text, {
+				return transportCall("sendUserMessage", () =>
+					client.prompt(text, {
 					images,
 					streamingBehavior: options?.deliverAs,
 					expandPromptTemplates: options?.expandPromptTemplates,
-				}));
+					}),
+				);
 			};
 			return context;
 		},

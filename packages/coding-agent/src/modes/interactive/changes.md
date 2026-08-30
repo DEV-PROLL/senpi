@@ -3020,3 +3020,8 @@ The tip line was teaching a small slice of the product while most of the surface
 
 - NF-2 RED: replacement string sendUserMessage dropped expandPromptTemplates, so the binding host trace did not preserve explicit false.
 - NF-2 GREEN: string replacement messages now forward expandPromptTemplates exactly like array messages; explicit false leaves /help as provider content.
+
+## Interactive RPC reconnect cancellation and terminal fallback (2026-08-30)
+
+- Treats transport loss in value-returning interactive host operations as user cancellation with inert results, so reconnect/fallback warnings are not repeated as action errors.
+- Makes reconnect exhaustion terminal after three attempts and awaits the local fallback session rebind before disposal.
