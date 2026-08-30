@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Persistent terminals now serialize headless xterm screen writes through parser callbacks with a bounded, dispose-safe backlog, preventing fast PTY output from exceeding xterm's pending-write watermark and terminating Senpi with `write data discarded, use flow control to avoid losing data` ([#1214](https://github.com/code-yeongyu/senpi/pull/1214), supersedes [#837](https://github.com/code-yeongyu/senpi/pull/837)).
+
 ### New Features
 
 ### Breaking Changes
