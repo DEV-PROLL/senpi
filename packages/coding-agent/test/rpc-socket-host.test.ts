@@ -257,16 +257,19 @@ describe("RPC Unix-socket multi-connection host", () => {
 		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
 		const peer = await connectPeer(qa.socketPath);
 		try {
+			// Armed before open_session so neither request can be missed, but left on
+			// the default timeout: both only arrive after the session spawns and loads
+			// its extensions, which outruns a 1s budget on a loaded CI shard. A short
+			// deadline here rejected both waiters and surfaced as two unhandled
+			// rejections attributed to whichever test ran next.
 			const arrayWidget = peer.peer.waitFor(
 				(value) =>
 					value.type === "extension_ui_request" &&
 					value.method === "setWidget" &&
 					value.widgetKey === "array-widget",
-				1_000,
 			);
 			const unsupported = peer.peer.waitFor(
 				(value) => value.type === "extension_ui_request" && value.method === "custom_unsupported",
-				1_000,
 			);
 			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
 			const sessionId = openedSessionId(opened);

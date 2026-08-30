@@ -1,6 +1,26 @@
 # changes
 
 ## 2026-08-30 - Scope host UI dispatch to the shared-host lane
+## 2026-08-30 - Restore the external-owner compaction delegation episode
+
+### What changed
+
+- `interactive-mode.ts`: restores the `externalOwnerCompactionNoticeShown` guard, the `rejectionCause === "external-owner"` branch in `compaction_end`, and every episode reset (successful compaction, session rebind, reload, retry fallback, `cycleModel`, `selectModelFromUi`, the `model_changed` wire event, and full transcript rerenders). Settings-only `rebuildChatFromMessages` rebuilds deliberately preserve the episode.
+
+### Why
+
+- A stray commit on this branch carried an RPC subject but held a reverse-diff of `interactive-mode.ts` that deleted the feature outright. Without it, a session whose compaction is owned by an external owner (the Claude Agent SDK) renders a red error on every auto-compaction attempt instead of one muted informational notice, and the footer never marks the saturated context meter as handled natively. The external-owner branch is checked before `aborted` because production rejections are emitted via `_rejectCompaction(..., true, reason)` and carry `aborted: true`.
+
+### Why an extension could not handle it
+
+- The notice, its once-per-episode guard, and the footer delegation marker are interactive-mode chat rendering state that no extension surface owns.
+
+### Expected merge conflict zones
+
+- LOW: the `compaction_end` and `model_changed` cases in `handleEvent`, and the episode resets at each model-switch and rerender call site.
+
+
+## 2026-08-30 - Keep shared-host disposal working when the remote session is incomplete
 
 ### What changed
 
