@@ -62,6 +62,22 @@ describe("jsRuntimeInfo", () => {
 });
 
 describe("isNativeSelfRuntime", () => {
+	it("trusts the compiled-host signal even when the module loads from a disk sidecar", () => {
+		expect(
+			isNativeSelfRuntime({
+				bunVersion: "1.4.0",
+				hostCompiledBinary: true,
+				moduleUrl: "file:///Users/dev/node_modules/@code-yeongyu/senpi-codemode/src/extension/runtime-info.ts",
+			}),
+		).toBe(true);
+	});
+
+	it("ignores the compiled-host signal without the bun marker", () => {
+		expect(
+			isNativeSelfRuntime({ bunVersion: undefined, hostCompiledBinary: true, moduleUrl: "file:///x/y.ts" }),
+		).toBe(false);
+	});
+
 	it("detects the bun virtual filesystem in the module url of a compiled binary", () => {
 		expect(isNativeSelfRuntime({ bunVersion: "1.4.0", moduleUrl: "file:///$bunfs/root/runtime-info.ts" })).toBe(true);
 	});
@@ -79,6 +95,18 @@ describe("isNativeSelfRuntime", () => {
 		expect(isNativeSelfRuntime({ bunVersion: "1.4.0", moduleUrl: "file:///Users/dev/src/runtime-info.ts" })).toBe(
 			false,
 		);
+	});
+
+	it("stays false when a stock bun disk path merely contains a marker segment", () => {
+		expect(
+			isNativeSelfRuntime({ bunVersion: "1.4.0", moduleUrl: "file:///tmp/$bunfs/project/runtime-info.ts" }),
+		).toBe(false);
+		expect(
+			isNativeSelfRuntime({ bunVersion: "1.4.0", moduleUrl: "file:///Users/dev/~BUN/root/runtime-info.ts" }),
+		).toBe(false);
+		expect(
+			isNativeSelfRuntime({ bunVersion: "1.4.0", moduleUrl: "file:///Users/dev/%7EBUN/root/runtime-info.ts" }),
+		).toBe(false);
 	});
 
 	it("stays false under node even when the module url carries a marker", () => {

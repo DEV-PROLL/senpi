@@ -7,15 +7,27 @@ export interface JsRuntimeVersions {
 }
 
 /**
- * Markers a compiled standalone bun binary leaves in module urls: posix
- * virtual filesystem, windows virtual drive, and its percent-encoded form.
- * Mirrors the detection in packages/coding-agent/src/config.ts.
+ * Global-registry key the coding-agent binary loader publishes before loading
+ * this package from the physical sidecar of a compiled binary. Compiled hosts
+ * load codemode from disk, so this module's own url carries no bunfs marker;
+ * the host's classification is the authoritative signal. Follows the
+ * Symbol.for registry convention of the interactive theme.
  */
-const NATIVE_MODULE_URL_MARKERS = ["$bunfs", "~BUN", "%7EBUN"] as const;
+const COMPILED_HOST_KEY = Symbol.for("@earendil-works/pi-coding-agent:compiled-binary-host");
+
+/**
+ * Exact module-url shapes of Bun's virtual filesystem in compiled binaries:
+ * posix `file:///$bunfs/...` and the windows virtual drive
+ * `file:///<drive>:/~BUN/...` (raw or percent-encoded). Anchored so stock bun
+ * runs from disk paths that merely contain a marker segment never match.
+ */
+const POSIX_VIRTUAL_URL_PREFIX = "file:///$bunfs/";
+const WINDOWS_VIRTUAL_URL_PATTERN = /^file:\/\/\/[A-Za-z]:\/(?:~BUN|%7EBUN)\//;
 
 export interface NativeRuntimeSignals {
 	readonly bunVersion?: string | undefined;
 	readonly moduleUrl?: string | undefined;
+	readonly hostCompiledBinary?: boolean | undefined;
 }
 
 /**
@@ -26,12 +38,17 @@ export interface NativeRuntimeSignals {
 export function isNativeSelfRuntime(signals: NativeRuntimeSignals = processNativeSignals()): boolean {
 	const bun = signals.bunVersion;
 	if (bun === undefined || bun.length === 0) return false;
+	if (signals.hostCompiledBinary === true) return true;
 	const moduleUrl = signals.moduleUrl ?? "";
-	return NATIVE_MODULE_URL_MARKERS.some((marker) => moduleUrl.includes(marker));
+	return moduleUrl.startsWith(POSIX_VIRTUAL_URL_PREFIX) || WINDOWS_VIRTUAL_URL_PATTERN.test(moduleUrl);
 }
 
 function processNativeSignals(): NativeRuntimeSignals {
-	return { bunVersion: process.versions.bun, moduleUrl: import.meta.url };
+	return {
+		bunVersion: process.versions.bun,
+		moduleUrl: import.meta.url,
+		hostCompiledBinary: Reflect.get(globalThis, COMPILED_HOST_KEY) === true,
+	};
 }
 
 /**
