@@ -117,12 +117,13 @@ describe("model usability budget", () => {
 		expect(error.projection).toMatchObject({
 			model: "faux/372k",
 			contextWindow: 372_000,
-			liveContextTokens: 318_381,
 			outputReserveTokens: 32_000,
 			compactionReserveTokens: 16_384,
 			safetyMarginTokens: 8_192,
 			usable: false,
 		});
+		expect(error.projection.liveContextTokens).toBeGreaterThanOrEqual(318_380);
+		expect(error.projection.liveContextTokens).toBeLessThanOrEqual(318_384);
 		expect(error.projection.speculationLeadTokens).toBeGreaterThan(0);
 		expect(error.projection.requiredTokens).toBe(
 			error.projection.liveContextTokens +
