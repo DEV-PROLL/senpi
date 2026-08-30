@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -181,6 +181,67 @@ describe("builtin hooks trust", () => {
 		expect(hookTrustStorageScope(globalHook, { projectTrusted: false })).toBe("global");
 		expect(isCommandHookTrusted(hook, persisted)).toBe(false);
 		expect(isCommandHookTrusted(globalHook, persisted)).toBe(true);
+	});
+
+	it("reads the last complete snapshot without contending on the writer lock", async () => {
+		// Given
+		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
+		createdDirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "repo");
+		const statePath = join(agentDir, "hooks-state.json");
+		mkdirSync(dirname(statePath), { recursive: true });
+		mkdirSync(cwd, { recursive: true });
+		const hook = commandHook();
+		const state = {
+			version: 1,
+			hooks: {
+				[hookTrustId(hook)]: createHookTrustEntry(hook, { updatedAt: UPDATED_AT }),
+			},
+		} as const;
+		writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+		const storage = new FileHookStateStorage({ agentDir, cwd });
+		const release = lockfile.lockSync(dirname(statePath), { realpath: false, lockfilePath: `${statePath}.lock` });
+
+		try {
+			// When
+			const persisted = storage.read("global");
+
+			// Then
+			expect(persisted).toEqual(state);
+		} finally {
+			release();
+		}
+	});
+
+	it("publishes through a same-directory rename and cleans the temp file when publication fails", async () => {
+		// Given
+		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
+		createdDirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "repo");
+		const statePath = join(agentDir, "hooks-state.json");
+		mkdirSync(dirname(statePath), { recursive: true });
+		mkdirSync(cwd, { recursive: true });
+		writeFileSync(statePath, '{"version":1,"hooks":{}}\n', "utf-8");
+		const storage = new FileHookStateStorage({ agentDir, cwd });
+
+		// When
+		let publicationError: unknown;
+		try {
+			storage.update("global", (current) => {
+				expect(current).toEqual({ version: 1, hooks: {} });
+				rmSync(statePath);
+				mkdirSync(statePath);
+				return current;
+			});
+		} catch (error) {
+			publicationError = error;
+		}
+
+		// Then
+		expect(publicationError).toMatchObject({ syscall: "rename" });
+		expect(readdirSync(agentDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 	});
 
 	it("uses a bounded proper-lockfile-compatible file lock for writes", async () => {

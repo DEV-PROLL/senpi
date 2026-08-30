@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../../../../config.ts";
@@ -26,16 +27,22 @@ export class FileHookStateStorage implements HookStateStorage {
 	}
 
 	read(scope: HookTrustStorageScope): HookTrustState {
-		return withHookStateFileLock(statePathForScope(scope, this.globalStatePath, this.projectStatePath), (path) =>
-			readHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined),
-		);
+		const path = statePathForScope(scope, this.globalStatePath, this.projectStatePath);
+		return readHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined);
 	}
 
 	update(scope: HookTrustStorageScope, updater: (current: HookTrustState) => HookTrustState): HookTrustState {
 		return withHookStateFileLock(statePathForScope(scope, this.globalStatePath, this.projectStatePath), (path) => {
 			const current = readHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined);
 			const next = updater(current);
-			writeFileSync(path, serializeHookTrustState(next), "utf-8");
+			const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+			try {
+				writeFileSync(tempPath, serializeHookTrustState(next), "utf-8");
+				renameSync(tempPath, path);
+			} catch (error) {
+				rmSync(tempPath, { force: true });
+				throw error;
+			}
 			return next;
 		});
 	}
