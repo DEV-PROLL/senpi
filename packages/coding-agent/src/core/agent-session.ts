@@ -203,7 +203,16 @@ import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapp
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 /** Built-in shell tools routed exclusively through eval when experimental.bashEvalOnly is enabled. */
-const EVAL_ONLY_POLICY_TOOL_NAMES: readonly string[] = ["bash", "powershell"];
+const EVAL_ONLY_SHELL_TOOL_NAMES: readonly string[] = ["bash", "powershell"];
+/** Workflow tool routed exclusively through eval when experimental.workflowEvalOnly is enabled. */
+const EVAL_ONLY_WORKFLOW_TOOL_NAMES: readonly string[] = ["workflow"];
+
+/** Sample eval-cell call for an eval-only tool, using the argument name that tool actually takes. */
+function evalHelperCall(name: string): string {
+	if (EVAL_ONLY_SHELL_TOOL_NAMES.includes(name)) return `tool.${name}({ command: "..." })`;
+	if (EVAL_ONLY_WORKFLOW_TOOL_NAMES.includes(name)) return `tool.${name}({ action: "..." })`;
+	return `tool.${name}({ ... })`;
+}
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 const DEFERRED_RETRY_QUEUE_OWNERS = new WeakSet<object>();
 
@@ -3037,7 +3046,11 @@ export class AgentSession {
 	 */
 	private _resolveEvalOnlyToolNames(): ReadonlySet<string> | undefined {
 		if (this._evalOnlyToolNamesOverride !== undefined) return this._evalOnlyToolNamesOverride;
-		return this.settingsManager.getExperimentalBashEvalOnly() ? new Set(EVAL_ONLY_POLICY_TOOL_NAMES) : undefined;
+		const names = [
+			...(this.settingsManager.getExperimentalBashEvalOnly() ? EVAL_ONLY_SHELL_TOOL_NAMES : []),
+			...(this.settingsManager.getExperimentalWorkflowEvalOnly() ? EVAL_ONLY_WORKFLOW_TOOL_NAMES : []),
+		];
+		return names.length > 0 ? new Set(names) : undefined;
 	}
 
 	/** Publish per-tool eval-only redirect hints so a direct call names its own eval helper. */
@@ -3045,7 +3058,7 @@ export class AgentSession {
 		if (!this._isEvalOnlyPolicyArmed()) return;
 		for (const name of this._evalOnlyToolNames ?? []) {
 			this.agent.removedToolHints[name] =
-				`Run ${name} inside an eval cell via tool.${name}({ command: "..." }); hooks and permissions still apply.`;
+				`Run ${name} inside an eval cell via ${evalHelperCall(name)}; hooks and permissions still apply.`;
 		}
 	}
 
@@ -3294,10 +3307,20 @@ export class AgentSession {
 		const prompt =
 			loaderAppendSystemPrompt.length > 0 ? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}` : basePrompt;
 		if (!this._isEvalOnlyPolicyArmed()) return prompt;
-		const helpers = [...(this._evalOnlyToolNames ?? [])]
-			.map((name) => `tool.${name}({ command: "..." })`)
-			.join(" or ");
-		return `${prompt}\n\nShell commands run ONLY inside eval cells via ${helpers}; hooks and permissions still apply.`;
+		const armed = this._evalOnlyToolNames ?? new Set<string>();
+		const sentences: string[] = [];
+		const shellHelpers = EVAL_ONLY_SHELL_TOOL_NAMES.filter((name) => armed.has(name)).map(evalHelperCall);
+		if (shellHelpers.length > 0) {
+			sentences.push(
+				`Shell commands run ONLY inside eval cells via ${shellHelpers.join(" or ")}; hooks and permissions still apply.`,
+			);
+		}
+		if (armed.has("workflow")) {
+			sentences.push(
+				`The workflow tool runs ONLY inside eval cells via ${evalHelperCall("workflow")}; hooks and permissions still apply.`,
+			);
+		}
+		return sentences.length > 0 ? `${prompt}\n\n${sentences.join("\n\n")}` : prompt;
 	}
 
 	/**
