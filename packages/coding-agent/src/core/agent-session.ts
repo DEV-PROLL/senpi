@@ -4536,7 +4536,7 @@ export class AgentSession {
 		});
 		const currentUsableContext = currentBudget.contextWindow - currentBudget.requiredTokens;
 		const targetUsableContext = targetBudget.contextWindow - targetBudget.requiredTokens;
-		if (targetUsableContext > currentUsableContext) return 0;
+		if (targetUsableContext >= currentUsableContext) return 0;
 		const fixedPrefixTokens = currentBudget.systemPromptTokens + currentBudget.activeToolSchemaTokens;
 		return Math.max(0, (this.getContextUsage()?.tokens ?? 0) - fixedPrefixTokens);
 	}
