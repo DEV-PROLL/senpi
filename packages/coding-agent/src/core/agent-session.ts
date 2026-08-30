@@ -4700,7 +4700,8 @@ export class AgentSession {
 			nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
 		}
 		const next = favoriteModels[nextIndex];
-		this.assertModelUsable(next.model, this._getDownswitchLiveContextTokens(next.model));
+		const liveContextTokens = this._getDownswitchLiveContextTokens(next.model);
+		this.assertModelUsable(next.model, liveContextTokens);
 		const invalidatesCompaction =
 			this._modelSelectionChangesContext(currentModel, next.model) ||
 			currentModel?.provider !== next.model.provider ||
@@ -4734,7 +4735,7 @@ export class AgentSession {
 		const previousSystemPrompt = this.agent.state.systemPrompt;
 		try {
 			const systemPromptChange = await this._emitModelSelect(next.model, currentModel, "cycle");
-			this.assertModelUsable(next.model, this._getDownswitchLiveContextTokens(next.model));
+			this.assertModelUsable(next.model, liveContextTokens);
 
 			const cycleResult: ModelCycleResult = {
 				model: next.model,

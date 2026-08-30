@@ -66,6 +66,30 @@ describe("model usability review regressions", () => {
 		expect(harness.session.model?.id).toBe("current");
 	});
 
+	it("revalidates live context after a favorite-cycle model_select hook changes the prompt", async () => {
+		const harness = await createHarness({
+			models: [
+				{ id: "current", contextWindow: 100_000, maxTokens: 4_000 },
+				{ id: "target", contextWindow: 80_000, maxTokens: 4_000 },
+			],
+			extensionFactories: [
+				(pi) => {
+					pi.on("model_select", (event) =>
+						event.model.id === "target" ? { systemPrompt: "target prompt ".repeat(16_000) } : undefined,
+					);
+				},
+			],
+		});
+		harnesses.push(harness);
+		seed(harness, 50_000);
+		const current = harness.getModel("current");
+		const target = harness.getModel("target");
+		if (!current || !target) throw new Error("missing favorite-cycle model fixture");
+		harness.session.setFavoriteModels([{ model: current }, { model: target }]);
+		await expect(harness.session.cycleModel()).rejects.toBeInstanceOf(ModelUsabilityBudgetError);
+		expect(harness.session.model?.id).toBe("current");
+	});
+
 	it("rolls back model and prompt after an unusable model-specific prompt", async () => {
 		const harness = await createHarness({
 			models: [
