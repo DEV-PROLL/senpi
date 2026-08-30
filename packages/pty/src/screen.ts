@@ -9,6 +9,7 @@ import {
 	sharedSettler,
 	trackSettler,
 } from "./screen-operations.ts";
+
 import {
 	decodeInput,
 	normalizeDimension,
@@ -56,8 +57,7 @@ export class TerminalScreen {
 	private readonly history: string[] = [];
 	private historyLength = 0;
 	private readonly operations: ScreenOperation[] = [];
-	private historyHeadChunks = 0;
-	private pendingWriteChars = 0;
+	private pendingChars = 0;
 	private draining = false;
 	private disposed = false;
 	private notifyDisposed: () => void = () => undefined;
@@ -81,10 +81,10 @@ export class TerminalScreen {
 		const payload = decodeInput(data);
 		const sanitizedPayload = sanitizeString(payload);
 		if (sanitizedPayload.length > 0) this.appendHistory(sanitizedPayload);
-		if (this.pendingWriteChars + payload.length > MAX_PENDING_WRITE_CHARS) {
-			return this.coalesceBacklogIntoReplay();
+		if (this.pendingChars + payload.length > MAX_PENDING_WRITE_CHARS) {
+			return this.coalesceFeedIntoReplay(payload);
 		}
-		this.pendingWriteChars += payload.length;
+		this.pendingChars += payload.length;
 		const operation: ScreenOperation = { kind: "write", payload, settlers: [] };
 		return this.enqueue(operation, trackSettler(operation.settlers));
 	}
@@ -93,21 +93,27 @@ export class TerminalScreen {
 		if (this.disposed) return Promise.resolve();
 		const nextCols = normalizeDimension(cols, this.terminal.cols);
 		const nextRows = normalizeDimension(rows, this.terminal.rows);
+		const snapshot = this.history.join("");
 		const tail = this.operations[this.operations.length - 1];
 		if (tail !== undefined && tail.kind === "resize") {
 			tail.cols = nextCols;
 			tail.rows = nextRows;
-			tail.historyMark = this.historyEnd();
+			this.pendingChars += snapshot.length - tail.replay.length;
+			tail.replay = snapshot;
 			return sharedSettler(tail);
+		}
+		if (this.pendingChars + snapshot.length > MAX_PENDING_WRITE_CHARS) {
+			return this.coalesceQueueIntoResize(nextCols, nextRows, snapshot);
 		}
 		const operation: ResizeOperation = {
 			kind: "resize",
 			cols: nextCols,
 			rows: nextRows,
-			historyMark: this.historyEnd(),
+			replay: snapshot,
 			settled: null,
 			settlers: [],
 		};
+		this.pendingChars += snapshot.length;
 		return this.enqueue(operation, sharedSettler(operation));
 	}
 
@@ -148,7 +154,7 @@ export class TerminalScreen {
 		this.disposed = true;
 		this.notifyDisposed();
 		const pending = this.operations.splice(0, this.operations.length);
-		this.pendingWriteChars = 0;
+		this.pendingChars = 0;
 		for (const operation of pending) {
 			settleOperation(operation.settlers, null);
 		}
@@ -174,24 +180,55 @@ export class TerminalScreen {
 
 	/**
 	 * Route an over-cap feed to the queue's tail replay instead of enqueueing
-	 * another write. The feed's payload already lives in `history` and the
-	 * replay renders history up to its mark, so advancing the mark and sharing
-	 * the replay's promise loses nothing while keeping the queue, its settler
-	 * memory, and the replay payload all O(1) per queued operation.
+	 * another write. Replay payloads are owned snapshot strings (immune to
+	 * history trimming) bounded to the replay budget, and every coalesced feed
+	 * shares the tail's memoized promise, so a flood cannot grow the queue,
+	 * its payload memory, or its settler memory past the configured bounds.
 	 */
-	private coalesceBacklogIntoReplay(): Promise<void> {
+	private coalesceFeedIntoReplay(payload: string): Promise<void> {
 		const tail = this.operations[this.operations.length - 1];
 		if (tail !== undefined && tail.kind === "replay") {
-			tail.historyMark = this.historyEnd();
+			const previousLength = tail.payload.length;
+			tail.payload = this.boundReplayPayload(tail.payload + payload);
+			this.pendingChars += tail.payload.length - previousLength;
 			return sharedSettler(tail);
 		}
 		const operation: ReplayOperation = {
 			kind: "replay",
-			historyMark: this.historyEnd(),
+			payload: this.history.join(""),
 			settled: null,
 			settlers: [],
 		};
+		this.pendingChars += operation.payload.length;
 		return this.enqueue(operation, sharedSettler(operation));
+	}
+
+	/**
+	 * A resize whose snapshot would push the queued payload past the cap
+	 * collapses the whole queue into one resize at the latest dimensions:
+	 * every dropped operation's payload is already covered by the bounded
+	 * history snapshot, and their settlers settle with this operation.
+	 */
+	private coalesceQueueIntoResize(cols: number, rows: number, snapshot: string): Promise<void> {
+		const operation: ResizeOperation = {
+			kind: "resize",
+			cols,
+			rows,
+			replay: snapshot,
+			settled: null,
+			settlers: [],
+		};
+		for (const queued of this.operations.splice(0, this.operations.length)) {
+			for (const settler of queued.settlers) operation.settlers.push(settler);
+			queued.settlers.length = 0;
+		}
+		this.pendingChars = snapshot.length;
+		return this.enqueue(operation, sharedSettler(operation));
+	}
+
+	private boundReplayPayload(payload: string): string {
+		if (payload.length <= this.maxReplayHistoryLength) return payload;
+		return sanitizeString(payload.slice(-this.maxReplayHistoryLength));
 	}
 
 	private async drain(): Promise<void> {
@@ -201,7 +238,7 @@ export class TerminalScreen {
 			while (!this.disposed) {
 				const operation = this.operations.shift();
 				if (operation === undefined) return;
-				if (operation.kind === "write") this.pendingWriteChars -= operation.payload.length;
+				this.pendingChars -= operation.kind === "resize" ? operation.replay.length : operation.payload.length;
 				try {
 					await this.run(operation);
 					settleOperation(operation.settlers, null);
@@ -222,29 +259,14 @@ export class TerminalScreen {
 				return;
 			case "replay":
 				this.terminal.reset();
-				await this.raceDisposal(this.write(this.renderHistory(operation.historyMark)));
+				await this.raceDisposal(this.write(operation.payload));
 				return;
 			case "resize":
 				this.terminal.dispose();
 				this.terminal = this.createTerminal(operation.cols, operation.rows);
-				await this.raceDisposal(this.write(this.renderHistory(operation.historyMark)));
+				await this.raceDisposal(this.write(operation.replay));
 				return;
 		}
-	}
-
-	/**
-	 * Render only the history recorded up to the operation's mark. Feeds made
-	 * after the mark keep their own queued writes and land after this barrier,
-	 * preserving FIFO order; feeds before it drained ahead of the barrier and
-	 * are reproduced exactly by the replayed prefix.
-	 */
-	private renderHistory(historyMark: number): string {
-		const end = Math.max(0, historyMark - this.historyHeadChunks);
-		return this.history.slice(0, end).join("");
-	}
-
-	private historyEnd(): number {
-		return this.historyHeadChunks + this.history.length;
 	}
 
 	/** A disposed terminal may never invoke its parse callback; do not hang. */
@@ -277,7 +299,6 @@ export class TerminalScreen {
 		while (this.historyLength > this.maxReplayHistoryLength && this.history.length > 1) {
 			const removed = this.history.shift();
 			if (removed === undefined) return;
-			this.historyHeadChunks += 1;
 			this.historyLength -= removed.length;
 		}
 

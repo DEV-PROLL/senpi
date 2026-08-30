@@ -6,6 +6,7 @@ interface RejectionRecord {
 
 const pty = vi.hoisted(() => {
 	const records: RejectionRecord[] = [];
+	const state = { sharedMode: false, sharedAttachCount: 0, feedCalls: 0 };
 
 	// A thenable standing in for a rejected feed/resize promise. It records
 	// whether the caller ever attaches a rejection handler; with none, the
@@ -14,13 +15,14 @@ const pty = vi.hoisted(() => {
 	const observedRejection = (record: RejectionRecord): Promise<void> => {
 		const failure = new Error("write data discarded, use flow control to avoid losing data");
 		const thenable = {
-			// biome-ignore lint/suspicious/noThenProperty: intentionally thenable so the test observes whether the call site attaches a rejection handler
+			// biome-ignore lint/suspicious/noThenProperty: intentional thenable observing handler attachment
 			then(
 				_onFulfilled?: ((value: undefined) => unknown) | null,
 				onRejected?: ((reason: unknown) => unknown) | null,
 			): Promise<void> {
 				if (typeof onRejected === "function") {
 					record.handled = true;
+					state.sharedAttachCount += 1;
 					onRejected(failure);
 				}
 				return Promise.resolve();
@@ -35,6 +37,9 @@ const pty = vi.hoisted(() => {
 		};
 		return thenable as unknown as Promise<void>;
 	};
+
+	const sharedRecord: RejectionRecord = { handled: false };
+	const sharedRejection = observedRejection(sharedRecord);
 
 	class TerminalSession {
 		backend: string | null = null;
@@ -69,12 +74,15 @@ const pty = vi.hoisted(() => {
 
 	class TerminalScreen {
 		feed(): Promise<void> {
+			state.feedCalls += 1;
+			if (state.sharedMode) return sharedRejection;
 			const record: RejectionRecord = { handled: false };
 			records.push(record);
 			return observedRejection(record);
 		}
 
 		resize(): Promise<void> {
+			if (state.sharedMode) return sharedRejection;
 			const record: RejectionRecord = { handled: false };
 			records.push(record);
 			return observedRejection(record);
@@ -83,25 +91,46 @@ const pty = vi.hoisted(() => {
 		dispose(): void {}
 	}
 
-	return { TerminalScreen, TerminalSession, records, sessions: [] as TerminalSession[] };
+	return { TerminalScreen, TerminalSession, records, sessions: [] as TerminalSession[], state };
 });
 
 vi.mock("@earendil-works/pi-pty", () => pty);
 
 import { TerminalRuntimeSession } from "../src/core/extensions/builtin/terminal/runtime-session.ts";
 
+function latestSession(): InstanceType<typeof pty.TerminalSession> {
+	const session = pty.sessions.at(-1);
+	if (!session) throw new Error("Terminal session was not created");
+	return session;
+}
+
 describe("PTY runtime screen error ownership", () => {
 	it("owns screen feed/resize rejections instead of leaking them unhandled", () => {
+		pty.state.sharedMode = false;
 		const runtime = new TerminalRuntimeSession("screen-error-fixture", {});
-		const session = pty.sessions.at(-1);
-		if (!session) throw new Error("Terminal session was not created");
 
-		session.emit("flood");
+		latestSession().emit("flood");
 		runtime.resizeScreen(120, 40);
 
 		expect(pty.records).toHaveLength(2);
 		expect(pty.records.every((record) => record.handled)).toBe(true);
 		expect(runtime.fullOutput()).toBe("flood");
 		runtime.dispose();
+	});
+
+	it("attaches one rejection handler per distinct coalesced screen promise", () => {
+		pty.state.sharedMode = true;
+		pty.state.sharedAttachCount = 0;
+		const feedCallsBefore = pty.state.feedCalls;
+		const runtime = new TerminalRuntimeSession("screen-coalesce-fixture", {});
+
+		latestSession().emit("one");
+		latestSession().emit("two");
+		latestSession().emit("three");
+
+		expect(pty.state.feedCalls - feedCallsBefore).toBe(3);
+		expect(pty.state.sharedAttachCount).toBe(1);
+		runtime.dispose();
+		pty.state.sharedMode = false;
 	});
 });

@@ -388,6 +388,38 @@ describe("TerminalScreen", () => {
 		}
 	});
 
+	it("keeps a queued resize replay intact when later floods trim history", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		const heldWrite: { release: (() => void) | null } = { release: null };
+
+		xterm.Terminal.prototype.write = function patchedWrite(
+			this: XtermTerminalType,
+			data: string | Uint8Array,
+			callback?: () => void,
+		): void {
+			if (heldWrite.release === null) {
+				heldWrite.release = () => originalWrite.call(this, data, callback);
+				return;
+			}
+			originalWrite.call(this, data, callback);
+		};
+
+		try {
+			const screen = new TerminalScreen({ cols: 10, rows: 4, scrollback: 10 });
+			const held = screen.feed("A");
+			const resized = screen.resize(5, 4);
+			const flood = screen.feed("\u001b7".repeat(100_000));
+			heldWrite.release?.();
+
+			await Promise.all([held, resized, flood]);
+			expect(screen.snapshot().cols).toBe(5);
+			expect(screen.snapshot().visibleGrid[0]).toBe("A");
+			screen.dispose();
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	}, 30_000);
+
 	it("delivers write rejections to the owning caller and keeps the queue usable", async () => {
 		const originalWrite = xterm.Terminal.prototype.write;
 

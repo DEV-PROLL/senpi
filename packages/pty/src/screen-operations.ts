@@ -11,7 +11,7 @@ export interface WriteOperation {
 
 export interface ReplayOperation {
 	readonly kind: "replay";
-	historyMark: number;
+	payload: string;
 	settled: Promise<void> | null;
 	readonly settlers: OperationSettler[];
 }
@@ -20,7 +20,7 @@ export interface ResizeOperation {
 	readonly kind: "resize";
 	cols: number;
 	rows: number;
-	historyMark: number;
+	replay: string;
 	settled: Promise<void> | null;
 	readonly settlers: OperationSettler[];
 }
