@@ -94,16 +94,24 @@ export function admitContextToolResult(
 	return { text: result.text, admitted: result.spilled, spillPath: result.spillPath };
 }
 
+export function buildToolResultOmissionLine(omitted: ReadonlyArray<{ tokens: number; path: string }>): string {
+	return `[tool-result admission: ${omitted.length} later text part(s) omitted (~${omitted.reduce((sum, item) => sum + item.tokens, 0)} tokens); full outputs at: ${omitted.map((item) => item.path).join("; ")} - read with the read tool]`;
+}
+
+export function estimateToolResultOmissionTokens(omitted: ReadonlyArray<{ tokens: number; path: string }>): number {
+	return estimateTextTokens(buildToolResultOmissionLine(omitted));
+}
+
 export function admitContextToolResults(
 	messages: AgentMessage[],
 	contextWindow: number,
 	enabled: boolean,
 	capOverride?: number,
+	spillDir = join(tmpdir(), "senpi-tool-spill"),
 ): AgentMessage[] {
 	if (!enabled) return messages;
 	return messages.map((message) => {
 		if (message.role !== "toolResult") return message;
-		const spillDir = join(tmpdir(), "senpi-tool-spill");
 		if (typeof message.content === "string") {
 			const admitted = admitContextToolResult(message.content, contextWindow, spillDir);
 			return admitted.admitted ? { ...message, content: [{ type: "text" as const, text: admitted.text }] } : message;
@@ -135,8 +143,10 @@ export function admitContextToolResults(
 			if (admitted.spillPath) omitted.push({ tokens: partTokens, path: admitted.spillPath });
 			return { ...part, text: admitted.text };
 		});
+		let omissionCost = 0;
 		if (omitted.length > 0) {
-			const omission = `[tool-result admission: ${omitted.length} later text part(s) omitted (~${omitted.reduce((sum, item) => sum + item.tokens, 0)} tokens); full outputs at: ${omitted.map((item) => item.path).join("; ")} - read with the read tool]`;
+			const omission = buildToolResultOmissionLine(omitted);
+			omissionCost = estimateToolResultOmissionTokens(omitted);
 			const lastText = content.findLastIndex((part) => part.type === "text" && part.text);
 			const target = lastText >= 0 ? lastText : content.findIndex((part) => part.type === "text");
 			const targetPart = target >= 0 ? content[target] : undefined;
@@ -152,14 +162,18 @@ export function admitContextToolResults(
 					.map((part) => part.text ?? "")
 					.join("\n"),
 			);
-		while (aggregateTokens() > resultCap) {
-			const target = content.findLastIndex((part) => part.type === "text" && part.text);
+		const retainedLimit = Math.max(resultCap, omissionCost);
+		while (aggregateTokens() > retainedLimit) {
+			const target = content.findLastIndex((part) => {
+				if (part.type !== "text" || !part.text) return false;
+				const omissionIndex = part.text.indexOf("[tool-result admission:");
+				return omissionIndex < 0 || part.text.slice(0, omissionIndex).trim().length > 0;
+			});
 			if (target < 0) break;
 			const part = content[target];
 			if (part.type !== "text") break;
 			const text = part.text ?? "";
 			const omissionIndex = text.indexOf("[tool-result admission:");
-			if (omissionIndex === 1 || omissionIndex === 0) break;
 			const prefix = omissionIndex >= 0 ? text.slice(0, omissionIndex) : text;
 			const suffix = omissionIndex >= 0 ? text.slice(omissionIndex) : "";
 			const nextText = `${prefix.slice(0, Math.floor(prefix.length / 2))}${suffix}`;

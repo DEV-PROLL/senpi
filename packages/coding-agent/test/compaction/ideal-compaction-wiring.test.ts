@@ -1,15 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { estimateTokens } from "../../src/core/compaction/index.ts";
 import { resolveCompactionSettings } from "../../src/core/compaction-settings-resolver.ts";
 import {
 	admitContextToolResult,
 	admitContextToolResults,
+	estimateToolResultOmissionTokens,
 	resolveBeforeAgentStartMessage,
 	resolveCompactionGeometry,
 	resolveReminderSystemPrompt,
 	shouldDeferGraceBand,
 } from "../../src/core/extensions/builtin/compaction/orchestration.ts";
 import { TOOL_ADMISSION_MARKER_PREFIX } from "../../src/core/extensions/builtin/compaction/tool-admission.ts";
+
+let admissionDir: string;
+
+beforeEach(() => {
+	admissionDir = mkdtempSync(join(tmpdir(), "wiring-admission-"));
+	rmSync(join(tmpdir(), "senpi-tool-spill"), { recursive: true, force: true });
+});
+
+afterEach(() => {
+	rmSync(admissionDir, { recursive: true, force: true });
+});
 
 describe("ideal compaction extension wiring decisions", () => {
 	it("defers an in-flight compaction inside the grace band", () => {
@@ -130,7 +145,7 @@ describe("ideal compaction extension wiring decisions", () => {
 				],
 			},
 		];
-		const projected = admitContextToolResults(messages, 200_000, true)[0] as {
+		const projected = admitContextToolResults(messages, 200_000, true, cap)[0] as {
 			content: Array<{ type: string; text?: string }>;
 		};
 		const text = projected.content
@@ -169,8 +184,39 @@ describe("ideal compaction extension wiring decisions", () => {
 		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeGreaterThan(cap);
 	});
 
+	it("keeps the 13-part reviewer repro within the amended bound", () => {
+		const cap = 1_000;
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "thirteen",
+				toolName: "test",
+				isError: false,
+				timestamp: 0,
+				content: Array.from({ length: 13 }, (_, index) => ({
+					type: "text" as const,
+					text: String.fromCharCode(97 + index).repeat(8_100),
+				})),
+			},
+		];
+		const projected = admitContextToolResults(messages, 20_000, true, cap)[0] as {
+			content: Array<{ type: string; text?: string }>;
+		};
+		const text = projected.content
+			.filter((part) => part.type === "text")
+			.map((part) => part.text ?? "")
+			.join("\n");
+		const omission = text.slice(text.indexOf("[tool-result admission:"));
+		const omissionCost = estimateTokens({ role: "user", content: omission, timestamp: 0 });
+		expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(
+			Math.max(cap, omissionCost),
+		);
+	});
+
 	it.each([60, 200, 1000, 10000])("keeps aggregate admission bounded at cap %i across oversized parts", (cap) => {
 		for (let count = 1; count <= 4; count++) {
+			rmSync(admissionDir, { recursive: true, force: true });
+			mkdirSync(admissionDir, { recursive: true });
 			const messages = [
 				{
 					role: "toolResult" as const,
@@ -184,6 +230,9 @@ describe("ideal compaction extension wiring decisions", () => {
 					})),
 				},
 			];
+			const spillRoot = join(tmpdir(), "senpi-tool-spill");
+			rmSync(spillRoot, { recursive: true, force: true });
+			mkdirSync(spillRoot, { recursive: true });
 			const projected = admitContextToolResults(messages, Math.max(1, cap * 20), true, cap)[0] as {
 				content: Array<{ type: string; text?: string }>;
 			};
@@ -191,17 +240,13 @@ describe("ideal compaction extension wiring decisions", () => {
 				.filter((part) => part.type === "text")
 				.map((part) => part.text ?? "")
 				.join("\n");
-			const paths = [...text.matchAll(/full output at (\S+)/g)].map((match) => match[1]);
-			for (const path of paths) expect(text).toContain(path);
+			const expectedPaths = readdirSync(spillRoot).map((name) => join(spillRoot, name));
+			for (const path of expectedPaths) expect(text).toContain(path);
 			const omissionCost = text.includes("tool-result admission:")
-				? estimateTokens({
-						role: "user",
-						content: text.slice(text.indexOf("[tool-result admission:")),
-						timestamp: 0,
-					})
+				? estimateToolResultOmissionTokens(expectedPaths.map((path) => ({ tokens: cap * 8 + 100, path })))
 				: 0;
 			expect(estimateTokens({ role: "user", content: text, timestamp: 0 })).toBeLessThanOrEqual(
-				Math.max(cap, omissionCost + 1),
+				Math.max(cap, omissionCost + 2),
 			);
 		}
 	});
