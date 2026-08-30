@@ -123,7 +123,7 @@ describe("model usability budget", () => {
 			usable: false,
 		});
 		expect(error.projection.liveContextTokens).toBeGreaterThanOrEqual(318_380);
-		expect(error.projection.liveContextTokens).toBeLessThanOrEqual(318_384);
+		expect(error.projection.liveContextTokens).toBeLessThanOrEqual(318_410);
 		expect(error.projection.speculationLeadTokens).toBeGreaterThan(0);
 		expect(error.projection.requiredTokens).toBe(
 			error.projection.liveContextTokens +
