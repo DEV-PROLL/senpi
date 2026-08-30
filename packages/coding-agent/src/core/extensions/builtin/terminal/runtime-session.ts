@@ -74,7 +74,10 @@ export class TerminalRuntimeSession {
 	private ingest(chunk: Uint8Array): string {
 		const text = this.decoder.decode(chunk, { stream: true });
 		if (text.length === 0) return text;
-		void this.screen.feed(text);
+		// The screen is a best-effort projection; a rejected feed must never
+		// become an unhandled rejection that kills the host process (#837).
+		// `buffer` below remains the source of truth for reads.
+		this.screen.feed(text).catch(() => {});
 		this.buffer += text;
 		if (this.buffer.length > MAX_SESSION_OUTPUT_CHARS) {
 			const overflow = this.buffer.length - MAX_SESSION_OUTPUT_CHARS;
@@ -109,7 +112,7 @@ export class TerminalRuntimeSession {
 	}
 
 	resizeScreen(cols: number, rows: number): void {
-		void this.screen.resize(cols, rows);
+		this.screen.resize(cols, rows).catch(() => {});
 	}
 
 	dispose(): void {
