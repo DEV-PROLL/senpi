@@ -10,7 +10,7 @@ import { SessionManager } from "../../core/session-manager.ts";
 import { SettingsManager } from "../../core/settings-manager.ts";
 import type { BashOperations } from "../../core/tools/bash.ts";
 import { type EnsuredHost, ensureHost } from "../rpc/host-ensure.ts";
-import { RpcClient, type RpcClientEvent } from "../rpc/rpc-client.ts";
+import { isTransportGoneError, RpcClient, type RpcClientEvent } from "../rpc/rpc-client.ts";
 
 export const INTERACTIVE_HOST_FALLBACK_WARNING = "Warning: shared interactive host unavailable; continuing locally";
 
@@ -68,7 +68,38 @@ export async function createInteractiveHostRuntime(
 	const sessionPath = localRuntime.session.sessionFile;
 	if (!sessionPath) return localRuntime;
 	const startHost = options.ensureHost ?? ((hostOptions) => ensureHost(hostOptions));
-	const client = new RpcClient({ socketPath: options.socket });
+	let remoteSession: RemoteSessionProxy | undefined;
+	let reconnecting: Promise<void> | undefined;
+	let fallbackWarned = false;
+	const warnFallback = (cause: unknown) => {
+		if (fallbackWarned) return;
+		fallbackWarned = true;
+		options.onWarning?.({ type: "interactive_host_fallback", message: INTERACTIVE_HOST_FALLBACK_WARNING, cause });
+	};
+	const client = new RpcClient({
+		socketPath: options.socket,
+		onDisconnect: () => {
+			if (!remoteSession || reconnecting) return;
+			reconnecting = (async () => {
+				let cause: unknown;
+				for (let attempt = 0; attempt < 3; attempt++) {
+					try {
+						await startHost({ socket: options.socket, agentDir: options.agentDir });
+						await client.start();
+						await client.openSession({ sessionPath, cwd: localRuntime.cwd });
+						await remoteSession.refresh();
+						return;
+					} catch (error) {
+						cause = error;
+						await client.stop().catch(() => {});
+					}
+				}
+				warnFallback(cause);
+			})().finally(() => {
+				reconnecting = undefined;
+			});
+		},
+	});
 	try {
 		await startHost({ socket: options.socket, agentDir: options.agentDir });
 		await client.start();
@@ -79,7 +110,7 @@ export async function createInteractiveHostRuntime(
 			modelId: localRuntime.session.model?.id,
 			thinkingLevel: localRuntime.session.thinkingLevel,
 		});
-		const remoteSession = createRemoteSessionProxy(
+		remoteSession = createRemoteSessionProxy(
 			localRuntime.session,
 			localRuntime.services.agentDir,
 			client,
@@ -278,9 +309,12 @@ export function createRemoteSessionProxy(
 	// failures must not vanish: the matching *_changed wire event confirms success,
 	// and a rejection here is the only signal of failure.
 	const reportActionFailure = (action: string) => (error: unknown) => {
+		const transportGone = isTransportGoneError(error);
 		onWarning?.({
-			type: "interactive_host_action_failed",
-			message: `Warning: shared interactive host ${action} failed: ${error instanceof Error ? error.message : String(error)}`,
+			type: transportGone ? "interactive_host_fallback" : "interactive_host_action_failed",
+			message: transportGone
+				? INTERACTIVE_HOST_FALLBACK_WARNING
+				: `Warning: shared interactive host ${action} failed: ${error instanceof Error ? error.message : String(error)}`,
 			cause: error,
 		});
 	};
@@ -596,8 +630,9 @@ export function createRemoteSessionProxy(
 	const session = new Proxy(local, {
 		get(target, property, receiver) {
 			if (property === "prompt")
-				return (message: string, options?: Parameters<AgentSession["prompt"]>[1]) =>
-					client.prompt(message, {
+				return async (message: string, options?: Parameters<AgentSession["prompt"]>[1]) => {
+					try {
+						await client.prompt(message, {
 						...(options?.images ? { images: options.images } : {}),
 						...(options?.streamingBehavior ? { streamingBehavior: options.streamingBehavior } : {}),
 						...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
@@ -609,7 +644,12 @@ export function createRemoteSessionProxy(
 							: {}),
 						...(options?.promptDisposition ? { promptDisposition: options.promptDisposition } : {}),
 						...(options?.preflightResult ? { preflightResult: options.preflightResult } : {}),
-					});
+						});
+					} catch (error) {
+						if (!isTransportGoneError(error)) throw error;
+						reportActionFailure("prompt")(error);
+					}
+				};
 			if (property === "abort") return () => client.abort();
 			if (property === "abortCompaction") return () => void client.abortCompaction();
 			if (property === "steer")

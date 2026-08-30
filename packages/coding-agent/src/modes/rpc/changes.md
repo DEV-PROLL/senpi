@@ -19,6 +19,11 @@
 - LOW: the tail of `rebindSession()` and the `installSessionSubscriptions` declaration.
 
 
+## 2026-08-30 - Classify RPC transport disconnects and recover shared interactive hosts
+
+- `RpcClient` now reports established socket disconnects through `onDisconnect` and rejects sends with `RpcTransportGoneError` instead of exposing the raw `Client not started` message.
+- Shared interactive runtimes make bounded reconnect attempts, re-open and refresh the attached session, and surface only the standard fallback warning when recovery is unavailable.
+
 ## 2026-08-30 - Expose session_replaced on the public client event union
 
 ### What changed
