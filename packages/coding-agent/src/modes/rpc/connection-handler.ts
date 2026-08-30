@@ -160,7 +160,12 @@ function loadedMcpStatus(server: McpWireStatusServer): RpcMcpServerStatus {
  */
 export function buildRpcSessionState(session: AgentSession, lastAbortSource?: AgentAbortSource): RpcSessionState {
 	const cwd = session.sessionManager.getCwd();
-	const projectTrusted = new ProjectTrustStore(session.agentDir).get(cwd) === true;
+	// Trust gates project-source settings (shell prefixes, project resources), so an
+	// unverifiable verdict must fail closed: no agentDir means no authoritative store to
+	// consult, and the session's own manager only counts when it says trusted outright.
+	const projectTrusted = session.agentDir
+		? new ProjectTrustStore(session.agentDir).get(cwd) === true
+		: session.settingsManager?.isProjectTrusted?.() === true;
 	return {
 		model: session.model,
 		thinkingLevel: session.thinkingLevel,
@@ -199,9 +204,9 @@ export function buildRpcSessionState(session: AgentSession, lastAbortSource?: Ag
 		messageCount: session.messages.length,
 		pendingMessageCount: session.pendingMessageCount,
 		usageTotals: session.sessionManager.getUsageTotals(),
-		contextUsage: session.getContextUsage(),
-		favoriteModels: session.favoriteModels.map((entry) => ({ ...entry })),
-		scopedModels: session.scopedModels.map((entry) => ({ ...entry })),
+		contextUsage: typeof session.getContextUsage === "function" ? session.getContextUsage() : undefined,
+		favoriteModels: session.favoriteModels?.map((entry) => ({ ...entry })) ?? [],
+		scopedModels: session.scopedModels?.map((entry) => ({ ...entry })) ?? [],
 	};
 }
 
@@ -646,17 +651,19 @@ export function createRpcConnectionHandler(
 		session = runtimeHost.session;
 		if (replacedSession) {
 			lastAbortSource = undefined;
-			// A replacement can be driven by ANY attached client, so every connection must be
-			// told the live binding moved and given the new authoritative identity. Emitted
-			// before the derived-surface refresh so a client cannot act on the old identity in
-			// the window the refresh takes.
-			outputEvent({
-				type: "session_replaced",
-				sessionId: session.sessionId,
-				sessionFile: session.sessionFile,
-				cwd: session.sessionManager.getCwd(),
-				sessionName: session.sessionName,
-			} satisfies RpcSessionReplacedEvent);
+			if (routingSessionId !== undefined) {
+				// A replacement can be driven by ANY attached client, so every connection must be
+				// told the live binding moved and given the new authoritative identity. Emitted
+				// before the derived-surface refresh so a client cannot act on the old identity in
+				// the window the refresh takes.
+				outputEvent({
+					type: "session_replaced",
+					sessionId: session.sessionId,
+					sessionFile: session.sessionFile,
+					cwd: session.sessionManager.getCwd(),
+					sessionName: session.sessionName,
+				} satisfies RpcSessionReplacedEvent);
+			}
 		}
 		unsubscribeExtensionEvents = clientCapabilities?.includes(EXTENSION_EVENTS_CAPABILITY)
 			? session.extensionRunner.onRpcEvent(({ name, data }) => {
@@ -972,6 +979,8 @@ export function createRpcConnectionHandler(
 			case "new_session": {
 				const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
 				const result = await runtimeHost.newSession(options);
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "new_session", result);
 			}
 
@@ -1217,11 +1226,15 @@ export function createRpcConnectionHandler(
 
 			case "switch_session": {
 				const result = await runtimeHost.switchSession(command.sessionPath, { cwdOverride: command.cwdOverride });
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "switch_session", result);
 			}
 
 			case "fork": {
 				const result = await runtimeHost.fork(command.entryId, { position: command.position });
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "fork", { text: result.selectedText, cancelled: result.cancelled });
 			}
 
@@ -1231,6 +1244,8 @@ export function createRpcConnectionHandler(
 					return error(id, "clone", "Cannot clone session: no current entry selected");
 				}
 				const result = await runtimeHost.fork(leafId, { position: "at" });
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "clone", { cancelled: result.cancelled });
 			}
 
@@ -1264,6 +1279,8 @@ export function createRpcConnectionHandler(
 
 			case "import_jsonl": {
 				const result = await runtimeHost.importFromJsonl(command.inputPath, command.cwdOverride);
+				if (routingSessionId === undefined && !result.cancelled && session !== runtimeHost.session)
+					await rebindSession();
 				return success(id, "import_jsonl", result);
 			}
 
