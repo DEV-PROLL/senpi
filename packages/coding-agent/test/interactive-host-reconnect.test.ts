@@ -20,6 +20,7 @@ import type { RpcSessionState } from "../src/modes/rpc/rpc-types.ts";
 
 const roots: string[] = [];
 const servers: Server[] = [];
+const acceptedSockets: Socket[] = [];
 const runtimes: AgentSessionRuntime[] = [];
 
 const TEST_TIMEOUT = 10_000;
@@ -31,7 +32,7 @@ afterEach(async () => {
 			(server) =>
 				new Promise<void>((resolve) => {
 					server.close(() => resolve());
-					server.closeAllConnections?.();
+					for (const socket of acceptedSockets.splice(0)) socket.destroy();
 				}),
 		),
 	);
@@ -94,7 +95,10 @@ class FakeHost {
 	private readonly sessionId = "fake-session";
 	private connectionCount = 0;
 
-	constructor(readonly socketPath: string, sessionPath: string, cwd: string) {
+	readonly socketPath: string;
+
+	constructor(socketPath: string, sessionPath: string, cwd: string) {
+		this.socketPath = socketPath;
 		this.sessionPath = sessionPath;
 		this.cwd = cwd;
 		this.server.on("connection", (socket) => this.accept(socket));
@@ -108,6 +112,7 @@ class FakeHost {
 	private accept(socket: Socket): void {
 		this.connectionCount++;
 		this.connections.push(socket);
+		acceptedSockets.push(socket);
 		if (this.connectionCount === 2) this.secondConnection.resolve(socket);
 		if (this.connectionCount === 3) this.thirdConnection.resolve(socket);
 		attachJsonlLineReader(socket, (line) => {
@@ -247,7 +252,7 @@ describe("interactive host reconnect orchestration", () => {
 		}
 	}, TEST_TIMEOUT);
 
-	test("re-arms reconnect when the socket disconnects during a successful reconnect", async () => {
+	it("re-arms reconnect when the socket disconnects during a successful reconnect", async () => {
 		const qa = scratch("race");
 		const local = await createLocalRuntime(qa);
 		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
@@ -266,7 +271,7 @@ describe("interactive host reconnect orchestration", () => {
 		}
 	}, TEST_TIMEOUT);
 
-	test("dispose cancels an in-flight reconnect before reopening the session", async () => {
+	it("dispose cancels an in-flight reconnect before reopening the session", async () => {
 		const qa = scratch("dispose");
 		const local = await createLocalRuntime(qa);
 		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
