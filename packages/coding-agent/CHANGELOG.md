@@ -146,6 +146,9 @@
   delegation sticky until compaction is accepted, the model or provider changes, or the session
   navigates to another branch. Manual `/compact` behavior is unchanged.
 
+- Tool-result admission now preserves images and other structured content blocks in their original order while
+  projecting only oversized text blocks.
+
 ### Removed
 
 ## [2026.8.29] - 2026-08-29
