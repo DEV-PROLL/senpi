@@ -183,7 +183,10 @@ export class RemoteInteractiveRuntime {
 			projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
 		},
 	): Promise<{ cancelled: boolean }> {
-		const result = await this.#client.switchSession(sessionPath, options);
+		const result = await this.#client.switchSession(
+			sessionPath,
+			options?.cwdOverride === undefined ? undefined : { cwdOverride: options.cwdOverride },
+		);
 		if (!result.cancelled) {
 			this.#beforeSessionInvalidate?.();
 			this.#remoteSession.abortLocalBash();

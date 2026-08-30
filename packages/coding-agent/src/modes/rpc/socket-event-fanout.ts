@@ -85,6 +85,9 @@ export class SocketEventSinkActor {
 			}
 		})().finally(() => {
 			this.draining = undefined;
+			// An enqueue that lands between the loop's exit and this reaction sees the
+			// stale settled promise and starts nothing; reschedule for it here.
+			if (!this.closed && this.queue.length > 0) void this.drain();
 		});
 		return this.draining;
 	}

@@ -53,6 +53,7 @@ import type {
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
 import { getSupportedThinkingLevels } from "../../core/thinking-levels.ts";
+import { ProjectTrustStore } from "../../core/trust-manager.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
 import {
 	buildCustomUnsupportedRequest,
@@ -158,6 +159,8 @@ function loadedMcpStatus(server: McpWireStatusServer): RpcMcpServerStatus {
  * who owned the abort.
  */
 export function buildRpcSessionState(session: AgentSession, lastAbortSource?: AgentAbortSource): RpcSessionState {
+	const cwd = session.sessionManager.getCwd();
+	const projectTrusted = new ProjectTrustStore(session.agentDir).get(cwd) === true;
 	return {
 		model: session.model,
 		thinkingLevel: session.thinkingLevel,
@@ -174,8 +177,8 @@ export function buildRpcSessionState(session: AgentSession, lastAbortSource?: Ag
 		sessionFile: session.sessionFile,
 		sessionId: session.sessionId,
 		sessionName: session.sessionName,
-		cwd: session.sessionManager.getCwd(),
-		projectTrusted: session.settingsManager?.isProjectTrusted?.() ?? true,
+		cwd,
+		projectTrusted,
 		...(session.sessionFile &&
 		!existsSync(session.sessionFile) &&
 		session.sessionManager
