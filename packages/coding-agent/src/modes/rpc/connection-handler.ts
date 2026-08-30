@@ -670,7 +670,7 @@ export function createRpcConnectionHandler(
 				// the window the refresh takes.
 				outputEvent({
 					type: "session_replaced",
-					sessionId: session.sessionId,
+					durableSessionId: session.sessionId,
 					sessionFile: session.sessionFile,
 					cwd: session.sessionManager.getCwd(),
 					sessionName: session.sessionName,
