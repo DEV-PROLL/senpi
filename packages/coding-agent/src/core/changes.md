@@ -5,8 +5,8 @@
 - Interactive sessions no longer join the shared RPC host implicitly. `main.ts` now gates
   `createInteractiveHostRuntime` on `shouldJoinSharedHost()` (`core/shared-host-policy.ts`): a bare
   interactive session stays purely local and never opens `<agentDir>/rpc/rpc.sock`.
-- Opt in per-process with the `ENABLE_SHARED_HOST` env flag, or persistently with the
-  `experimental.sharedHost` setting (`SettingsManager.getExperimentalSharedHost()`). Non-interactive
+- Opt in persistently with the `experimental.sharedHost` setting, or per-process with the
+  brand-prefixed `ENABLE_SHARED_HOST` env flag (`SENPI_ENABLE_SHARED_HOST=1` / `OMO_ENABLE_SHARED_HOST=1`) (`SettingsManager.getExperimentalSharedHost()`). Non-interactive
   modes (print, json, rpc, app-server) are unaffected; the app-server / `--multi-session` host owns
   its own transport.
 - The former opt-out `DISABLE_SHARED_HOST` is obsolete: it is now the default, and setting it prints a
