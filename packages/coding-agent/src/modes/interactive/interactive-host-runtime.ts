@@ -466,7 +466,8 @@ function createRemoteSessionProxy(
 		}
 		if (wireEvent.type === "compaction_end" && wireEvent.accepted && !wireEvent.aborted) {
 			try {
-				sessionManager.reloadFromDisk?.();
+				local.sessionManager.reloadFromDisk?.();
+				if (sessionManager !== local.sessionManager) sessionManager.reloadFromDisk?.();
 				local.agent.state.messages = sessionManager.buildSessionContext().messages;
 			} catch {
 				// Non-fatal if session file is transiently locked or unavailable
