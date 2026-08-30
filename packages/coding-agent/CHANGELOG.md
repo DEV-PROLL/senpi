@@ -32,6 +32,11 @@
 
 - Compiled standalone binaries can now start the shared interactive RPC host. The host launch re-enters the executable through the internal supervisor route instead of a script path, which compiled entrypoints parse as CLI arguments; previously every interactive launch stalled for the full 10s readiness budget, printed `Error: Unknown option: --socket`, and fell back to a local session.
 
+- A compaction started right after `switch_session`, `new_session`, or `fork` is no longer cancelled by the replacement's own extension binding. Binding deactivates tools for the active model, and that tool change aborted the in-flight compaction with "Compaction cancelled".
+
+- The `session_replaced` RPC event carries the replacement identity as `durableSessionId`. It previously used `sessionId`, which multi-session hosts overwrite with the connection's routing handle, so attached clients received a replacement event with no usable identity.
+
+
 - The `session_replaced` RPC event carries the replacement identity as `durableSessionId`. It previously used `sessionId`, which multi-session hosts overwrite with the connection's routing handle, so attached clients received a replacement event with no usable identity.
 
 - Bash callback settlement is bounded on direct, shared-host, and harness execution paths so never-settling callbacks cannot hang commands or silently lose spill cleanup failures.
