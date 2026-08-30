@@ -140,7 +140,7 @@ describe("RPC wire provenance", () => {
 		const second = await newHarness();
 		const collected = makeSink();
 		const host = makeRuntimeHost(first.session);
-		const handler = createRpcConnectionHandler(host.runtimeHost, collected.sink);
+		const handler = createRpcConnectionHandler(host.runtimeHost, collected.sink, { sessionId: "rpc-attached" });
 		await handler.ready;
 
 		const replaced = collected.waitFor((record) => record.type === "session_replaced");
