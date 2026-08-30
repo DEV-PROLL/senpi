@@ -1,6 +1,47 @@
 # changes
 
+## 2026-08-30 - Expose session_replaced on the public client event union
+
+### What changed
+
+- `rpc-client.ts`: `RpcSessionReplacedEvent` joins the public `RpcClientEvent` union, so a typed client can discriminate `event.type === "session_replaced"` and read `durableSessionId` without casting. The runtime already forwarded the event through the unchecked `data as RpcClientEvent` cast in `handleFrame`, so it reached listeners untyped.
+- `rpc-client.ts`: `collectEvents()` excludes it alongside the other non-session events it already filtered. It returns `JsonAgentSessionEvent[]`, and a replacement notice is connection-level rather than part of the agent's event stream.
+
+### Why
+
+- The command response for a replacement carries only `{ cancelled }`, and a replacement can be driven by another attached client or by an extension, so this event is the only channel delivering the new identity. A client that cannot narrow to it cannot resync.
+
+### Why an extension could not handle it
+
+- The client event union is protocol surface beneath every extension hook.
+
+### Expected merge conflict zones
+
+- LOW: the `RpcClientEvent` union members and the `collectEvents()` filter.
+
+
 ## 2026-08-30 - Require agentDir for the RPC project-trust gate
+
+## 2026-08-30 - Carry the replacement identity as durableSessionId
+
+### What changed
+
+- `rpc-types.ts` / `connection-handler.ts`: `session_replaced` now carries `durableSessionId` instead of `sessionId`.
+
+### Why
+
+- Top-level `sessionId` is the per-connection routing handle, and `tagSessionRecord()` applies it last (`{ ...value, sessionId: routingSessionId }`). A multi-session host therefore overwrote the durable identity in the payload, leaving the event with no identity at all - the exact information it exists to deliver. In classic mode the untagged payload key also broke the pin that no classic line carries a top-level `sessionId`. Renaming to the vocabulary the D6 table already uses for `list_sessions` fixes both modes and keeps `sessionId` meaning exactly one thing on the wire.
+
+### Why an extension could not handle it
+
+- The event is emitted by the connection handler beneath the extension API; no extension hook can rewrite an outbound wire record.
+
+### Expected merge conflict zones
+
+- LOW: the `session_replaced` payload in `rebindSession()` and its interface in `rpc-types.ts`.
+
+
+## 2026-08-30 - Reschedule the retained-queue drain when an enqueue races its settling
 
 - `connection-handler.ts` now requires an authoritative `agentDir` when projecting RPC session state and reads project trust only from a fresh `ProjectTrustStore` lookup for the session's current cwd.
 - The old `settingsManager.isProjectTrusted()` fallback is removed because that verdict can belong to a previous cwd after a session replacement. Missing `agentDir` now throws an explicit RPC session invariant error rather than silently selecting a stale trust verdict.
@@ -30,6 +71,29 @@
   `replacementIssuedHere` for the duration of that rebind only.
 - Routed/shared-host behavior is unchanged: those connections still receive the broadcast.
 
+
+
+## 2026-08-30 - Launch the shared RPC socket host correctly from compiled binaries
+
+### What changed
+
+- `host-ensure.ts`: `defaultHostLaunch()` (now exported for tests) re-enters a compiled standalone binary through the hidden `--internal-rpc-host-supervisor` route instead of a `host-lifecycle` script path. A bun executable always boots its embedded entrypoint, so the script path was parsed as CLI arguments and the spawned supervisor died with `Unknown option: --socket`; every interactive launch then burned the full 10s readiness budget before printing the shared-host fallback warning.
+- `host-lifecycle.ts`: the supervisor's default host spawn moved into the exported `resolveHostChildLaunch()`. In compiled binaries it drops `resolveCliMainPath()` and passes `--mode rpc --multi-session --listen` directly to the executable; explicit `--child-command` launches (desktop) are unchanged.
+- `host-lifecycle.ts`: the internal launch route is now matched by the exported `findInternalSupervisorArgs()` bounded scan instead of a strict `args[0]` test in `main.ts`. A rebranded wrapper may prepend engine-global flags before re-dispatching (`packages/omo-native` injects `--extension <dir>` for every non-early command), which pushed the sentinel off `args[0]` so the route never fired and the helper died on `--socket` anyway. The scan accepts the sentinel at `args[0]` or preceded only by allowlisted `--extension <value>` pairs; a positional operand, `--`, an unknown flag, or a dangling prefix all disqualify it, so a user-supplied value equal to the sentinel can never reach the supervisor. The skipped prefix is not forwarded, because the wrapper re-injects its own on every re-entry.
+- `main.ts`: dispatches through that scan and still fails closed (`exit(2)`) on a malformed payload rather than falling through to the public parser.
+- QA: `scripts/qa-rpc-socket/compiled-host.mjs` drives the real `build:binary` output through a pty and asserts the shared host answers `get_protocol_info` without the fallback warning, reaping the detached supervisor on every exit path (SIGTERM then SIGKILL) so a failed run cannot leak a live host and a bound socket.
+
+### Why
+
+- No compiled distribution (release binaries, bundled/rebranded runtimes) could ever start the shared interactive host: the script-path re-entry only works when `process.execPath` is a JS runtime. Both spawn levels (ensure -> supervisor, supervisor -> host) had the same defect.
+
+### Why an extension could not handle it
+
+- The spawn shapes are core host-lifecycle wiring inside `ensureHost()` and the supervisor; no extension hook runs before the shared host is ensured, so an extension cannot intercept or rewrite the default launch.
+
+### Expected merge conflict zones
+
+- LOW: `defaultHostLaunch` in `host-ensure.ts`, the child spawn in `runHostSupervisor`, and the internal-route dispatch block in `main.ts`.
 
 ## 2026-08-30 - Reschedule the sink actor drain when an enqueue races its settling
 

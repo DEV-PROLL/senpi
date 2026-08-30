@@ -27,6 +27,11 @@ function runtime(options: Parameters<CreateAgentSessionRuntimeFactory>[0]): Crea
 			agentDir: options.agentDir,
 			isFastModeActive: () => false,
 			isStreaming: false,
+			// The shared state builder projects open_session through the full session
+			getContextUsage: () => undefined,
+			favoriteModels: [],
+			scopedModels: [],
+			isBashRunning: false,
 			extensionRunner: { hasHandlers: () => false, emit: async () => {} },
 			abort: async () => {},
 			waitForIdle: async () => {},
