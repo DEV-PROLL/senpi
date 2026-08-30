@@ -55,7 +55,6 @@ import type {
 import { getSupportedThinkingLevels } from "../../core/thinking-levels.ts";
 import { ProjectTrustStore } from "../../core/trust-manager.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
-import { createLiveComponentRenderer, type LiveComponentRenderer } from "./widget-line-renderer.ts";
 import {
 	buildCustomUnsupportedRequest,
 	DEFAULT_CUSTOM_EXTENSION_LABEL,
@@ -80,6 +79,7 @@ import type {
 	RpcSkillInvocationEvent,
 } from "./rpc-types.ts";
 import { SessionExtensionUiRequests } from "./session-extension-ui-requests.ts";
+import { createLiveComponentRenderer, type LiveComponentRenderer } from "./widget-line-renderer.ts";
 
 /** Additive per-connection options. Absent = classic default (byte-identical). */
 export interface RpcConnectionOptions {
@@ -497,13 +497,31 @@ export function createRpcConnectionHandler(
 		setWidget(key: string, content: unknown, options?: ExtensionWidgetOptions): void {
 			disposeRenderer(key);
 			if (content === undefined || Array.isArray(content)) {
-				output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setWidget", widgetKey: key, widgetLines: content as string[] | undefined, widgetPlacement: options?.placement } as RpcExtensionUIRequest);
+				output({
+					type: "extension_ui_request",
+					id: crypto.randomUUID(),
+					method: "setWidget",
+					widgetKey: key,
+					widgetLines: content as string[] | undefined,
+					widgetPlacement: options?.placement,
+				} as RpcExtensionUIRequest);
 				return;
 			}
 			const renderer = createLiveComponentRenderer({
-				factory: content as (tui: import("@earendil-works/pi-tui").TUI, thm: Theme) => import("@earendil-works/pi-tui").Component,
+				factory: content as (
+					tui: import("@earendil-works/pi-tui").TUI,
+					thm: Theme,
+				) => import("@earendil-works/pi-tui").Component,
 				getWidth: () => clientWidth,
-				emit: (widgetLines) => output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setWidget", widgetKey: key, widgetLines, widgetPlacement: options?.placement } as RpcExtensionUIRequest),
+				emit: (widgetLines) =>
+					output({
+						type: "extension_ui_request",
+						id: crypto.randomUUID(),
+						method: "setWidget",
+						widgetKey: key,
+						widgetLines,
+						widgetPlacement: options?.placement,
+					} as RpcExtensionUIRequest),
 			});
 			if (renderer) liveRenderers.set(key, renderer);
 		},
@@ -511,20 +529,50 @@ export function createRpcConnectionHandler(
 		setFooter(factory: unknown): void {
 			disposeRenderer("__footer__");
 			if (factory === undefined) {
-				output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setFooter", widgetLines: undefined } as RpcExtensionUIRequest);
+				output({
+					type: "extension_ui_request",
+					id: crypto.randomUUID(),
+					method: "setFooter",
+					widgetLines: undefined,
+				} as RpcExtensionUIRequest);
 				return;
 			}
-			const renderer = createLiveComponentRenderer({ factory: factory as never, getWidth: () => clientWidth, emit: (widgetLines) => output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setFooter", widgetLines } as RpcExtensionUIRequest) });
+			const renderer = createLiveComponentRenderer({
+				factory: factory as never,
+				getWidth: () => clientWidth,
+				emit: (widgetLines) =>
+					output({
+						type: "extension_ui_request",
+						id: crypto.randomUUID(),
+						method: "setFooter",
+						widgetLines,
+					} as RpcExtensionUIRequest),
+			});
 			if (renderer) liveRenderers.set("__footer__", renderer);
 		},
 
 		setHeader(factory: unknown): void {
 			disposeRenderer("__header__");
 			if (factory === undefined) {
-				output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setHeader", widgetLines: undefined } as RpcExtensionUIRequest);
+				output({
+					type: "extension_ui_request",
+					id: crypto.randomUUID(),
+					method: "setHeader",
+					widgetLines: undefined,
+				} as RpcExtensionUIRequest);
 				return;
 			}
-			const renderer = createLiveComponentRenderer({ factory: factory as never, getWidth: () => clientWidth, emit: (widgetLines) => output({ type: "extension_ui_request", id: crypto.randomUUID(), method: "setHeader", widgetLines } as RpcExtensionUIRequest) });
+			const renderer = createLiveComponentRenderer({
+				factory: factory as never,
+				getWidth: () => clientWidth,
+				emit: (widgetLines) =>
+					output({
+						type: "extension_ui_request",
+						id: crypto.randomUUID(),
+						method: "setHeader",
+						widgetLines,
+					} as RpcExtensionUIRequest),
+			});
 			if (renderer) liveRenderers.set("__header__", renderer);
 		},
 

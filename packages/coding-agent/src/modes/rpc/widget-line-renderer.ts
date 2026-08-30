@@ -1,5 +1,5 @@
 import type { Component, TUI } from "@earendil-works/pi-tui";
-import { initTheme, theme, type Theme } from "../interactive/theme/theme.ts";
+import { initTheme, type Theme, theme } from "../interactive/theme/theme.ts";
 
 export interface LiveComponentRenderer {
 	rerender(): void;
@@ -27,7 +27,12 @@ export function createLiveComponentRenderer(options: {
 			if (disposed) return;
 			try {
 				const lines = component.render(options.getWidth());
-				if (lastLines && lines.length === lastLines.length && lines.every((line: string, i: number) => line === lastLines![i])) return;
+				if (
+					lastLines &&
+					lines.length === lastLines.length &&
+					lines.every((line: string, i: number) => line === lastLines![i])
+				)
+					return;
 				lastLines = [...lines];
 				options.emit(lines);
 			} catch (error) {

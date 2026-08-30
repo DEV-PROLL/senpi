@@ -620,7 +620,7 @@ export type RpcExtensionUIRequest =
 			id: string;
 			method: "setHeader" | "setFooter";
 			widgetLines: string[] | undefined;
-		  }
+	  }
 	| { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
 	| { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string }
 	// Additive (task 13/14): emitted ONLY when the client advertised the
