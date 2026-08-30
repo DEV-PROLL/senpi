@@ -86,7 +86,7 @@ async function main() {
 			}
 		}
 		transcript.push(`assert get_protocol_info serverVersion=${info.serverVersion} capabilities=${info.capabilities.join(",")}`);
-		if (output.includes(FALLBACK_NEEDLE)) {
+		if (plainText(output).includes(FALLBACK_NEEDLE)) {
 			throw new Error(`compiled TUI fell back to a local session:\n${supervisorStderr(paths)}`);
 		}
 		transcript.push("assert fallback-warning=absent");
@@ -100,7 +100,7 @@ async function main() {
 	} catch (error) {
 		if (scratch) {
 			const paths = createHostDaemonPaths(scratch.agentDir);
-			transcript.push(`observed fallback-warning=${output.includes(FALLBACK_NEEDLE) ? "present" : "absent"}`);
+			transcript.push(`observed fallback-warning=${plainText(output).includes(FALLBACK_NEEDLE) ? "present" : "absent"}`);
 			transcript.push(`supervisor-stderr: ${supervisorStderr(paths)}`);
 		}
 		transcript.push(`pty-tail: ${plainText(output).slice(-800) || "<empty>"}`);
@@ -128,7 +128,7 @@ async function main() {
 async function waitForSharedHost(socketPath, readOutput) {
 	const deadline = Date.now() + READY_BUDGET_MS;
 	while (Date.now() <= deadline) {
-		if (readOutput().includes(FALLBACK_NEEDLE)) {
+		if (plainText(readOutput()).includes(FALLBACK_NEEDLE)) {
 			throw new Error("compiled TUI printed the shared-host fallback warning before the host became ready");
 		}
 		const info = await probeProtocolInfo(socketPath);

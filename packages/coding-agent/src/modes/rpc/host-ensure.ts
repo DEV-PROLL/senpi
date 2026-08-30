@@ -18,7 +18,12 @@ import {
 	EXTENSION_EVENTS_CAPABILITY,
 	RPC_CLIENT_CAPABILITIES_ENV,
 } from "./custom-capability.ts";
-import { DEFAULT_HOST_IDLE_EXIT_MS, type HostColdStart, type HostLifecyclePolicyInput } from "./host-lifecycle.ts";
+import {
+	DEFAULT_HOST_IDLE_EXIT_MS,
+	type HostColdStart,
+	type HostLifecyclePolicyInput,
+	INTERNAL_SUPERVISOR_FLAG,
+} from "./host-lifecycle.ts";
 
 export type { HostColdStart, HostLifecyclePolicyInput };
 
@@ -321,7 +326,7 @@ export function defaultHostLaunch(
 	if (compiled) {
 		return {
 			command: process.execPath,
-			args: ["--internal-rpc-host-supervisor", "--socket", socket, ...hostArgs],
+			args: [INTERNAL_SUPERVISOR_FLAG, "--socket", socket, ...hostArgs],
 		};
 	}
 	return {
