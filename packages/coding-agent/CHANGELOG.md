@@ -30,6 +30,8 @@
 
 ### Fixed
 
+- Compiled standalone binaries can now start the shared interactive RPC host. The host launch re-enters the executable through the internal supervisor route instead of a script path, which compiled entrypoints parse as CLI arguments; previously every interactive launch stalled for the full 10s readiness budget, printed `Error: Unknown option: --socket`, and fell back to a local session.
+
 - Bash callback settlement is bounded on direct, shared-host, and harness execution paths so never-settling callbacks cannot hang commands or silently lose spill cleanup failures.
 
 - Deterministic compaction fallback now supports replay-safe Gemini opaque provider state (thoughtSignature, thinkingSignature, textSignature, and empty visible text blocks) and recovers earlier safe boundaries without breaking atomic tool-call chains ([#947](https://github.com/code-yeongyu/senpi/pull/947)).
