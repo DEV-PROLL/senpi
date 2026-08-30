@@ -87,6 +87,10 @@ function spawnHost(
 				...hermeticProviderEnv(),
 				PI_OFFLINE: "1",
 				PI_TELEMETRY: "0",
+				// The rules extension appends an async `pi-rules.scan` entry on the
+				// host after session start, racing entry-parity assertions between
+				// the host and the local mirror. No test here exercises rules.
+				PI_RULES_DISABLED: "1",
 				SENPI_RUNTIME: "node",
 				SENPI_CODING_AGENT_DIR: qa.agentDir,
 				SENPI_CODING_AGENT_SESSION_DIR: qa.sessionDir,

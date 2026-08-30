@@ -1,5 +1,9 @@
 # Local fork changes
 
+## 2026-08-30 - Make interactive-host entry-parity tests rules-hermetic
+
+- The spawned RPC host in `test/interactive-host-runtime.test.ts` now sets `PI_RULES_DISABLED=1`, so the rules extension's asynchronous `pi-rules.scan` custom entry can no longer race the host-vs-local entry parity assertions (flaky `transports setup mutations to the authoritative host before rebind` on CI shard 1/3).
+
 ## 2026-08-29 - GLM-5.3 default and prompt preset
 
 - Use GLM-5.3 as the Z.AI global and China default, with the matching built-in prompt preset from current main.
