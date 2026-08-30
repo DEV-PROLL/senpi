@@ -1109,7 +1109,7 @@ export async function main(args: string[], options?: MainOptions) {
 	if (isTruthyEnvFlag(envValue("DISABLE_SHARED_HOST"))) {
 		console.error(
 			chalk.yellow(
-				"DISABLE_SHARED_HOST is obsolete: the shared session host is now off by default. Set ENABLE_SHARED_HOST=1 or experimental.sharedHost to opt in.",
+				"DISABLE_SHARED_HOST is obsolete: the shared session host is now off by default. Enable the experimental.sharedHost setting (or set the brand-prefixed ENABLE_SHARED_HOST=1 env flag) to opt in.",
 			),
 		);
 	}
