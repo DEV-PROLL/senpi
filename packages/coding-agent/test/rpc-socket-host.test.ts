@@ -121,7 +121,11 @@ function scratch(label: string): {
 	};
 }
 
-function spawnRpc(args: string[], qa: ReturnType<typeof scratch>): ChildProcessWithoutNullStreams {
+function spawnRpc(
+	args: string[],
+	qa: ReturnType<typeof scratch>,
+	capabilities = "extension_events,custom_unsupported,rendered_components",
+): ChildProcessWithoutNullStreams {
 	const child = spawn(process.execPath, [join(import.meta.dirname, "..", "src", "cli.ts"), ...args], {
 		cwd: qa.cwd,
 		env: {
@@ -132,7 +136,7 @@ function spawnRpc(args: string[], qa: ReturnType<typeof scratch>): ChildProcessW
 			SENPI_RUNTIME: "node",
 			SENPI_CODING_AGENT_DIR: qa.agentDir,
 			SENPI_CODING_AGENT_SESSION_DIR: qa.sessionDir,
-			SENPI_RPC_CLIENT_CAPABILITIES: "extension_events,custom_unsupported,rendered_components",
+			SENPI_RPC_CLIENT_CAPABILITIES: capabilities,
 		},
 		stdio: ["pipe", "pipe", "pipe"],
 	});
@@ -311,7 +315,7 @@ describe("RPC Unix-socket multi-connection host", () => {
 					ctx.ui.setWidget("array-widget", ["array widget"]);
 					ctx.ui.setWidget("factory-widget", () => ({ render: (width) => [\`w:\${width}\`] }));
 					ctx.ui.setHeader(() => ({ render: () => ["factory header"] }));
-					ctx.ui.setFooter(() => ({ render: () => ["factory footer"] }));
+					ctx.ui.setFooter((_tui, _theme, footerData) => ({ render: () => [footerData.getGitBranch() ?? "factory footer"] }));
 				});
 			}\n`,
 		);
@@ -418,6 +422,56 @@ describe("RPC Unix-socket multi-connection host", () => {
 			await fake.close();
 			await stopChild(child);
 		}
+	});
+
+	it("keeps factory UI silent for a default client while preserving array widgets", async () => {
+		const qa = scratch("widget-default");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		mkdirSync(join(qa.agentDir, "extensions"), { recursive: true });
+		writeFileSync(join(qa.agentDir, "extensions", "widget-factory.ts"), `export default function (pi) {
+			pi.on("session_start", (_event, ctx) => {
+				ctx.ui.setWidget("array-widget", ["array widget"]);
+				ctx.ui.setWidget("factory-widget", () => ({ render: () => ["factory"] }));
+				ctx.ui.setHeader(() => ({ render: () => ["header"] }));
+				ctx.ui.setFooter((_tui, _theme, footerData) => ({ render: () => [footerData.getGitBranch() ?? "footer"] }));
+			});
+		}`);
+		const child = spawnRpc(["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL, "--extension", join(qa.agentDir, "extensions", "widget-factory.ts")], qa, "");
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const peer = await connectPeer(qa.socketPath);
+		try {
+			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
+			await new Promise<void>((resolve) => queueMicrotask(resolve));
+			expect(opened).toMatchObject({ success: true });
+			expect(peer.peer.messages.filter((value) => value.type === "extension_ui_request" && ["factory-widget", "setHeader", "setFooter"].includes(String(value.widgetKey ?? value.method)))).toEqual([]);
+			expect(peer.peer.messages).toEqual(expect.arrayContaining([expect.objectContaining({ method: "setWidget", widgetKey: "array-widget", widgetLines: ["array widget"] })]));
+		} finally { peer.peer.close(); peer.socket.destroy(); await fake.close(); await stopChild(child); }
+	});
+
+	it("uses the minimum reported width across attached peers and drops leavers", async () => {
+		const qa = scratch("widget-width-peers");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		mkdirSync(join(qa.agentDir, "extensions"), { recursive: true });
+		writeFileSync(join(qa.agentDir, "extensions", "widget-factory.ts"), `export default function (pi) { pi.on("session_start", (_event, ctx) => ctx.ui.setWidget("factory-widget", () => ({ render: (width) => [String(width)] }))); }`);
+		const child = spawnRpc(["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL, "--extension", join(qa.agentDir, "extensions", "widget-factory.ts")], qa);
+		await waitForStderr(child, `senpi rpc listening on unix://${qa.socketPath}`);
+		const a = await connectPeer(qa.socketPath); const b = await connectPeer(qa.socketPath);
+		try {
+			const path = join(qa.sessionDir, "width.jsonl");
+			const opened = await a.peer.request({ id: "open", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			const sessionId = openedSessionId(opened);
+			await b.peer.request({ id: "attach", type: "open_session", cwd: qa.cwd, sessionPath: path });
+			await a.peer.request({ id: "a-width", type: "set_client_info", width: 120, sessionId });
+			const min60 = a.peer.waitFor((v) => v.type === "extension_ui_request" && v.widgetKey === "factory-widget" && JSON.stringify(v.widgetLines) === JSON.stringify(["60"]));
+			await b.peer.request({ id: "b-width", type: "set_client_info", width: 60, sessionId });
+			await expect(min60).resolves.toBeDefined();
+			expect(b.peer.messages.some((v) => v.widgetKey === "factory-widget" && JSON.stringify(v.widgetLines) === JSON.stringify(["60"]))).toBe(true);
+			a.peer.close(); a.socket.destroy();
+			const width120 = b.peer.waitFor((v) => v.type === "extension_ui_request" && v.widgetKey === "factory-widget" && JSON.stringify(v.widgetLines) === JSON.stringify(["120"]));
+			await expect(width120).resolves.toBeDefined();
+		} finally { a.peer.close(); a.socket.destroy(); b.peer.close(); b.socket.destroy(); await fake.close(); await stopChild(child); }
 	});
 
 	it("dispatches a reentrant UI response while switch_session is in flight", async () => {

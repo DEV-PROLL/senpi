@@ -94,6 +94,7 @@ function spawnHost(
 				SENPI_RUNTIME: "node",
 				SENPI_CODING_AGENT_DIR: qa.agentDir,
 				SENPI_CODING_AGENT_SESSION_DIR: qa.sessionDir,
+				SENPI_RPC_CLIENT_CAPABILITIES: "extension_events,custom_unsupported,rendered_components",
 			},
 			stdio: ["pipe", "pipe", "pipe"],
 		},
@@ -155,6 +156,22 @@ async function waitForHost(child: ChildProcessWithoutNullStreams, socket: string
 }
 
 describe("interactive host runtime", () => {
+	it("delivers startup factory UI through the normal runtime API", async () => {
+		const qa = scratch("startup-ui");
+		const fake = await startFakeModelServer();
+		writeRpcModelsJson(qa.agentDir, fake.origin);
+		mkdirSync(join(qa.agentDir, "extensions"), { recursive: true });
+		writeFileSync(join(qa.agentDir, "extensions", "startup-ui.ts"), `export default function (pi) { pi.on("session_start", (_event, ctx) => ctx.ui.setWidget("startup", () => ({ render: () => ["startup"] }))); }`);
+		const host = spawnHost(qa);
+		await waitForHost(host, qa.socket);
+		const local = await createAgentSessionRuntimeFixture({ cwd: qa.cwd, agentDir: qa.agentDir, sessionManager: SessionManager.create(qa.cwd, qa.sessionDir), settingsManager: SettingsManager.create(qa.cwd, qa.agentDir) });
+		const runtime = await createInteractiveHostRuntime(local, { socket: qa.socket, ensureHost: async () => undefined });
+		try {
+			const received: unknown[] = [];
+			runtime.setHostUiHandler?.((request) => { received.push(request); });
+			expect(received).toContainEqual(expect.objectContaining({ method: "setWidget", widgetKey: "startup", widgetLines: ["startup"] }));
+		} finally { await runtime.dispose(); await fake.close(); }
+	});
 	it("renders host-authoritative footer context, cwd, and session name", async () => {
 		const qa = scratch("footer-values");
 		const fake = await startFakeModelServer();
