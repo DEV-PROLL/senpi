@@ -695,11 +695,15 @@ describe("retry fallback engine", () => {
 			{ type: "turn_start" },
 			{ type: "message_start", role: "user" },
 			{ type: "message_end", role: "user" },
+			// Each durable session entry publishes an entry_appended notification as
+			// it is persisted, so one follows every completed message.
+			{ type: "entry_appended" },
 			{ type: "message_start", role: "assistant" },
 			{ type: "message_update", update: "text_start" },
 			{ type: "message_update", update: "text_delta" },
 			{ type: "message_update", update: "text_end" },
 			{ type: "message_end", role: "assistant" },
+			{ type: "entry_appended" },
 			{ type: "turn_end" },
 			{ type: "agent_end", willRetry: true },
 			{
@@ -716,6 +720,7 @@ describe("retry fallback engine", () => {
 			{ type: "message_update", update: "text_delta" },
 			{ type: "message_update", update: "text_end" },
 			{ type: "message_end", role: "assistant" },
+			{ type: "entry_appended" },
 			{ type: "auto_retry_end", success: true, attempt: 1 },
 			{ type: "turn_end" },
 			{ type: "agent_end", willRetry: false },
