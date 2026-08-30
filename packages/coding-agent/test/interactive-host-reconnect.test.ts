@@ -87,6 +87,7 @@ class FakeHost {
 	readonly connections: Socket[] = [];
 	readonly requests: Array<Record<string, unknown>> = [];
 	readonly secondConnection = deferred<Socket>();
+	readonly thirdConnection = deferred<Socket>();
 	readonly secondOpenSession = deferred<Record<string, unknown>>();
 	private readonly sessionPath: string;
 	private readonly cwd: string;
@@ -108,6 +109,7 @@ class FakeHost {
 		this.connectionCount++;
 		this.connections.push(socket);
 		if (this.connectionCount === 2) this.secondConnection.resolve(socket);
+		if (this.connectionCount === 3) this.thirdConnection.resolve(socket);
 		attachJsonlLineReader(socket, (line) => {
 			const request = JSON.parse(line) as Record<string, unknown>;
 			this.requests.push(request);
@@ -182,6 +184,117 @@ describe("interactive host reconnect orchestration", () => {
 			expect(warnings).toEqual([]);
 		} finally {
 			await runtime.dispose();
+		}
+	}, TEST_TIMEOUT);
+
+	it("sanitizes later proxy failures and deduplicates the fallback warning", async () => {
+		const qa = scratch("sanitized");
+		const local = await createLocalRuntime(qa);
+		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+		await host.listen();
+		const warnings: Array<{ message: string; cause: unknown }> = [];
+		let ensureHostCalls = 0;
+		const warning = deferred<void>();
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => {
+				ensureHostCalls++;
+				if (ensureHostCalls > 1) throw new Error("internal socket path / secret");
+				return undefined;
+			},
+			onWarning: (value) => {
+				warnings.push(value);
+				warning.resolve();
+			},
+		});
+		try {
+			host.connections[0]!.destroy();
+			const action = runtime.session.steer("after disconnect");
+			await expect(action).rejects.toThrow();
+			await warning.promise;
+			await Promise.resolve();
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]?.message).toBe(INTERACTIVE_HOST_FALLBACK_WARNING);
+			expect(warnings[0]?.message).not.toContain("internal socket path");
+		} finally {
+			await runtime.dispose();
+		}
+	}, TEST_TIMEOUT);
+
+	it("switches to the local runtime after reconnect exhaustion", async () => {
+		const qa = scratch("fallback");
+		const local = await createLocalRuntime(qa);
+		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+		await host.listen();
+		const warning = deferred<void>();
+		let ensureHostCalls = 0;
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => {
+				ensureHostCalls++;
+				if (ensureHostCalls > 1) throw new Error("reconnect failed");
+				return undefined;
+			},
+			onWarning: () => warning.resolve(),
+		});
+		try {
+			host.connections[0]!.destroy();
+			await warning.promise;
+			expect(runtime.session).toBe(local.session);
+			expect(host.requests.filter((request) => request.type === "get_state")).toHaveLength(0);
+		} finally {
+			await runtime.dispose();
+		}
+	}, TEST_TIMEOUT);
+
+	test("re-arms reconnect when the socket disconnects during a successful reconnect", async () => {
+		const qa = scratch("race");
+		const local = await createLocalRuntime(qa);
+		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+		await host.listen();
+		const runtime = await createInteractiveHostRuntime(local, { socket: qa.socket, ensureHost: async () => undefined });
+		try {
+			host.connections[0]!.destroy();
+			await host.secondConnection.promise;
+			await host.secondOpenSession.promise;
+			// The reconnect has completed; a later disconnect must start another attempt.
+			host.connections[1]!.destroy();
+			await host.thirdConnection.promise;
+			expect(host.connections.length).toBeGreaterThanOrEqual(3);
+		} finally {
+			await runtime.dispose();
+		}
+	}, TEST_TIMEOUT);
+
+	test("dispose cancels an in-flight reconnect before reopening the session", async () => {
+		const qa = scratch("dispose");
+		const local = await createLocalRuntime(qa);
+		const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+		await host.listen();
+		const reconnectStarted = deferred<void>();
+		const releaseReconnect = deferred<void>();
+		let ensureHostCalls = 0;
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => {
+				ensureHostCalls++;
+				if (ensureHostCalls > 1) {
+					reconnectStarted.resolve();
+					await releaseReconnect.promise;
+				}
+				return undefined;
+			},
+		});
+		try {
+			host.connections[0]!.destroy();
+			await reconnectStarted.promise;
+			const disposed = runtime.dispose();
+			releaseReconnect.resolve();
+			await disposed;
+			expect(host.requests.filter((request) => request.type === "open_session")).toHaveLength(1);
+		} finally {
+			releaseReconnect.resolve();
+			await runtime.dispose().catch(() => {});
 		}
 	}, TEST_TIMEOUT);
 
