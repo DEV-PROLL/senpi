@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2026.8.30-2] - 2026-08-30
 
 ### Added
 
