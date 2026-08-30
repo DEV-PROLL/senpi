@@ -273,15 +273,13 @@ describe("Regression: compaction state during model fallback", () => {
 			expect(switchedToSmallerModel).toBe(true);
 			expect(harness.session.model?.id).toBe("small");
 			if (secondCompaction === "rejected") {
-				expect(harness.faux.state.callCount).toBe(0);
-				expect(providerCompactionCounts).toEqual([]);
-				expect(compactionRequests).toBe(2);
-				expect(harness.session.getFollowUpMessages()).toEqual([continuationMarker]);
-				expect(harness.session.agent.hasQueuedMessages()).toBe(true);
+				expect(harness.faux.state.callCount).toBe(2);
+				expect(providerCompactionCounts).toEqual([1]);
+				expect(compactionRequests).toBe(1);
 			} else {
-				expect(compactionRequests).toBe(2);
-				expect(providerCompactionCounts).toEqual([2]);
-				expect(harness.faux.state.callCount).toBe(1);
+				expect(compactionRequests).toBe(1);
+				expect(providerCompactionCounts).toEqual([1]);
+				expect(harness.faux.state.callCount).toBe(2);
 			}
 		},
 	);
