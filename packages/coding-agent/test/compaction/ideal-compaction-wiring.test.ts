@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { estimateTokens } from "../../src/core/compaction/index.ts";
 import {
 	admitContextToolResult,
 	admitContextToolResults,
@@ -6,7 +7,14 @@ import {
 	resolveCompactionGeometry,
 	shouldDeferGraceBand,
 } from "../../src/core/extensions/builtin/compaction/orchestration.ts";
-import { TOOL_ADMISSION_MARKER_PREFIX } from "../../src/core/extensions/builtin/compaction/tool-admission.ts";
+import {
+	resolveToolResultAdmissionCapTokens,
+	TOOL_ADMISSION_MARKER_PREFIX,
+} from "../../src/core/extensions/builtin/compaction/tool-admission.ts";
+
+function estimateTextTokens(text: string): number {
+	return estimateTokens({ role: "user", content: text, timestamp: 0 });
+}
 
 describe("ideal compaction extension wiring decisions", () => {
 	it("defers an in-flight compaction inside the grace band", () => {
@@ -88,6 +96,72 @@ describe("ideal compaction extension wiring decisions", () => {
 
 		expect(result.admitted).toBe(true);
 		expect(result.text).not.toBe(marked);
+	});
+
+	it("bounds all multipart text blocks by one shared admission cap", () => {
+		const contextWindow = 200_000;
+		const cap = resolveToolResultAdmissionCapTokens(contextWindow);
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "multipart-result",
+				toolName: "read",
+				content: [
+					{ type: "text" as const, text: `first\n${"a".repeat(cap * 8)}\nend` },
+					{ type: "text" as const, text: `second\n${"b".repeat(cap * 8)}\nend` },
+				],
+				isError: false,
+				timestamp: 1,
+			},
+		];
+
+		const [result] = admitContextToolResults(messages, contextWindow, true);
+
+		if (result?.role !== "toolResult" || typeof result.content === "string") {
+			throw new Error("Expected multipart tool result");
+		}
+		const retainedTokens = result.content
+			.filter((part): part is { type: "text"; text: string } => part.type === "text")
+			.reduce((total, part) => total + estimateTextTokens(part.text), 0);
+		expect(retainedTokens).toBeLessThanOrEqual(cap);
+	});
+
+	it("does not re-project an already-admitted multipart result", () => {
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "idempotent-result",
+				toolName: "read",
+				content: [
+					{ type: "text" as const, text: `first\n${"a".repeat(100_000)}\nend` },
+					{ type: "text" as const, text: `second\n${"b".repeat(100_000)}\nend` },
+				],
+				isError: false,
+				timestamp: 1,
+			},
+		];
+
+		const admitted = admitContextToolResults(messages, 200_000, true);
+		expect(admitContextToolResults(admitted, 200_000, true)).toEqual(admitted);
+	});
+
+	it("leaves an under-cap multipart result unchanged", () => {
+		const messages = [
+			{
+				role: "toolResult" as const,
+				toolCallId: "small-multipart-result",
+				toolName: "read",
+				content: [
+					{ type: "text" as const, text: "first" },
+					{ type: "image" as const, mimeType: "image/png", data: "IMAGE" },
+					{ type: "text" as const, text: "second" },
+				],
+				isError: false,
+				timestamp: 1,
+			},
+		];
+
+		expect(admitContextToolResults(messages, 200_000, true)).toEqual(messages);
 	});
 
 	it("preserves mixed tool-result blocks in order while projecting only oversized text", () => {

@@ -1,10 +1,10 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { copyContextProvenance } from "@earendil-works/pi-ai";
-import type { CompactionPreparation } from "../../../compaction/index.ts";
+import { type CompactionPreparation, estimateTokens } from "../../../compaction/index.ts";
 import { type IdleCompactionDecision, shouldWarmAtIdle } from "./idle.ts";
 import * as policy from "./policy.ts";
 import { isWarmResultStale, isWithinGraceBand, resolveSpeculationLeadTokens } from "./speculation-lead.ts";
-import { admitToolResult } from "./tool-admission.ts";
+import { admitToolResult, admitToolResultWithinBudget, resolveToolResultAdmissionCapTokens } from "./tool-admission.ts";
 
 export interface CompactionGeometry {
 	reserveTokens: number;
@@ -87,11 +87,29 @@ export function admitContextToolResults(
 			return admitted.admitted ? { ...message, content: [{ type: "text", text: admitted.text }] } : message;
 		}
 
+		const textTokens = message.content.map((part) =>
+			part.type === "text" ? estimateTokens({ role: "user", content: part.text, timestamp: 0 }) : 0,
+		);
+		const totalTextTokens = textTokens.reduce((total, tokens) => total + tokens, 0);
+		const capTokens = resolveToolResultAdmissionCapTokens(contextWindow);
+		if (totalTextTokens <= capTokens) return message;
+
+		const preservedTokens = textTokens.reduce((total, tokens) => total + (tokens <= capTokens ? tokens : 0), 0);
+		const preserveUnderCap = preservedTokens <= capTokens;
+		let remainingBudget = preserveUnderCap ? capTokens - preservedTokens : capTokens;
+		let remainingOversizedTokens = preserveUnderCap
+			? textTokens.reduce((total, tokens) => total + (tokens > capTokens ? tokens : 0), 0)
+			: totalTextTokens;
 		let projected = false;
-		const content = message.content.map((part) => {
+		const content = message.content.map((part, index) => {
 			if (part.type !== "text") return part;
-			const admitted = admitContextToolResult(part.text, contextWindow);
-			if (!admitted.admitted) return part;
+			const partTokens = textTokens[index] ?? 0;
+			if (preserveUnderCap && partTokens <= capTokens) return part;
+			const budget = Math.floor((remainingBudget * partTokens) / Math.max(1, remainingOversizedTokens));
+			const admitted = admitToolResultWithinBudget(part.text, budget);
+			remainingOversizedTokens -= partTokens;
+			remainingBudget -= estimateTokens({ role: "user", content: admitted.text, timestamp: 0 });
+			if (!admitted.projected) return part;
 			projected = true;
 			return { ...part, text: admitted.text };
 		});
