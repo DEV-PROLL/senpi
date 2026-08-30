@@ -69,6 +69,8 @@ export interface SessionEventWriterConnection {
 	readonly waitForBackpressure: BackpressureWaiter;
 }
 
+export const RENDERED_COMPONENT_RECORD = "__senpiRenderedComponent";
+
 export class SessionEventWriter {
 	private readonly queues = new Map<string, RecordQueue>();
 	private readonly connections = new Map<
@@ -77,6 +79,7 @@ export class SessionEventWriter {
 	>();
 	private readonly sessionSnapshots = new Map<string, string[]>();
 	private readonly connectionContext = new AsyncLocalStorage<string>();
+	private readonly connectionCapabilities = new Map<string, Set<string>>();
 	private readonly controlQueue: RecordQueue = { latestByKey: new Map(), ready: false };
 	private readonly readyQueues: RecordQueue[] = [];
 	private readonly sealedSessions = new Set<string>();
@@ -124,9 +127,13 @@ export class SessionEventWriter {
 
 	registerConnection(id: string, connection: SessionEventWriterConnection): void {
 		const actor = new SocketEventSinkActor(connection, () => {
-			if (this.connections.get(id)?.actor === actor) this.connections.delete(id);
+			if (this.connections.get(id)?.actor === actor) {
+				this.connections.delete(id);
+				this.connectionCapabilities.delete(id);
+			}
 		});
 		this.connections.set(id, { connection, actor });
+		this.connectionCapabilities.set(id, new Set());
 		for (const snapshot of this.sessionSnapshots.values()) for (const line of snapshot) actor.enqueue(line);
 	}
 
@@ -135,6 +142,15 @@ export class SessionEventWriter {
 		if (!registered) return;
 		registered.actor.close();
 		this.connections.delete(id);
+		this.connectionCapabilities.delete(id);
+	}
+
+	setConnectionCapabilities(id: string, capabilities: readonly string[]): void {
+		if (this.connections.has(id)) this.connectionCapabilities.set(id, new Set(capabilities));
+	}
+
+	clearConnectionCapabilities(id: string): void {
+		if (this.connections.has(id)) this.connectionCapabilities.set(id, new Set());
 	}
 
 	/** Execute a connection's command with its response destination in context. */
@@ -158,15 +174,24 @@ export class SessionEventWriter {
 			(record.type === "extension_ui_request" &&
 				["select", "confirm", "input", "editor"].includes(String(record.method)));
 		const tagged = { ...value, sessionId } as RpcRecord;
-		const line = serializeJsonLine(tagged);
-		this.rememberSnapshot(sessionId, tagged, line);
-		const targets = isTargeted ? [targetId] : this.connections.size > 0 ? [...this.connections.keys()] : [undefined];
+		const { [RENDERED_COMPONENT_RECORD]: _rendered, ...wireTagged } = tagged;
+		const line = serializeJsonLine(wireTagged);
+		this.rememberSnapshot(sessionId, wireTagged, line);
+		const targets = isTargeted
+			? [targetId]
+			: record[RENDERED_COMPONENT_RECORD] && this.connections.size > 0
+				? [...this.connections.keys()].filter((id) =>
+						this.connectionCapabilities.get(id)?.has("rendered_components"),
+					)
+				: this.connections.size > 0
+					? [...this.connections.keys()]
+					: [undefined];
 		for (const target of targets) {
 			if (target !== undefined && !this.connections.has(target)) continue;
 			const registered = target === undefined ? undefined : this.connections.get(target);
 			if (registered)
 				registered.actor.enqueue(line, compactDelta(tagged) && tagged.message !== null ? MESSAGE_KEY : undefined);
-			else this.appendSessionRecord(sessionId, tagged, target);
+			else this.appendSessionRecord(sessionId, wireTagged, target);
 		}
 		this.requestFlush();
 		return true;

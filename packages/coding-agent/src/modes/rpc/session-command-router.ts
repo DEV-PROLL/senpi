@@ -41,6 +41,7 @@ export class SessionCommandRouter {
 	private readonly createBinding: typeof createRpcSessionBinding;
 	private readonly connectionOptions: Parameters<typeof createRpcSessionBinding>[4];
 	private readonly widths = new Map<string, Map<string, number>>();
+	private readonly pendingCapabilities = new Map<string, string[]>();
 
 	constructor(
 		registry: RpcSessionRegistry,
@@ -82,6 +83,14 @@ export class SessionCommandRouter {
 			};
 		if (command.type === "open_session") return this.openWithBarrier(command);
 		if (command.type === "close_session") return this.close(command);
+		if (command.type === "set_client_info" && !command.sessionId) {
+			const connection = this.writer.currentConnection();
+			if (connection !== undefined) {
+				this.pendingCapabilities.set(connection, command.capabilities ?? []);
+				this.writer.setConnectionCapabilities(connection, command.capabilities ?? []);
+			}
+			return { id: command.id, type: "response", command: "set_client_info", success: true } as RpcResponse;
+		}
 		if (controls.has(command.type)) return undefined;
 		if (!command.sessionId) return error(command.id, command.type, RPC_ERROR_MISSING_SESSION_ID);
 		try {
@@ -171,10 +180,14 @@ export class SessionCommandRouter {
 						() => void this.close({ type: "close_session", sessionId: openedSession.sessionId }),
 						{
 							...this.connectionOptions,
+							capabilities:
+								owner !== undefined
+									? (this.pendingCapabilities.get(owner) ?? [])
+									: this.connectionOptions?.capabilities,
 							sharedWidth: {
 								getWidth: () => {
 									const widths = this.widths.get(openedSession.sessionId);
-									return widths && widths.size ? Math.min(...widths.values()) : 80;
+									return widths?.size ? Math.min(...widths.values()) : 80;
 								},
 								setWidth: (connectionId, width) => {
 									if (connectionId !== undefined) {
@@ -186,6 +199,10 @@ export class SessionCommandRouter {
 								clearWidth: (connectionId) => {
 									const widths = this.widths.get(openedSession.sessionId);
 									if (connectionId !== undefined) widths?.delete(connectionId);
+								},
+								setCapabilities: (connectionId, capabilities) => {
+									if (connectionId !== undefined)
+										this.writer.setConnectionCapabilities(connectionId, capabilities);
 								},
 
 								connectionId: () => this.writer.currentConnection(),
@@ -307,6 +324,11 @@ export class SessionCommandRouter {
 			// otherwise leaves a window where commands can enter the old handler.
 			const entry = this.registry.beginClose(command.sessionId);
 			const owner = this.writer.currentConnection();
+			if (owner !== undefined) {
+				this.widths.get(command.sessionId)?.delete(owner);
+				this.writer.clearConnectionCapabilities(owner);
+				for (const binding of this.bindings.values()) binding.rerenderComponents?.();
+			}
 			if (owner !== undefined) {
 				const owned = this.sessionsByConnection.get(owner);
 				const count = owned?.get(command.sessionId);

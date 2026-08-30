@@ -153,7 +153,7 @@ type RpcSessionCommand =
 	| { id?: string; type: "get_provider_accounts"; provider: string }
 	| { id?: string; type: "account_pin"; provider: string; name: string | null }
 	| { id?: string; type: "account_remove"; provider: string; name: string }
-	| { id?: string; type: "set_client_info"; width: number };
+	| { id?: string; type: "set_client_info"; width: number; capabilities?: string[] };
 
 /** Stable multi-session protocol error codes. */
 export const RPC_ERROR_UNKNOWN_SESSION = "unknown_session";

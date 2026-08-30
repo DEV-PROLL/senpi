@@ -294,6 +294,27 @@ describe("multi-session RPC event writer", () => {
 		expect(resolvedB).toBe(true);
 	});
 
+	it("delivers rendered component records only to registered capable connections", async () => {
+		const a: string[] = [];
+		const b: string[] = [];
+		const writer = new SessionEventWriter(() => {});
+		writer.registerConnection("a", { writeRaw: (chunk) => a.push(chunk), waitForBackpressure: async () => {} });
+		writer.registerConnection("b", { writeRaw: (chunk) => b.push(chunk), waitForBackpressure: async () => {} });
+		writer.setConnectionCapabilities("a", ["rendered_components"]);
+		writer.enqueue("session", {
+			type: "extension_ui_request",
+			method: "setWidget",
+			widgetLines: ["factory"],
+			__senpiRenderedComponent: true,
+		});
+		writer.enqueue("session", { type: "extension_ui_request", method: "setWidget", widgetLines: ["array"] });
+		await writer.flush();
+		expect(records(a).filter((record) => record.widgetLines)).toHaveLength(2);
+		expect(records(b).filter((record) => record.widgetLines)).toEqual([
+			{ type: "extension_ui_request", method: "setWidget", widgetLines: ["array"], sessionId: "session" },
+		]);
+	});
+
 	it("broadcasts unsolicited extension UI state while targeting dialog requests", async () => {
 		const chunks: string[] = [];
 		const scheduled: Array<() => void> = [];

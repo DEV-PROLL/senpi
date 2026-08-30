@@ -63,6 +63,14 @@ every open session, each tagged with its routing `sessionId`. Correlated respons
 only to the connection that issued the command. This lets a non-owner observe a foreign turn without requiring a
 separate subscription protocol.
 
+### Client information and rendered components
+
+Clients may send `set_client_info` with `{ sessionId, width, capabilities? }`. Advertising `rendered_components` registers
+that connection to receive factory-rendered `setWidget`, `setHeader`, and `setFooter` records. Those records are filtered
+per connection; array/undefined widget records and dialog requests retain their existing delivery semantics. Width is
+shared per session using the minimum of attached clients, and a closed or dropped connection no longer contributes its
+width or capability registration.
+
 ### Session auto-titling
 
 Auto-generated session titles are on by default only for interactive launches. RPC hosts opt in with

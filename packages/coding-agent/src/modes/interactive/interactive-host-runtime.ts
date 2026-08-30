@@ -137,6 +137,7 @@ export async function createInteractiveHostRuntime(
 	try {
 		await startHost({ socket: options.socket, agentDir: options.agentDir });
 		await client.start();
+		await client.setClientInfo(80, ["rendered_components"]);
 		const startupEvents: import("../rpc/rpc-client.ts").RpcClientEvent[] = [];
 		const stopBuffering = client.onEvent((event) => startupEvents.push(event));
 		const opened = await client.openSession({
@@ -156,7 +157,7 @@ export async function createInteractiveHostRuntime(
 				if (remoteRuntime?.isReconnecting) warnReconnect(cause);
 				else warnFallback(cause);
 			},
-			startupEvents,
+			startupEvents.filter((event) => !("sessionId" in event) || event.sessionId === opened.sessionId),
 		);
 		stopBuffering();
 		if (opened.state.isBashRunning && !opened.attached) {
@@ -287,10 +288,11 @@ export class RemoteInteractiveRuntime {
 	setHostUiHandler(callback?: InteractiveHostUiHandler): void {
 		this.#remoteSession.setHostUiHandler(callback);
 	}
+	#clientInfoSent = false;
 	setClientInfo(width: number): void {
-		void (this.#client as unknown as { send(command: { type: "set_client_info"; width: number }): Promise<unknown> })
-			.send({ type: "set_client_info", width })
-			.catch(() => {});
+		const capabilities = this.#clientInfoSent ? undefined : ["rendered_components"];
+		this.#clientInfoSent = true;
+		void this.#client.setClientInfo(width, capabilities).catch(() => {});
 	}
 	async dispose(): Promise<void> {
 		if (this.#state === "disposed") return;

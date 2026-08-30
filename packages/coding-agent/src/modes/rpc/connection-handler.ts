@@ -23,7 +23,6 @@ import { VERSION } from "../../config.ts";
 import type { AgentAbortSource } from "../../core/agent-abort-provenance.ts";
 import type { AgentSession, PromptDisposition } from "../../core/agent-session.ts";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
-import { FooterDataProvider } from "../../core/footer-data-provider.ts";
 import { buildLoginProviderInfos } from "../../core/auth-providers.ts";
 import {
 	getCredentialAccounts,
@@ -53,6 +52,7 @@ import type {
 	ExtensionWidgetOptions,
 	WorkingIndicatorOptions,
 } from "../../core/extensions/index.ts";
+import { FooterDataProvider } from "../../core/footer-data-provider.ts";
 import { getSupportedThinkingLevels } from "../../core/thinking-levels.ts";
 import { ProjectTrustStore } from "../../core/trust-manager.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
@@ -80,6 +80,7 @@ import type {
 	RpcSessionState,
 	RpcSkillInvocationEvent,
 } from "./rpc-types.ts";
+import { RENDERED_COMPONENT_RECORD } from "./session-event-writer.ts";
 import { SessionExtensionUiRequests } from "./session-extension-ui-requests.ts";
 import { createLiveComponentRenderer, type LiveComponentRenderer } from "./widget-line-renderer.ts";
 
@@ -93,10 +94,12 @@ export interface RpcConnectionOptions {
 	disposeRuntime?: boolean;
 	/** Multi-session routing handle. Absent preserves classic wire output exactly. */
 	sessionId?: string;
+	footerDataProviderFactory?: (session: AgentSession) => FooterDataProvider;
 	sharedWidth?: {
 		getWidth: () => number;
 		setWidth: (connectionId: string | undefined, width: number) => void;
 		clearWidth: (connectionId: string | undefined) => void;
+		setCapabilities?: (connectionId: string | undefined, capabilities: readonly string[]) => void;
 		connectionId: () => string | undefined;
 		onChange?: () => void;
 	};
@@ -263,18 +266,24 @@ export function createRpcConnectionHandler(
 	sink: RpcConnectionSink,
 	options: RpcConnectionOptions = {},
 ): RpcConnectionHandler {
-	const clientCapabilities = options.capabilities;
+	let clientCapabilities = options.capabilities;
 	const routingSessionId = options.sessionId;
 	const clientWidth = () => options.sharedWidth?.getWidth() ?? 80;
-	const hasRenderedComponents = clientCapabilities?.includes(RENDERED_COMPONENTS_CAPABILITY) ?? false;
+	const hasRenderedComponents = () =>
+		options.sharedWidth !== undefined || (clientCapabilities?.includes(RENDERED_COMPONENTS_CAPABILITY) ?? false);
 	const liveRenderers = new Map<string, LiveComponentRenderer>();
+	const footerProviders = new Map<string, FooterDataProvider>();
 	const disposeRenderer = (key: string) => {
 		liveRenderers.get(key)?.dispose();
 		liveRenderers.delete(key);
+		footerProviders.get(key)?.dispose();
+		footerProviders.delete(key);
 	};
 	const disposeAllRenderers = () => {
 		for (const renderer of liveRenderers.values()) renderer.dispose();
+		for (const provider of footerProviders.values()) provider.dispose();
 		liveRenderers.clear();
+		footerProviders.clear();
 	};
 	// True only while THIS connection's own command drives a replacement; the issuer
 	// already learns the new identity from its command response.
@@ -522,7 +531,7 @@ export function createRpcConnectionHandler(
 				} as RpcExtensionUIRequest);
 				return;
 			}
-			if (!hasRenderedComponents) return;
+			if (!hasRenderedComponents()) return;
 			const renderer = createLiveComponentRenderer({
 				factory: content as (
 					tui: import("@earendil-works/pi-tui").TUI,
@@ -537,6 +546,7 @@ export function createRpcConnectionHandler(
 						widgetKey: key,
 						widgetLines,
 						widgetPlacement: options?.placement,
+						[RENDERED_COMPONENT_RECORD]: true,
 					} as RpcExtensionUIRequest),
 			});
 			if (renderer) liveRenderers.set(key, renderer);
@@ -544,7 +554,7 @@ export function createRpcConnectionHandler(
 
 		setFooter(factory: unknown): void {
 			disposeRenderer("__footer__");
-			if (!hasRenderedComponents) return;
+			if (!hasRenderedComponents()) return;
 			if (factory === undefined) {
 				output({
 					type: "extension_ui_request",
@@ -554,9 +564,10 @@ export function createRpcConnectionHandler(
 				} as RpcExtensionUIRequest);
 				return;
 			}
+			const provider = options.footerDataProviderFactory?.(session) ?? createFooterDataProvider(session);
 			const renderer = createLiveComponentRenderer({
 				factory: factory as never,
-				factoryArgs: [createFooterDataProvider(session)],
+				factoryArgs: [provider],
 				getWidth: clientWidth,
 				emit: (widgetLines) =>
 					output({
@@ -564,14 +575,18 @@ export function createRpcConnectionHandler(
 						id: crypto.randomUUID(),
 						method: "setFooter",
 						widgetLines,
+						[RENDERED_COMPONENT_RECORD]: true,
 					} as RpcExtensionUIRequest),
 			});
-			if (renderer) liveRenderers.set("__footer__", renderer);
+			if (renderer) {
+				liveRenderers.set("__footer__", renderer);
+				footerProviders.set("__footer__", provider);
+			} else provider.dispose();
 		},
 
 		setHeader(factory: unknown): void {
 			disposeRenderer("__header__");
-			if (!hasRenderedComponents) return;
+			if (!hasRenderedComponents()) return;
 			if (factory === undefined) {
 				output({
 					type: "extension_ui_request",
@@ -590,6 +605,7 @@ export function createRpcConnectionHandler(
 						id: crypto.randomUUID(),
 						method: "setHeader",
 						widgetLines,
+						[RENDERED_COMPONENT_RECORD]: true,
 					} as RpcExtensionUIRequest),
 			});
 			if (renderer) liveRenderers.set("__header__", renderer);
@@ -1098,6 +1114,10 @@ export function createRpcConnectionHandler(
 			// =================================================================
 
 			case "set_client_info":
+				if (options.sharedWidth && command.capabilities !== undefined) {
+					clientCapabilities = command.capabilities;
+					options.sharedWidth.setCapabilities?.(options.sharedWidth.connectionId(), command.capabilities);
+				}
 				if (Number.isFinite(command.width) && command.width > 0) {
 					if (options.sharedWidth) {
 						options.sharedWidth.setWidth(options.sharedWidth.connectionId(), command.width);
