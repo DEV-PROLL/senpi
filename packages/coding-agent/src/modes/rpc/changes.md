@@ -1,5 +1,25 @@
 # changes
 
+## 2026-08-30 - Expose session_replaced on the public client event union
+
+### What changed
+
+- `rpc-client.ts`: `RpcSessionReplacedEvent` joins the public `RpcClientEvent` union, so a typed client can discriminate `event.type === "session_replaced"` and read `durableSessionId` without casting. The runtime already forwarded the event through the unchecked `data as RpcClientEvent` cast in `handleFrame`, so it reached listeners untyped.
+- `rpc-client.ts`: `collectEvents()` excludes it alongside the other non-session events it already filtered. It returns `JsonAgentSessionEvent[]`, and a replacement notice is connection-level rather than part of the agent's event stream.
+
+### Why
+
+- The command response for a replacement carries only `{ cancelled }`, and a replacement can be driven by another attached client or by an extension, so this event is the only channel delivering the new identity. A client that cannot narrow to it cannot resync.
+
+### Why an extension could not handle it
+
+- The client event union is protocol surface beneath every extension hook.
+
+### Expected merge conflict zones
+
+- LOW: the `RpcClientEvent` union members and the `collectEvents()` filter.
+
+
 ## 2026-08-30 - Require agentDir for the RPC project-trust gate
 
 ## 2026-08-30 - Carry the replacement identity as durableSessionId
