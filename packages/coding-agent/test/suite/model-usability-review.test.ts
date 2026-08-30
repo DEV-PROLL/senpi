@@ -75,13 +75,13 @@ describe("model usability review regressions", () => {
 			extensionFactories: [
 				(pi) => {
 					pi.on("model_select", (event) =>
-						event.model.id === "target" ? { systemPrompt: "target prompt ".repeat(16_000) } : undefined,
+						event.model.id === "target" ? { systemPrompt: "target prompt ".repeat(10_000) } : undefined,
 					);
 				},
 			],
 		});
 		harnesses.push(harness);
-		seed(harness, 50_000);
+		seed(harness, 20_000);
 		const current = harness.getModel("current");
 		const target = harness.getModel("target");
 		if (!current || !target) throw new Error("missing favorite-cycle model fixture");
