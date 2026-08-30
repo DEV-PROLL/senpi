@@ -102,37 +102,37 @@ export async function createInteractiveHostRuntime(
 		if (!remoteSession || reconnecting || disposed || remoteRuntime?.isFallback) return;
 		remoteRuntime?.enterReconnecting();
 		reconnecting = (async () => {
-				let cause: unknown;
-				for (let attempt = 0; attempt < 3; attempt++) {
+			let cause: unknown;
+			for (let attempt = 0; attempt < 3; attempt++) {
+				if (disposed) return;
+				disconnectQueued = false;
+				try {
+					await startHost({ socket: options.socket, agentDir: options.agentDir });
 					if (disposed) return;
-					disconnectQueued = false;
-					try {
-						await startHost({ socket: options.socket, agentDir: options.agentDir });
-						if (disposed) return;
-						await client.start();
-						if (disposed) return;
-						await client.openSession({ sessionPath, cwd: localRuntime.cwd });
-						if (disposed) return;
-						await remoteSession.refresh();
-						if (disposed) return;
-						fallbackWarned = false;
-						reconnectWarningShown = false;
-						remoteRuntime?.enterConnected();
-						return;
-					} catch (error) {
-						cause = error;
-						await client.stop().catch(() => {});
-						if (disposed) return;
-					}
+					await client.start();
+					if (disposed) return;
+					await client.openSession({ sessionPath, cwd: localRuntime.cwd });
+					if (disposed) return;
+					await remoteSession.refresh();
+					if (disposed) return;
+					fallbackWarned = false;
+					reconnectWarningShown = false;
+					remoteRuntime?.enterConnected();
+					return;
+				} catch (error) {
+					cause = error;
+					await client.stop().catch(() => {});
+					if (disposed) return;
 				}
-				if (!disposed) {
-					remoteRuntime?.enterFallback();
-					warnFallback(cause);
-				}
-	})().finally(() => {
-		reconnecting = undefined;
+			}
+			if (!disposed) {
+				await remoteRuntime?.enterFallback();
+				warnFallback(cause);
+			}
+		})().finally(() => {
+			reconnecting = undefined;
 			if (disconnectQueued && !disposed && !remoteRuntime?.isFallback) scheduleReconnect();
-	});
+		});
 	};
 	try {
 		await startHost({ socket: options.socket, agentDir: options.agentDir });
@@ -316,26 +316,26 @@ export class RemoteInteractiveRuntime {
 		// newSession transports setup entries between two refreshes.
 		return this.#remoteSession
 			.aroundLocalReplacement(async () => {
-			const result = await this.#call(() => this.#client.newSession(options?.parentSession));
-			if (!result.cancelled) {
-				this.#beforeSessionInvalidate?.();
-				this.#remoteSession.abortLocalBash();
-				await this.#remoteSession.refresh();
-				if (options?.setup) {
-					const capture = SessionManager.inMemory(this.#remoteSession.session.sessionManager.getCwd());
-					await options.setup(capture);
-					for (const entry of capture.getEntries()) await this.#client.appendSessionEntry(entry);
+				const result = await this.#call(() => this.#client.newSession(options?.parentSession));
+				if (!result.cancelled) {
+					this.#beforeSessionInvalidate?.();
+					this.#remoteSession.abortLocalBash();
 					await this.#remoteSession.refresh();
+					if (options?.setup) {
+						const capture = SessionManager.inMemory(this.#remoteSession.session.sessionManager.getCwd());
+						await options.setup(capture);
+						for (const entry of capture.getEntries()) await this.#client.appendSessionEntry(entry);
+						await this.#remoteSession.refresh();
+					}
+					await this.#rebindSession?.();
+					if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 				}
-				await this.#rebindSession?.();
-				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
-			}
-			return result;
+				return result;
 			})
 			.catch((error) => {
-			if (isTransportGoneError(error)) return { cancelled: true };
-			throw error;
-		});
+				if (isTransportGoneError(error)) return { cancelled: true };
+				throw error;
+			});
 	}
 	async switchSession(
 		sessionPath: string,
@@ -352,26 +352,26 @@ export class RemoteInteractiveRuntime {
 			.aroundLocalReplacement(async () => {
 				const result = await this.#call(() =>
 					this.#client.switchSession(
-				sessionPath,
-				options?.cwdOverride === undefined ? undefined : { cwdOverride: options.cwdOverride },
+						sessionPath,
+						options?.cwdOverride === undefined ? undefined : { cwdOverride: options.cwdOverride },
 					),
 				);
-			if (!result.cancelled) {
-				this.#beforeSessionInvalidate?.();
-				this.#remoteSession.abortLocalBash();
-				await this.#remoteSession.refresh();
-				await this.#rebindSession?.();
-				// The shared host already resolved trust; this callback is retained for
-				// compatibility, but its result cannot override host-authoritative state.
-				options?.projectTrustContextFactory?.(this.#remoteSession.session.sessionManager.getCwd());
-				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
-			}
-			return result;
+				if (!result.cancelled) {
+					this.#beforeSessionInvalidate?.();
+					this.#remoteSession.abortLocalBash();
+					await this.#remoteSession.refresh();
+					await this.#rebindSession?.();
+					// The shared host already resolved trust; this callback is retained for
+					// compatibility, but its result cannot override host-authoritative state.
+					options?.projectTrustContextFactory?.(this.#remoteSession.session.sessionManager.getCwd());
+					if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
+				}
+				return result;
 			})
 			.catch((error) => {
-			if (isTransportGoneError(error)) return { cancelled: true };
-			throw error;
-		});
+				if (isTransportGoneError(error)) return { cancelled: true };
+				throw error;
+			});
 	}
 	async fork(
 		entryId: string,
@@ -381,37 +381,37 @@ export class RemoteInteractiveRuntime {
 		// See newSession: the suppression must cover the command itself.
 		return this.#remoteSession
 			.aroundLocalReplacement(async () => {
-			const result = await this.#call(() => this.#client.fork(entryId, options));
-			if (!result.cancelled) {
-				this.#beforeSessionInvalidate?.();
-				this.#remoteSession.abortLocalBash();
-				await this.#refreshAndRebind();
-				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
-			}
-			return { cancelled: result.cancelled, selectedText: result.text };
+				const result = await this.#call(() => this.#client.fork(entryId, options));
+				if (!result.cancelled) {
+					this.#beforeSessionInvalidate?.();
+					this.#remoteSession.abortLocalBash();
+					await this.#refreshAndRebind();
+					if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
+				}
+				return { cancelled: result.cancelled, selectedText: result.text };
 			})
 			.catch((error) => {
-			if (isTransportGoneError(error)) return { cancelled: true };
-			throw error;
-		});
+				if (isTransportGoneError(error)) return { cancelled: true };
+				throw error;
+			});
 	}
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
 		if (this.#state === "fallback") return this.#local.importFromJsonl(inputPath, cwdOverride);
 		// See newSession: the suppression must cover the command itself.
 		return this.#remoteSession
 			.aroundLocalReplacement(async () => {
-			const result = await this.#call(() => this.#client.importJsonl(inputPath, cwdOverride));
-			if (!result.cancelled) {
-				this.#beforeSessionInvalidate?.();
-				this.#remoteSession.abortLocalBash();
-				await this.#refreshAndRebind();
-			}
-			return result;
+				const result = await this.#call(() => this.#client.importJsonl(inputPath, cwdOverride));
+				if (!result.cancelled) {
+					this.#beforeSessionInvalidate?.();
+					this.#remoteSession.abortLocalBash();
+					await this.#refreshAndRebind();
+				}
+				return result;
 			})
 			.catch((error) => {
-			if (isTransportGoneError(error)) return { cancelled: true };
-			throw error;
-		});
+				if (isTransportGoneError(error)) return { cancelled: true };
+				throw error;
+			});
 	}
 
 	async #refreshAndRebind(): Promise<void> {
@@ -935,9 +935,9 @@ export function createRemoteSessionProxy(
 							"bash",
 							() =>
 								client.bash(command, {
-							excludeFromContext: options?.excludeFromContext,
-							executionId,
-							operations: options?.operations as Record<string, unknown> | undefined,
+									excludeFromContext: options?.excludeFromContext,
+									executionId,
+									operations: options?.operations as Record<string, unknown> | undefined,
 								}),
 							{ output: "", exitCode: undefined, cancelled: true, truncated: false },
 						);
@@ -1021,9 +1021,10 @@ export function createRemoteSessionProxy(
 			if (property === "retryAttempt") return state.retryAttempt;
 			if (property === "isBashRunning") return state.isBashRunning;
 			if (property === "reload")
-				return (_options?: Parameters<AgentSession["reload"]>[0]) => transportCall("reload", () => client.reload());
+				return (_options?: Parameters<AgentSession["reload"]>[0]) =>
+					transportCall("reload", () => client.reload(), { cancelled: true });
 			if (property === "checkReloadVeto")
-				return () => transportCall("checkReloadVeto", () => client.checkReloadVeto());
+				return () => transportCall("checkReloadVeto", () => client.checkReloadVeto(), { cancelled: true });
 			if (property === "exportToJsonl")
 				return (outputPath?: string) =>
 					transportCall("exportToJsonl", () => client.exportJsonl(outputPath)).then((result) => result?.path);
@@ -1084,16 +1085,16 @@ export function createRemoteSessionProxy(
 			context.sendMessage = (message, options) =>
 				transportCall("sendMessage", () =>
 					client.sendCustomMessage(message, {
-					triggerTurn: options?.triggerTurn,
-					deliverAs: options?.deliverAs,
+						triggerTurn: options?.triggerTurn,
+						deliverAs: options?.deliverAs,
 					}),
 				);
 			context.sendUserMessage = (content, options) => {
 				if (typeof content === "string")
 					return transportCall("sendUserMessage", () =>
 						client.prompt(content, {
-						streamingBehavior: options?.deliverAs,
-						expandPromptTemplates: options?.expandPromptTemplates,
+							streamingBehavior: options?.deliverAs,
+							expandPromptTemplates: options?.expandPromptTemplates,
 						}),
 					);
 				const text = content
@@ -1103,9 +1104,9 @@ export function createRemoteSessionProxy(
 				const images = content.filter((part) => part.type === "image");
 				return transportCall("sendUserMessage", () =>
 					client.prompt(text, {
-					images,
-					streamingBehavior: options?.deliverAs,
-					expandPromptTemplates: options?.expandPromptTemplates,
+						images,
+						streamingBehavior: options?.deliverAs,
+						expandPromptTemplates: options?.expandPromptTemplates,
 					}),
 				);
 			};

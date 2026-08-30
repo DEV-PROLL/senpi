@@ -258,6 +258,31 @@ describe("interactive host reconnect orchestration", () => {
 	);
 
 	it(
+		"cancels reload and veto transport calls without secondary errors",
+		async () => {
+			const qa = scratch("reload-cancel");
+			const local = await createLocalRuntime(qa);
+			const host = new FakeHost(qa.socket, local.session.sessionFile!, qa.cwd);
+			await host.listen();
+			const runtime = await createInteractiveHostRuntime(local, {
+				socket: qa.socket,
+				ensureHost: async () => undefined,
+			});
+			try {
+				await host.firstConnection.promise;
+				const veto = runtime.session.checkReloadVeto();
+				const reload = runtime.session.reload();
+				host.connections[0]!.destroy();
+				await expect(veto).resolves.toEqual({ cancelled: true });
+				await expect(reload).resolves.toEqual({ cancelled: true });
+			} finally {
+				await runtime.dispose();
+			}
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
 		"sanitizes later proxy failures and deduplicates the fallback warning",
 		async () => {
 			const qa = scratch("sanitized");
@@ -365,6 +390,8 @@ describe("interactive host reconnect orchestration", () => {
 			await host.listen();
 			const handoffStarted = deferred<void>();
 			const releaseRebind = deferred<void>();
+			let handoffFinished = false;
+			const fallbackWarning = deferred<void>();
 			const localDispose = vi.spyOn(local, "dispose");
 			let runtime!: AgentSessionRuntime;
 			let ensureHostCalls = 0;
@@ -375,12 +402,18 @@ describe("interactive host reconnect orchestration", () => {
 					if (ensureHostCalls > 1) throw new Error("reconnect unavailable");
 					return undefined;
 				},
-				onWarning: () => {},
+				onWarning: (warning) => {
+					if (warning.message === INTERACTIVE_HOST_FALLBACK_WARNING) {
+						expect(handoffFinished).toBe(true);
+						fallbackWarning.resolve();
+					}
+				},
 			});
 			(runtime as unknown as { setRebindSession(callback: () => Promise<void>): void }).setRebindSession(
 				async () => {
 					handoffStarted.resolve();
 					await releaseRebind.promise;
+					handoffFinished = true;
 				},
 			);
 			try {
@@ -391,6 +424,7 @@ describe("interactive host reconnect orchestration", () => {
 				await Promise.resolve();
 				expect(localDispose).not.toHaveBeenCalled();
 				releaseRebind.resolve();
+				await fallbackWarning.promise;
 				await disposing;
 				expect(localDispose).toHaveBeenCalled();
 			} finally {

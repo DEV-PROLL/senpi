@@ -3025,3 +3025,8 @@ The tip line was teaching a small slice of the product while most of the surface
 
 - Treats transport loss in value-returning interactive host operations as user cancellation with inert results, so reconnect/fallback warnings are not repeated as action errors.
 - Makes reconnect exhaustion terminal after three attempts and awaits the local fallback session rebind before disposal.
+
+## Interactive RPC reconnect cancellation ordering (2026-08-30)
+
+- Preserves structured cancellation results for reload and reload-veto checks when the shared transport disconnects.
+- Keeps fallback warning emission behind the completed local rebind handoff.
