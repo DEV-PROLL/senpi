@@ -2,6 +2,24 @@
 
 ## 2026-08-30 - Durable entry notifications are rpc-scoped
 
+## 2026-08-30 - Wire ideal compaction execution through AgentSession
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts` routes compaction through the ideal compaction execution pipeline while preserving the existing session lifecycle and transcript accounting contracts.
+
+### Why
+
+- The feature's compaction policy and execution layers need the session-owned model, settings, and transcript state at the integration boundary.
+
+### Why an extension could not handle it
+
+- Compaction dispatch is owned by `AgentSession`, before extension-level behavior can replace the session lifecycle integration.
+
+### Expected merge conflict zones
+
+- LOW: compaction dispatch in `agent-session.ts`.
+
 ## 2026-08-30 - Do not cancel client work from a binding-time tool change
 
 ### What changed
@@ -181,6 +199,32 @@
 ### Expected merge conflict zones
 
 - `agent-session.ts`: active-tool selection, tool registry refresh, reload, and system-prompt assembly.
+
+## Compaction settings resolution moved out of the settings manager (2026-08-29)
+
+### What changed
+
+- `settings-manager.ts` delegates compaction knob resolution to `compaction-settings-resolver.ts`
+  instead of resolving every field inline. The manager keeps its public accessor shape; the resolver
+  owns the defaults for the ideal-pipeline knobs (grace band, tool admission, reminder, reserve
+  scaling, speculative lead).
+
+### Why
+
+- `settings-manager.ts` was already well past the module size ceiling. This branch adds compaction
+  knobs, and the project rule forbids growing an already-oversized file, so the added resolution
+  became its own module.
+
+### Why an extension could not handle it
+
+- These defaults are read by core admission before any extension runs, so they cannot be supplied
+  from extension space.
+
+### Expected merge conflict zones
+
+- Upstream changes to `getCompactionSettings` now touch `compaction-settings-resolver.ts` as well as
+  `settings-manager.ts`.
+
 ## 2026-08-29 - Withheld tools are filtered at the advertisement seam
 
 ### What changed
