@@ -18,6 +18,7 @@ import {
 } from "../rpc/rpc-client.ts";
 
 export const INTERACTIVE_HOST_FALLBACK_WARNING = "Warning: shared interactive host unavailable; continuing locally";
+export const INTERACTIVE_HOST_RECONNECTING_WARNING = "Warning: shared interactive host connection lost; reconnecting";
 
 export interface InteractiveHostWarning {
 	readonly type: "interactive_host_fallback" | "interactive_host_action_failed";
@@ -79,6 +80,12 @@ export async function createInteractiveHostRuntime(
 	let disconnectQueued = false;
 	let disposed = false;
 	let fallbackWarned = false;
+	let reconnectWarningShown = false;
+	const warnReconnect = (cause: unknown) => {
+		if (reconnectWarningShown) return;
+		reconnectWarningShown = true;
+		options.onWarning?.({ type: "interactive_host_action_failed", message: INTERACTIVE_HOST_RECONNECTING_WARNING, cause });
+	};
 	const warnFallback = (cause: unknown) => {
 		if (fallbackWarned) return;
 		fallbackWarned = true;
@@ -110,6 +117,7 @@ export async function createInteractiveHostRuntime(
 						await remoteSession.refresh();
 						if (disposed) return;
 						fallbackWarned = false;
+						reconnectWarningShown = false;
 						remoteRuntime?.enterConnected();
 						return;
 					} catch (error) {
@@ -143,7 +151,10 @@ export async function createInteractiveHostRuntime(
 			client,
 			opened.state,
 			options.onWarning,
-			warnFallback,
+			(cause) => {
+				if (remoteRuntime?.isReconnecting) warnReconnect(cause);
+				else warnFallback(cause);
+			},
 		);
 		if (opened.state.isBashRunning && !opened.attached) {
 			// Only a newly opened session can have an execution orphaned by a
@@ -153,7 +164,10 @@ export async function createInteractiveHostRuntime(
 		}
 		if (opened.attached) await remoteSession.refresh();
 		remoteRuntime = new RemoteInteractiveRuntime(localRuntime, remoteSession, client, {
-			onTransportGone: warnFallback,
+			onTransportGone: (cause) => {
+				if (remoteRuntime?.isReconnecting) warnReconnect(cause);
+				else warnFallback(cause);
+			},
 			get reconnecting() {
 				return reconnecting;
 			},
@@ -178,6 +192,9 @@ export class RemoteInteractiveRuntime {
 	#rebindSession: (() => Promise<void>) | undefined;
 	#beforeSessionInvalidate: (() => void) | undefined;
 	#state: "connected" | "reconnecting" | "fallback" | "disposed" = "connected";
+	get isReconnecting(): boolean {
+		return this.#state === "reconnecting";
+	}
 
 	constructor(
 		local: AgentSessionRuntime,
@@ -215,7 +232,10 @@ export class RemoteInteractiveRuntime {
 	}
 
 	enterFallback(): void {
-		if (this.#state !== "disposed") this.#state = "fallback";
+		if (this.#state === "disposed" || this.#state === "fallback") return;
+		this.#state = "fallback";
+		this.#beforeSessionInvalidate?.();
+		void this.#rebindSession?.();
 	}
 
 	get session(): AgentSession {
@@ -238,9 +258,11 @@ export class RemoteInteractiveRuntime {
 	}
 	setBeforeSessionInvalidate(callback?: () => void): void {
 		this.#beforeSessionInvalidate = callback;
+		this.#local.setBeforeSessionInvalidate(callback);
 	}
 	setRebindSession(callback?: () => Promise<void>): void {
 		this.#rebindSession = callback;
+		this.#local.setRebindSession(callback);
 	}
 	setHostUiHandler(callback?: InteractiveHostUiHandler): void {
 		this.#remoteSession.setHostUiHandler(callback);
@@ -291,6 +313,9 @@ export class RemoteInteractiveRuntime {
 				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 			}
 			return result;
+		}).catch((error) => {
+			if (isTransportGoneError(error)) return { cancelled: true };
+			throw error;
 		});
 	}
 	async switchSession(
@@ -320,6 +345,9 @@ export class RemoteInteractiveRuntime {
 				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 			}
 			return result;
+		}).catch((error) => {
+			if (isTransportGoneError(error)) return { cancelled: true };
+			throw error;
 		});
 	}
 	async fork(
@@ -337,6 +365,9 @@ export class RemoteInteractiveRuntime {
 				if (options?.withSession) await options.withSession(this.#remoteSession.createReplacedSessionContext());
 			}
 			return { cancelled: result.cancelled, selectedText: result.text };
+		}).catch((error) => {
+			if (isTransportGoneError(error)) return { cancelled: true };
+			throw error;
 		});
 	}
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
@@ -350,6 +381,9 @@ export class RemoteInteractiveRuntime {
 				await this.#refreshAndRebind();
 			}
 			return result;
+		}).catch((error) => {
+			if (isTransportGoneError(error)) return { cancelled: true };
+			throw error;
 		});
 	}
 
@@ -647,7 +681,7 @@ export function createRemoteSessionProxy(
 		// while this refresh is in flight are newer than the snapshot it reconciles
 		// against, and must survive the rebuild below.
 		const idsAtRefreshStart = new Set(sessionManager.getEntries().map((entry) => entry.id));
-		const nextState = await client.getState();
+		const nextState = await transportCall("refresh", () => client.getState());
 		state = { ...stateFromRpc(nextState) };
 		nextQueuedInputOrder = Math.max(0, ...nextState.ordered.map((item) => item.enqueueOrder));
 		let messages: AgentSession["messages"];
@@ -697,7 +731,7 @@ export function createRemoteSessionProxy(
 			}
 			messages = sessionManager.buildSessionContext().messages;
 		} else {
-			messages = await client.getMessages();
+			messages = await transportCall("refresh", () => client.getMessages());
 		}
 		local.agent.state.messages.splice(0, local.agent.state.messages.length, ...structuredClone(messages));
 		streamingAssistant = undefined;
@@ -841,7 +875,7 @@ export function createRemoteSessionProxy(
 								{ onChunk, signal: abortController.signal },
 							);
 							if (state.sessionId === sessionAtStart) {
-								await client.recordBashResult(command, result, options.excludeFromContext);
+								await transportCall("recordBashResult", () => client.recordBashResult(command, result, options.excludeFromContext));
 							}
 							return result;
 						} finally {
@@ -859,11 +893,11 @@ export function createRemoteSessionProxy(
 					};
 					bashExecutions.set(executionId, execution);
 					try {
-						const result = await client.bash(command, {
+						const result = await transportCall("bash", () => client.bash(command, {
 							excludeFromContext: options?.excludeFromContext,
 							executionId,
 							operations: options?.operations as Record<string, unknown> | undefined,
-						});
+						}));
 						const callbacksSettled = await waitForBashCallbacks(execution.promises, false);
 						if (!callbacksSettled) {
 							if (result.fullOutputPath) await cleanupRemoteBashOutput(result.fullOutputPath);

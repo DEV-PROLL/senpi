@@ -1,5 +1,21 @@
 # changes
 
+## 2026-08-30 - Harden shared-host reconnect fallback
+
+### What changed
+
+- Shared-host refresh and bash operations now classify transport loss through the common reconnect path, avoiding raw RPC errors in the TUI.
+- Local fallback preserves the runtime invalidate/rebind callback contract and rebinds session-bound UI when the transition occurs.
+- Reconnect action failures use a transient reconnecting warning; the continuing-locally warning is emitted only after fallback.
+
+### Why
+
+- The shared-host runtime must degrade at the transport boundary without exposing implementation errors or leaving InteractiveMode bound to a stale remote session.
+
+### Expected merge conflict zones
+
+- LOW: reconnect warning and replacement handling in `interactive-host-runtime.ts`.
+
 ## 2026-08-30 - Reconcile the shared-host mirror to the host entry list
 
 ### What changed

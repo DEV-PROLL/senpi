@@ -20,6 +20,7 @@ import { FooterComponent } from "../src/modes/interactive/components/footer.ts";
 import {
 	createInteractiveHostRuntime,
 	INTERACTIVE_HOST_FALLBACK_WARNING,
+	INTERACTIVE_HOST_RECONNECTING_WARNING,
 } from "../src/modes/interactive/interactive-host-runtime.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 import { RpcClient } from "../src/modes/rpc/rpc-client.ts";
@@ -839,7 +840,7 @@ describe("interactive host runtime", () => {
 		});
 		try {
 			expect(runtime).toBe(local);
-			expect(warnings).toEqual([`${INTERACTIVE_HOST_FALLBACK_WARNING}: host intentionally unavailable`]);
+			expect(warnings).toEqual([INTERACTIVE_HOST_FALLBACK_WARNING]);
 			await runtime.session.prompt("local-fallback-unique");
 			await runtime.session.waitForIdle();
 			expect(runtime.session.getLastAssistantText()).toBeTruthy();

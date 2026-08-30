@@ -14,6 +14,7 @@ import { SettingsManager } from "../src/core/settings-manager.ts";
 import {
 	createInteractiveHostRuntime,
 	INTERACTIVE_HOST_FALLBACK_WARNING,
+	INTERACTIVE_HOST_RECONNECTING_WARNING,
 } from "../src/modes/interactive/interactive-host-runtime.ts";
 import { attachJsonlLineReader } from "../src/modes/rpc/jsonl.ts";
 import type { RpcSessionState } from "../src/modes/rpc/rpc-types.ts";
@@ -218,9 +219,12 @@ describe("interactive host reconnect orchestration", () => {
 			await expect(action).rejects.toThrow();
 			await warning.promise;
 			await Promise.resolve();
-			expect(warnings).toHaveLength(1);
-			expect(warnings[0]?.message).toBe(INTERACTIVE_HOST_FALLBACK_WARNING);
-			expect(warnings[0]?.message).not.toContain("internal socket path");
+			expect(warnings).toHaveLength(2);
+			expect(warnings.map(({ message }) => message)).toEqual([
+			INTERACTIVE_HOST_RECONNECTING_WARNING,
+			INTERACTIVE_HOST_FALLBACK_WARNING,
+		]);
+			expect(warnings.every(({ message }) => !message.includes("internal socket path"))).toBe(true);
 		} finally {
 			await runtime.dispose();
 		}
