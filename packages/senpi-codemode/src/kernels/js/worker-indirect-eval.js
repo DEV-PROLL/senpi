@@ -705,55 +705,75 @@ function findLastTopLevelStatementStart(code) {
 	let round = 0;
 	let square = 0;
 	let curly = 0;
-	let quote = "";
-	let escaped = false;
-	let lineComment = false;
-	let blockComment = false;
+	let canStartRegex = true;
 	for (let index = 0; index < code.length; index += 1) {
 		const char = code[index];
 		const next = code[index + 1];
-		if (lineComment) {
-			if (char === "\n") lineComment = false;
-			continue;
-		}
-		if (blockComment) {
-			if (char === "*" && next === "/") {
-				blockComment = false;
-				index += 1;
-			}
-			continue;
-		}
-		if (quote) {
-			if (escaped) {
-				escaped = false;
-			} else if (char === "\\") {
-				escaped = true;
-			} else if (char === quote) {
-				quote = "";
-			}
-			continue;
-		}
 		if (char === "/" && next === "/") {
-			lineComment = true;
-			index += 1;
+			index = skipLineComment(code, index) - 1;
 			continue;
 		}
 		if (char === "/" && next === "*") {
-			blockComment = true;
-			index += 1;
+			index = skipBlockComment(code, index) - 1;
 			continue;
 		}
-		if (char === "'" || char === '"' || char === "`") {
-			quote = char;
+		if (char === "'" || char === '"') {
+			index = skipQuotedLiteral(code, index) - 1;
+			canStartRegex = false;
+			continue;
+		}
+		if (char === "`") {
+			index = skipTemplateLiteral(code, index) - 1;
+			canStartRegex = false;
+			continue;
+		}
+		if (char === "/" && canStartRegex) {
+			index = skipRegexLiteral(code, index) - 1;
+			canStartRegex = false;
+			continue;
+		}
+		if (isIdentifierStart(char)) {
+			const end = readIdentifier(code, index);
+			canStartRegex = REGEX_PREFIX_KEYWORDS.has(code.slice(index, end));
+			index = end - 1;
+			continue;
+		}
+		if (isDecimalDigit(char)) {
+			index = skipNumberLiteral(code, index) - 1;
+			canStartRegex = false;
 			continue;
 		}
 		if (char === "(") round += 1;
-		else if (char === ")") round -= 1;
+		else if (char === ")") round = Math.max(0, round - 1);
 		else if (char === "[") square += 1;
-		else if (char === "]") square -= 1;
+		else if (char === "]") square = Math.max(0, square - 1);
 		else if (char === "{") curly += 1;
-		else if (char === "}") curly -= 1;
-		else if ((char === ";" || char === "\n") && round === 0 && square === 0 && curly === 0) start = index + 1;
+		else if (char === "}") curly = Math.max(0, curly - 1);
+		else if (char === ";" && round === 0 && square === 0 && curly === 0) {
+			const nextIndex = nextSignificantIndex(code, index + 1);
+			if (nextIndex < code.length && !isContinuationKeyword(code, nextIndex)) start = nextIndex;
+			canStartRegex = true;
+			continue;
+		} else if (isLineTerminator(char) && round === 0 && square === 0 && curly === 0) {
+			const nextIndex = nextSignificantIndex(code, index + 1);
+			if (nextIndex < code.length && !isStatementContinuation(code, nextIndex)) start = nextIndex;
+			canStartRegex = true;
+			continue;
+		}
+		if (!/\s/u.test(char)) canStartRegex = isExpressionOperator(char) || char === "(" || char === "[" || char === "{" || char === ",";
 	}
 	return start;
+}
+
+const STATEMENT_CONTINUATION_KEYWORDS = new Set(["catch", "else", "finally"]);
+
+function isContinuationKeyword(code, index) {
+	if (!isIdentifierStart(code[index])) return false;
+	return STATEMENT_CONTINUATION_KEYWORDS.has(code.slice(index, readIdentifier(code, index)));
+}
+
+function isStatementContinuation(code, index) {
+	const char = code[index];
+	if (char !== undefined && isDeclarationContinuation(char)) return true;
+	return isContinuationKeyword(code, index);
 }

@@ -258,4 +258,54 @@ footer\`)`,
 			expect(parseJavaScriptResult(run.result)).toEqual([1, 2]);
 		});
 	});
+
+	it("runs cells whose final statement is an else clause on its own line", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			const first = await runJavaScriptCell(
+				kernel,
+				[
+					"var persistenceBranchValue = 0",
+					"if (persistenceBranchValue) { persistenceBranchValue = 1 }",
+					"else persistenceBranchValue = 2",
+				].join("\n"),
+			);
+			const run = await runJavaScriptCell(kernel, "return persistenceBranchValue");
+
+			expect(first.result.ok).toBe(true);
+			expect(parseJavaScriptResult(run.result)).toBe(2);
+		});
+	});
+
+	it("keeps continuation-line method chains inside the captured last statement", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			const run = await runJavaScriptCell(
+				kernel,
+				[
+					'var persistenceChained = "a-b"',
+					'persistenceChained = persistenceChained.replace("a", "x")',
+					'.replace(/b|\\(/g, "y")',
+					"persistenceChained",
+				].join("\n"),
+			);
+
+			expect(parseJavaScriptResult(run.result)).toBe("x-y");
+		});
+	});
+
+	it("captures the last expression after nested template literals in interpolations", async () => {
+		await withJavaScriptKernel(async (kernel) => {
+			const run = await runJavaScriptCell(
+				kernel,
+				[
+					"var persistenceQuoted = `$" + '{"x".replace("x", `)`)}`',
+					'var persistenceJoined = ["a", persistenceQuoted].join(',
+					'\t"-",',
+					")",
+					"persistenceJoined",
+				].join("\n"),
+			);
+
+			expect(parseJavaScriptResult(run.result)).toBe("a-)");
+		});
+	});
 });

@@ -19,6 +19,11 @@
   `globalThis["jobs"] = {;`, failing cells with `Unexpected token ';'. Expected a property name.`),
   and no longer re-evaluates comment-bearing initializers when persisting bindings — such
   declarations are kept verbatim and their bindings persisted by reference.
+- Last-expression capture no longer inserts `return` before continuation lines (`else`/`catch`/`finally`
+  clauses and leading-`.`/operator method-chain lines), and now scans template literals (including
+  nested templates in interpolations), regexes, and comments with the same literal-aware scanner as
+  the persistence transform — fixing `return else …`, `return .replace(…)`, and mid-argument
+  `return )` corruption of valid cells.
 
 ### Removed
 
