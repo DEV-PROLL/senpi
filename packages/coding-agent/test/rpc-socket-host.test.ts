@@ -309,7 +309,7 @@ describe("RPC Unix-socket multi-connection host", () => {
 			`export default function (pi) {
 				pi.on("session_start", (_event, ctx) => {
 					ctx.ui.setWidget("array-widget", ["array widget"]);
-					ctx.ui.setWidget("factory-widget", () => ({ render: () => ["factory widget"] }));
+					ctx.ui.setWidget("factory-widget", () => ({ render: (width) => [\`w:\${width}\`] }));
 					ctx.ui.setHeader(() => ({ render: () => ["factory header"] }));
 					ctx.ui.setFooter(() => ({ render: () => ["factory footer"] }));
 				});
@@ -351,10 +351,16 @@ describe("RPC Unix-socket multi-connection host", () => {
 					value.widgetKey === "factory-widget",
 			);
 			const factoryHeader = peer.peer.waitFor(
-				(value) => value.type === "extension_ui_request" && value.method === "setHeader" && Array.isArray(value.widgetLines),
+				(value) =>
+					value.type === "extension_ui_request" &&
+					value.method === "setHeader" &&
+					Array.isArray(value.widgetLines),
 			);
 			const factoryFooter = peer.peer.waitFor(
-				(value) => value.type === "extension_ui_request" && value.method === "setFooter" && Array.isArray(value.widgetLines),
+				(value) =>
+					value.type === "extension_ui_request" &&
+					value.method === "setFooter" &&
+					Array.isArray(value.widgetLines),
 			);
 			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
 			const sessionId = openedSessionId(opened);
@@ -368,7 +374,29 @@ describe("RPC Unix-socket multi-connection host", () => {
 				type: "extension_ui_request",
 				method: "setWidget",
 				widgetKey: "factory-widget",
-				widgetLines: ["factory widget"],
+				widgetLines: ["w:80"],
+				sessionId,
+			});
+			const resizedWidget = peer.peer.waitFor(
+				(value) =>
+					value.type === "extension_ui_request" &&
+					value.method === "setWidget" &&
+					value.widgetKey === "factory-widget" &&
+					JSON.stringify(value.widgetLines) === JSON.stringify(["w:120"]),
+			);
+			await expect(
+				peer.peer.request({ id: "set-width", type: "set_client_info", width: 120, sessionId }),
+			).resolves.toMatchObject({
+				type: "response",
+				command: "set_client_info",
+				success: true,
+				sessionId,
+			});
+			expect(await resizedWidget).toMatchObject({
+				type: "extension_ui_request",
+				method: "setWidget",
+				widgetKey: "factory-widget",
+				widgetLines: ["w:120"],
 				sessionId,
 			});
 			expect(await factoryHeader).toMatchObject({
