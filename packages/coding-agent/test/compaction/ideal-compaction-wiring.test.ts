@@ -4,6 +4,7 @@ import {
 	admitContextToolResult,
 	resolveBeforeAgentStartMessage,
 	resolveCompactionGeometry,
+	resolveReminderSystemPrompt,
 	shouldDeferGraceBand,
 } from "../../src/core/extensions/builtin/compaction/orchestration.ts";
 import { TOOL_ADMISSION_MARKER_PREFIX } from "../../src/core/extensions/builtin/compaction/tool-admission.ts";
@@ -37,12 +38,11 @@ describe("ideal compaction extension wiring decisions", () => {
 		expect(shouldDeferGraceBand({ ...base, tokens: 82_000, graceBandEnabled: false })).toBe(false);
 	});
 
-	it("delivers a reminder as an ephemeral message on an ordinary turn", () => {
-		expect(resolveBeforeAgentStartMessage({ message: undefined, reminder: "budget reminder" })).toEqual({
-			customType: "compaction-budget-reminder",
-			content: "budget reminder",
-			display: false,
-		});
+	it("delivers a reminder through the system-prompt seam on an ordinary turn", () => {
+		expect(resolveBeforeAgentStartMessage({ message: undefined, reminder: "budget reminder" })).toBeUndefined();
+		expect(resolveReminderSystemPrompt({ systemPrompt: "base", reminder: "budget reminder" })).toBe(
+			"base\n\nbudget reminder",
+		);
 	});
 
 	it("merges a simultaneous reminder into the pending restoration message", () => {

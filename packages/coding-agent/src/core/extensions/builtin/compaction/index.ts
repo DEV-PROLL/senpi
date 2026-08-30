@@ -41,6 +41,7 @@ import {
 	resolveBeforeAgentStartMessage,
 	resolveCompactionGeometry,
 	resolveIdleWarmAction,
+	resolveReminderSystemPrompt,
 	shouldDeferGraceBand,
 } from "./orchestration.ts";
 import * as cap from "./per-turn-cap.ts";
@@ -858,7 +859,16 @@ export default function compactionExtension(
 			reminder: reminder.message,
 			reminderEnabled: settings.reminderEnabled,
 		});
-		return deliveredMessage ? { message: deliveredMessage } : undefined;
+		const reminderSystemPrompt = resolveReminderSystemPrompt({
+			systemPrompt: event.systemPrompt,
+			reminder: !message ? reminder.message : undefined,
+			reminderEnabled: settings.reminderEnabled,
+		});
+		if (!deliveredMessage && !reminderSystemPrompt) return undefined;
+		return {
+			...(deliveredMessage ? { message: deliveredMessage } : {}),
+			...(reminderSystemPrompt ? { systemPrompt: reminderSystemPrompt } : {}),
+		};
 	});
 
 	pi.on("context", (event, ctx) => {
