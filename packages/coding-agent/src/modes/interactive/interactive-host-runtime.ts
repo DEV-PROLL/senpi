@@ -10,7 +10,12 @@ import { SessionManager } from "../../core/session-manager.ts";
 import { SettingsManager } from "../../core/settings-manager.ts";
 import type { BashOperations } from "../../core/tools/bash.ts";
 import { type EnsuredHost, ensureHost } from "../rpc/host-ensure.ts";
-import { isTransportGoneError, RpcClient, type RpcClientEvent } from "../rpc/rpc-client.ts";
+import {
+	isTransportGoneError,
+	RpcClient,
+	RpcTransportGoneError,
+	type RpcClientEvent,
+} from "../rpc/rpc-client.ts";
 
 export const INTERACTIVE_HOST_FALLBACK_WARNING = "Warning: shared interactive host unavailable; continuing locally";
 
@@ -69,37 +74,59 @@ export async function createInteractiveHostRuntime(
 	if (!sessionPath) return localRuntime;
 	const startHost = options.ensureHost ?? ((hostOptions) => ensureHost(hostOptions));
 	let remoteSession: RemoteSessionProxy | undefined;
+	let remoteRuntime: RemoteInteractiveRuntime | undefined;
 	let reconnecting: Promise<void> | undefined;
+	let disconnectQueued = false;
+	let disposed = false;
 	let fallbackWarned = false;
 	const warnFallback = (cause: unknown) => {
 		if (fallbackWarned) return;
 		fallbackWarned = true;
 		options.onWarning?.({ type: "interactive_host_fallback", message: INTERACTIVE_HOST_FALLBACK_WARNING, cause });
 	};
+	let scheduleReconnect: () => void = () => {};
 	const client = new RpcClient({
 		socketPath: options.socket,
 		onDisconnect: () => {
-			if (!remoteSession || reconnecting) return;
-			reconnecting = (async () => {
+			disconnectQueued = true;
+			scheduleReconnect();
+		},
+	});
+	scheduleReconnect = () => {
+		if (!remoteSession || reconnecting || disposed) return;
+		remoteRuntime?.enterReconnecting();
+		reconnecting = (async () => {
 				let cause: unknown;
 				for (let attempt = 0; attempt < 3; attempt++) {
+					if (disposed) return;
+					disconnectQueued = false;
 					try {
 						await startHost({ socket: options.socket, agentDir: options.agentDir });
+						if (disposed) return;
 						await client.start();
+						if (disposed) return;
 						await client.openSession({ sessionPath, cwd: localRuntime.cwd });
+						if (disposed) return;
 						await remoteSession.refresh();
+						if (disposed) return;
+						fallbackWarned = false;
+						remoteRuntime?.enterConnected();
 						return;
 					} catch (error) {
 						cause = error;
 						await client.stop().catch(() => {});
+						if (disposed) return;
 					}
 				}
-				warnFallback(cause);
-			})().finally(() => {
-				reconnecting = undefined;
-			});
-		},
+				if (!disposed) {
+					remoteRuntime?.enterFallback();
+					warnFallback(cause);
+				}
+	})().finally(() => {
+		reconnecting = undefined;
+		if (disconnectQueued && !disposed) scheduleReconnect();
 	});
+	};
 	try {
 		await startHost({ socket: options.socket, agentDir: options.agentDir });
 		await client.start();
@@ -116,6 +143,7 @@ export async function createInteractiveHostRuntime(
 			client,
 			opened.state,
 			options.onWarning,
+			warnFallback,
 		);
 		if (opened.state.isBashRunning && !opened.attached) {
 			// Only a newly opened session can have an execution orphaned by a
@@ -124,14 +152,19 @@ export async function createInteractiveHostRuntime(
 			await client.abortBash().catch(() => {});
 		}
 		if (opened.attached) await remoteSession.refresh();
-		return new RemoteInteractiveRuntime(localRuntime, remoteSession, client) as unknown as AgentSessionRuntime;
+		remoteRuntime = new RemoteInteractiveRuntime(localRuntime, remoteSession, client, {
+			onTransportGone: warnFallback,
+			get reconnecting() {
+				return reconnecting;
+			},
+			dispose: () => {
+				disposed = true;
+			},
+		});
+		return remoteRuntime as unknown as AgentSessionRuntime;
 	} catch (cause) {
 		await client.stop().catch(() => {});
-		options.onWarning?.({
-			type: "interactive_host_fallback",
-			message: `${INTERACTIVE_HOST_FALLBACK_WARNING}: ${cause instanceof Error ? cause.message : String(cause)}`,
-			cause,
-		});
+		warnFallback(cause);
 		return localRuntime;
 	}
 }
@@ -140,23 +173,59 @@ export class RemoteInteractiveRuntime {
 	readonly #local: AgentSessionRuntime;
 	readonly #remoteSession: RemoteSessionProxy;
 	readonly #client: RpcClient;
+	readonly #lifecycle?: { readonly reconnecting: Promise<void> | undefined; readonly dispose: () => void };
+	readonly #onTransportGone: (cause: unknown) => void;
 	#rebindSession: (() => Promise<void>) | undefined;
 	#beforeSessionInvalidate: (() => void) | undefined;
+	#state: "connected" | "reconnecting" | "fallback" | "disposed" = "connected";
 
-	constructor(local: AgentSessionRuntime, remoteSession: RemoteSessionProxy, client: RpcClient) {
+	constructor(
+		local: AgentSessionRuntime,
+		remoteSession: RemoteSessionProxy,
+		client: RpcClient,
+		lifecycle?: { readonly reconnecting: Promise<void> | undefined; readonly dispose: () => void } & {
+			onTransportGone: (cause: unknown) => void;
+		},
+	) {
 		this.#local = local;
 		this.#remoteSession = remoteSession;
 		this.#client = client;
+		this.#lifecycle = lifecycle;
+		this.#onTransportGone = lifecycle?.onTransportGone ?? (() => {});
+	}
+
+	async #call<T>(call: () => Promise<T>): Promise<T> {
+		try {
+			return await call();
+		} catch (error) {
+			if (isTransportGoneError(error)) {
+				this.#onTransportGone(error);
+				throw new RpcTransportGoneError();
+			}
+			throw error;
+		}
+	}
+
+	enterConnected(): void {
+		if (this.#state !== "disposed") this.#state = "connected";
+	}
+
+	enterReconnecting(): void {
+		if (this.#state !== "disposed") this.#state = "reconnecting";
+	}
+
+	enterFallback(): void {
+		if (this.#state !== "disposed") this.#state = "fallback";
 	}
 
 	get session(): AgentSession {
-		return this.#remoteSession.session;
+		return this.#state === "fallback" || this.#state === "disposed" ? this.#local.session : this.#remoteSession.session;
 	}
 	get services(): AgentSessionRuntime["services"] {
 		return this.#local.services;
 	}
 	get cwd(): string {
-		return this.#remoteSession.session.sessionManager.getCwd();
+		return this.session.sessionManager.getCwd();
 	}
 	get diagnostics(): readonly AgentSessionRuntimeDiagnostic[] {
 		return this.#local.diagnostics;
@@ -177,6 +246,10 @@ export class RemoteInteractiveRuntime {
 		this.#remoteSession.setHostUiHandler(callback);
 	}
 	async dispose(): Promise<void> {
+		if (this.#state === "disposed") return;
+		this.#state = "disposed";
+		this.#lifecycle?.dispose();
+		await this.#lifecycle?.reconnecting?.catch(() => {});
 		const errors: unknown[] = [];
 		for (const cleanup of [
 			() => this.#remoteSession.abortLocalBash(),
@@ -197,12 +270,13 @@ export class RemoteInteractiveRuntime {
 		setup?: (sessionManager: SessionManager) => Promise<void>;
 		withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
 	}): Promise<{ cancelled: boolean }> {
+		if (this.#state === "fallback") return this.#local.newSession(options);
 		// Suppresses for the ENTIRE command, not just the refresh tail: a
 		// multi-session host emits session_replaced while completing it, so the echo
 		// can arrive before the refresh/rebind sequence below starts and race it -
 		// newSession transports setup entries between two refreshes.
 		return this.#remoteSession.aroundLocalReplacement(async () => {
-			const result = await this.#client.newSession(options?.parentSession);
+			const result = await this.#call(() => this.#client.newSession(options?.parentSession));
 			if (!result.cancelled) {
 				this.#beforeSessionInvalidate?.();
 				this.#remoteSession.abortLocalBash();
@@ -227,13 +301,14 @@ export class RemoteInteractiveRuntime {
 			projectTrustContextFactory?: (cwd: string) => ProjectTrustContext;
 		},
 	): Promise<{ cancelled: boolean }> {
+		if (this.#state === "fallback") return this.#local.switchSession(sessionPath, options);
 		// See newSession: the suppression must cover the command itself, since the
 		// host emits session_replaced while completing it.
 		return this.#remoteSession.aroundLocalReplacement(async () => {
-			const result = await this.#client.switchSession(
+			const result = await this.#call(() => this.#client.switchSession(
 				sessionPath,
 				options?.cwdOverride === undefined ? undefined : { cwdOverride: options.cwdOverride },
-			);
+			));
 			if (!result.cancelled) {
 				this.#beforeSessionInvalidate?.();
 				this.#remoteSession.abortLocalBash();
@@ -251,9 +326,10 @@ export class RemoteInteractiveRuntime {
 		entryId: string,
 		options?: { position?: "before" | "at"; withSession?: (ctx: ReplacedSessionContext) => Promise<void> },
 	): Promise<{ cancelled: boolean; selectedText?: string }> {
+		if (this.#state === "fallback") return this.#local.fork(entryId, options);
 		// See newSession: the suppression must cover the command itself.
 		return this.#remoteSession.aroundLocalReplacement(async () => {
-			const result = await this.#client.fork(entryId, options);
+			const result = await this.#call(() => this.#client.fork(entryId, options));
 			if (!result.cancelled) {
 				this.#beforeSessionInvalidate?.();
 				this.#remoteSession.abortLocalBash();
@@ -264,9 +340,10 @@ export class RemoteInteractiveRuntime {
 		});
 	}
 	async importFromJsonl(inputPath: string, cwdOverride?: string): Promise<{ cancelled: boolean }> {
+		if (this.#state === "fallback") return this.#local.importFromJsonl(inputPath, cwdOverride);
 		// See newSession: the suppression must cover the command itself.
 		return this.#remoteSession.aroundLocalReplacement(async () => {
-			const result = await this.#client.importJsonl(inputPath, cwdOverride);
+			const result = await this.#call(() => this.#client.importJsonl(inputPath, cwdOverride));
 			if (!result.cancelled) {
 				this.#beforeSessionInvalidate?.();
 				this.#remoteSession.abortLocalBash();
@@ -304,19 +381,29 @@ export function createRemoteSessionProxy(
 	client: RpcClient,
 	initialState: ReturnType<typeof stateFromRpc>,
 	onWarning?: (warning: InteractiveHostWarning) => void,
+	onTransportGone?: (cause: unknown) => void,
 ): RemoteSessionProxy {
 	// Fire-and-forget setters keep the sync AgentSession signature, but their RPC
 	// failures must not vanish: the matching *_changed wire event confirms success,
 	// and a rejection here is the only signal of failure.
 	const reportActionFailure = (action: string) => (error: unknown) => {
 		const transportGone = isTransportGoneError(error);
-		onWarning?.({
-			type: transportGone ? "interactive_host_fallback" : "interactive_host_action_failed",
-			message: transportGone
-				? INTERACTIVE_HOST_FALLBACK_WARNING
-				: `Warning: shared interactive host ${action} failed: ${error instanceof Error ? error.message : String(error)}`,
-			cause: error,
-		});
+		if (transportGone) onTransportGone?.(error);
+		else
+			onWarning?.({
+				type: "interactive_host_action_failed",
+				message: `Warning: shared interactive host ${action} failed: ${error instanceof Error ? error.message : String(error)}`,
+				cause: error,
+			});
+	};
+	const transportCall = async <T>(action: string, call: () => Promise<T>): Promise<T> => {
+		try {
+			return await call();
+		} catch (error) {
+			if (!isTransportGoneError(error)) throw error;
+			reportActionFailure(action)(error);
+			throw new RpcTransportGoneError();
+		}
 	};
 	let state = { ...initialState };
 	const waitForBashCallbacks = async (promises: Set<Promise<void>>, allowAbandonment: boolean): Promise<boolean> => {
@@ -389,7 +476,8 @@ export function createRemoteSessionProxy(
 	const remoteSessionManager = new Proxy({} as SessionManager, {
 		get(_target, property, _receiver) {
 			if (property === "appendLabelChange") {
-				return (entryId: string, label?: string) => void client.setLabel(entryId, label);
+				return (entryId: string, label?: string) =>
+					void client.setLabel(entryId, label).catch(reportActionFailure("appendLabelChange"));
 			}
 			if (property === "getCwd") return () => state.cwd;
 			if (property === "getSessionName") return () => state.sessionName;
@@ -407,9 +495,9 @@ export function createRemoteSessionProxy(
 		if ((wireEvent as { type?: string }).type === "extension_ui_request") {
 			const request = wireEvent as import("../rpc/rpc-types.ts").RpcExtensionUIRequest;
 			if (hostUiHandler)
-				void Promise.resolve(hostUiHandler(request)).then(
-					(response) => response && client.sendExtensionUIResponse(response),
-				);
+				void Promise.resolve(hostUiHandler(request))
+					.then((response) => response && client.sendExtensionUIResponse(response))
+					.catch(reportActionFailure("host UI response"));
 			else pendingUiRequests.push(request);
 			return;
 		}
@@ -651,7 +739,7 @@ export function createRemoteSessionProxy(
 					}
 				};
 			if (property === "abort") return () => client.abort();
-			if (property === "abortCompaction") return () => void client.abortCompaction();
+			if (property === "abortCompaction") return () => void client.abortCompaction().catch(reportActionFailure("abortCompaction"));
 			if (property === "steer")
 				return (
 					message: string,
@@ -666,7 +754,7 @@ export function createRemoteSessionProxy(
 						ordered: [...state.ordered, { text: message, mode: "steer", enqueueOrder }],
 						pendingMessageCount: state.pendingMessageCount + 1,
 					};
-					return client.steer(message, images, { ...recovery, enqueueOrder });
+					return transportCall("steer", () => client.steer(message, images, { ...recovery, enqueueOrder }));
 				};
 			if (property === "followUp")
 				return (
@@ -682,13 +770,13 @@ export function createRemoteSessionProxy(
 						ordered: [...state.ordered, { text: message, mode: "followUp", enqueueOrder }],
 						pendingMessageCount: state.pendingMessageCount + 1,
 					};
-					return client.followUp(message, images, { ...recovery, enqueueOrder });
+					return transportCall("followUp", () => client.followUp(message, images, { ...recovery, enqueueOrder }));
 				};
 			if (property === "waitForIdle") return () => client.waitForIdle();
 			if (property === "getLastAssistantText") return () => target.getLastAssistantText();
 			if (property === "setModel" || property === "setSessionModel")
 				return async (model: NonNullable<AgentSession["model"]>) => {
-					const next = await client.setModel(model.provider, model.id);
+					const next = await transportCall("setModel", () => client.setModel(model.provider, model.id));
 					return { systemPromptName: next.systemPromptName, model: next };
 				};
 			if (property === "setSessionThinkingLevel")
@@ -714,20 +802,20 @@ export function createRemoteSessionProxy(
 					state = { ...state, scopedModels: [...models] };
 					void client.setScopedModels(models).catch(reportActionFailure("setScopedModels"));
 				};
-			if (property === "cycleModel") return (direction?: "forward" | "backward") => client.cycleModel(direction);
+			if (property === "cycleModel") return (direction?: "forward" | "backward") => transportCall("cycleModel", () => client.cycleModel(direction));
 			if (property === "setThinkingLevel")
 				return (level: AgentSession["thinkingLevel"]) =>
 					void client.setThinkingLevel(level).catch(reportActionFailure("setThinkingLevel"));
 			if (property === "cycleThinkingLevel")
-				return () => client.cycleThinkingLevel().then((result) => result?.level);
-			if (property === "getAvailableThinkingLevels") return () => client.getAvailableThinkingLevels();
+				return () => transportCall("cycleThinkingLevel", () => client.cycleThinkingLevel()).then((result) => result?.level);
+			if (property === "getAvailableThinkingLevels") return () => transportCall("getAvailableThinkingLevels", () => client.getAvailableThinkingLevels());
 			if (property === "setSteeringMode")
 				return (mode: AgentSession["steeringMode"]) =>
 					void client.setSteeringMode(mode).catch(reportActionFailure("setSteeringMode"));
 			if (property === "setFollowUpMode")
 				return (mode: AgentSession["followUpMode"]) =>
 					void client.setFollowUpMode(mode).catch(reportActionFailure("setFollowUpMode"));
-			if (property === "compact") return (instructions?: string) => client.compact(instructions);
+			if (property === "compact") return (instructions?: string) => transportCall("compact", () => client.compact(instructions));
 			if (property === "setAutoCompactionEnabled")
 				return (enabled: boolean) =>
 					void client.setAutoCompaction(enabled).catch(reportActionFailure("setAutoCompaction"));
@@ -796,19 +884,19 @@ export function createRemoteSessionProxy(
 					else void client.abortBash().catch(reportActionFailure("abortBash"));
 				};
 			if (property === "getContextUsage") return () => state.contextUsage;
-			if (property === "getSessionStats") return () => client.getSessionStats();
+			if (property === "getSessionStats") return () => transportCall("getSessionStats", () => client.getSessionStats());
 			if (property === "exportToHtml")
 				return (outputPath?: string, options?: { themeName?: string }) =>
-					client.exportHtml(outputPath, options?.themeName).then((result) => result.path);
+					transportCall("exportToHtml", () => client.exportHtml(outputPath, options?.themeName)).then((result) => result.path);
 			if (property === "setSessionName")
 				return (name: string) => client.setSessionName(name).catch(reportActionFailure("setSessionName"));
 			if (property === "navigateTree")
 				return async (targetId: string, options?: Parameters<AgentSession["navigateTree"]>[1]) => {
-					const result = await client.navigateTree(targetId, options);
+					const result = await transportCall("navigateTree", () => client.navigateTree(targetId, options));
 					if (!result.cancelled) await refresh();
 					return result;
 				};
-			if (property === "getUserMessagesForForking") return () => client.getForkMessages();
+			if (property === "getUserMessagesForForking") return () => transportCall("getUserMessagesForForking", () => client.getForkMessages());
 			if (property === "subscribe")
 				return (listener: AgentSessionEventListener) => {
 					listeners.add(listener);
@@ -849,10 +937,10 @@ export function createRemoteSessionProxy(
 			if (property === "set_label") return undefined;
 			if (property === "retryAttempt") return state.retryAttempt;
 			if (property === "isBashRunning") return state.isBashRunning;
-			if (property === "reload") return (_options?: Parameters<AgentSession["reload"]>[0]) => client.reload();
-			if (property === "checkReloadVeto") return () => client.checkReloadVeto();
+			if (property === "reload") return (_options?: Parameters<AgentSession["reload"]>[0]) => transportCall("reload", () => client.reload());
+			if (property === "checkReloadVeto") return () => transportCall("checkReloadVeto", () => client.checkReloadVeto());
 			if (property === "exportToJsonl")
-				return (outputPath?: string) => client.exportJsonl(outputPath).then((result) => result.path);
+				return (outputPath?: string) => transportCall("exportToJsonl", () => client.exportJsonl(outputPath)).then((result) => result.path);
 			// The footer and other renderers read session.state.*; surface the
 			// host-authoritative fields there too, not only via the direct getters.
 			if (property === "state") {
@@ -889,9 +977,9 @@ export function createRemoteSessionProxy(
 			hostUiHandler = callback;
 			if (callback)
 				for (const request of pendingUiRequests.splice(0))
-					void Promise.resolve(callback(request)).then(
-						(response) => response && client.sendExtensionUIResponse(response),
-					);
+					void Promise.resolve(callback(request))
+						.then((response) => response && client.sendExtensionUIResponse(response))
+						.catch(reportActionFailure("host UI response"));
 		},
 		refresh,
 		aroundLocalReplacement: async (body) => {
@@ -908,26 +996,26 @@ export function createRemoteSessionProxy(
 			Object.defineProperty(context, "cwd", { value: state.cwd });
 			Object.defineProperty(context, "sessionManager", { value: remoteSessionManager });
 			context.sendMessage = (message, options) =>
-				client.sendCustomMessage(message, {
+				transportCall("sendMessage", () => client.sendCustomMessage(message, {
 					triggerTurn: options?.triggerTurn,
 					deliverAs: options?.deliverAs,
-				});
+				}));
 			context.sendUserMessage = (content, options) => {
 				if (typeof content === "string")
-					return client.prompt(content, {
+					return transportCall("sendUserMessage", () => client.prompt(content, {
 						streamingBehavior: options?.deliverAs,
 						expandPromptTemplates: options?.expandPromptTemplates,
-					});
+					}));
 				const text = content
 					.filter((part) => part.type === "text")
 					.map((part) => part.text)
 					.join("\n");
 				const images = content.filter((part) => part.type === "image");
-				return client.prompt(text, {
+				return transportCall("sendUserMessage", () => client.prompt(text, {
 					images,
 					streamingBehavior: options?.deliverAs,
 					expandPromptTemplates: options?.expandPromptTemplates,
-				});
+				}));
 			};
 			return context;
 		},

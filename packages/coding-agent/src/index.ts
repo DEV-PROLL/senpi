@@ -366,6 +366,8 @@ export {
 	PINNED_HOST_CLIENT_CAPABILITIES,
 	type PrintModeOptions,
 	RpcClient,
+	RpcTransportGoneError,
+	isTransportGoneError,
 	type RpcClientEvent,
 	type RpcClientOptions,
 	type RpcCommand,
