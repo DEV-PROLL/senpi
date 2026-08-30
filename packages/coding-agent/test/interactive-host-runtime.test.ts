@@ -19,6 +19,7 @@ import { ProjectTrustStore } from "../src/core/trust-manager.ts";
 import { FooterComponent } from "../src/modes/interactive/components/footer.ts";
 import {
 	createInteractiveHostRuntime,
+	createRemoteSessionProxy,
 	INTERACTIVE_HOST_FALLBACK_WARNING,
 } from "../src/modes/interactive/interactive-host-runtime.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -156,23 +157,67 @@ async function waitForHost(child: ChildProcessWithoutNullStreams, socket: string
 }
 
 describe("interactive host runtime", () => {
+	it("replays only own-session and untagged startup events", async () => {
+		const cwd = tmpdir();
+		const local = await createAgentSessionRuntimeFixture({
+			cwd,
+			agentDir: cwd,
+			sessionManager: SessionManager.inMemory(cwd),
+			settingsManager: SettingsManager.create(cwd, cwd),
+		});
+		const client = { onEvent: () => () => {} } as unknown as RpcClient;
+		const message = (text: string) => ({ role: "user", content: text, timestamp: Date.now() });
+		createRemoteSessionProxy(
+			local.session,
+			cwd,
+			client,
+			{ sessionId: "own", cwd, ordered: [], isBashRunning: false, isStreaming: false, isCompacting: false, retryAttempt: 0, steering: [], followUp: [], thinkingLevel: "off", autoCompactionEnabled: false, pendingMessageCount: 0, usageTotals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, favoriteModels: [], scopedModels: [], projectTrusted: false } as never,
+			undefined,
+			[
+				{ type: "message_start", sessionId: "own", message: message("own") } as never,
+				{ type: "message_start", message: message("untagged") } as never,
+			],
+		);
+		expect(local.session.agent.state.messages.map((entry) => (entry as { content: unknown }).content)).toEqual([
+			"own",
+			"untagged",
+		]);
+	});
 	it("delivers startup factory UI through the normal runtime API", async () => {
 		const qa = scratch("startup-ui");
 		const fake = await startFakeModelServer();
 		writeRpcModelsJson(qa.agentDir, fake.origin);
 		mkdirSync(join(qa.agentDir, "extensions"), { recursive: true });
-		writeFileSync(join(qa.agentDir, "extensions", "startup-ui.ts"), `export default function (pi) { pi.on("session_start", (_event, ctx) => ctx.ui.setWidget("startup", () => ({ render: () => ["startup"] }))); }`);
+		writeFileSync(
+			join(qa.agentDir, "extensions", "startup-ui.ts"),
+			`export default function (pi) { pi.on("session_start", (_event, ctx) => ctx.ui.setWidget("startup", () => ({ render: () => ["startup"] }))); }`,
+		);
 		const host = spawnHost(qa);
 		await waitForHost(host, qa.socket);
-		const local = await createAgentSessionRuntimeFixture({ cwd: qa.cwd, agentDir: qa.agentDir, sessionManager: SessionManager.create(qa.cwd, qa.sessionDir), settingsManager: SettingsManager.create(qa.cwd, qa.agentDir) });
-		const runtime = await createInteractiveHostRuntime(local, { socket: qa.socket, ensureHost: async () => undefined });
+		const local = await createAgentSessionRuntimeFixture({
+			cwd: qa.cwd,
+			agentDir: qa.agentDir,
+			sessionManager: SessionManager.create(qa.cwd, qa.sessionDir),
+			settingsManager: SettingsManager.create(qa.cwd, qa.agentDir),
+		});
+		const runtime = await createInteractiveHostRuntime(local, {
+			socket: qa.socket,
+			ensureHost: async () => undefined,
+		});
 		try {
 			const received: unknown[] = [];
-			(runtime as unknown as import("../src/modes/interactive/interactive-host-runtime.ts").RemoteInteractiveRuntime).setHostUiHandler((request) => {
+			(
+				runtime as unknown as import("../src/modes/interactive/interactive-host-runtime.ts").RemoteInteractiveRuntime
+			).setHostUiHandler((request) => {
 				received.push(request);
 			});
-			expect(received).toContainEqual(expect.objectContaining({ method: "setWidget", widgetKey: "startup", widgetLines: ["startup"] }));
-		} finally { await runtime.dispose(); await fake.close(); }
+			expect(received).toContainEqual(
+				expect.objectContaining({ method: "setWidget", widgetKey: "startup", widgetLines: ["startup"] }),
+			);
+		} finally {
+			await runtime.dispose();
+			await fake.close();
+		}
 	});
 	it("renders host-authoritative footer context, cwd, and session name", async () => {
 		const qa = scratch("footer-values");
