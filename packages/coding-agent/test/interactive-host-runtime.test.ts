@@ -168,7 +168,7 @@ describe("interactive host runtime", () => {
 		const runtime = await createInteractiveHostRuntime(local, { socket: qa.socket, ensureHost: async () => undefined });
 		try {
 			const received: unknown[] = [];
-			(runtime as import("../src/modes/interactive/interactive-host-runtime.ts").RemoteInteractiveRuntime).setHostUiHandler((request) => {
+			(runtime as unknown as import("../src/modes/interactive/interactive-host-runtime.ts").RemoteInteractiveRuntime).setHostUiHandler((request) => {
 				received.push(request);
 			});
 			expect(received).toContainEqual(expect.objectContaining({ method: "setWidget", widgetKey: "startup", widgetLines: ["startup"] }));
