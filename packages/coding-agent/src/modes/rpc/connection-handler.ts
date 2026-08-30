@@ -903,8 +903,7 @@ export function createRpcConnectionHandler(
 			}
 
 			case "append_session_entry": {
-				session.sessionManager.appendEntry(command.entry);
-				session.agent.state.messages = session.sessionManager.buildSessionContext().messages;
+				session.appendSessionEntry(command.entry);
 				return success(id, "append_session_entry");
 			}
 
