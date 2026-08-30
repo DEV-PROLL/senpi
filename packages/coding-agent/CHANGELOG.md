@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Hooks trust-state reads no longer contend on the bounded writer lock during concurrent session startup; serialized writers now publish complete snapshots through same-directory atomic rename.
+
 - Compaction no longer wedges when the summarizer model hijacks the forwarded agent tools and answers with a bare tool call (observed on openai-codex gpt-5.6-sol at high reasoning as `Compaction rejected: summarization response contained no text (stopReason: toolUse)` followed by `Context remains above the compaction threshold because compaction did not complete`). The summarization request is retried once with tool calling forbidden (`toolChoice: "none"`, tools kept in the request for Anthropic compatibility), and a persistent empty-summary failure now degrades into the deterministic no-LLM fallback on required-compaction routes instead of leaving the session stuck above the threshold.
 - Windows session resume no longer aborts the process when `fs.watch()` receives an event for a watch path containing a non-canonical component; existing paths are canonicalized before watching ([#1229](https://github.com/code-yeongyu/senpi/issues/1229)).
 
