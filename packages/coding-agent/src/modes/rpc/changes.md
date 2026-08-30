@@ -1,5 +1,19 @@
 # changes
 
+## 2026-08-30 - Require agentDir for the RPC project-trust gate
+
+- `connection-handler.ts` now requires an authoritative `agentDir` when projecting RPC session state and reads project trust only from a fresh `ProjectTrustStore` lookup for the session's current cwd.
+- The old `settingsManager.isProjectTrusted()` fallback is removed because that verdict can belong to a previous cwd after a session replacement. Missing `agentDir` now throws an explicit RPC session invariant error rather than silently selecting a stale trust verdict.
+- RPC test doubles now provide temporary agent directories and seeded trust-store entries.
+
+### Why
+
+- Project trust gates project-source settings and resources, so the RPC state builder must never substitute a construction-time settings verdict for the current cwd's authoritative trust decision.
+
+### Expected merge conflict zones
+
+- LOW: `connection-handler.ts` project trust projection and RPC fixture setup.
+
 ## 2026-08-30 - Replacement broadcast reaches observers, not the issuer
 
 - `connection-handler.ts`: `session_replaced` is emitted to every connection that did NOT
