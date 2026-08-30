@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Fixed shared RPC socket host startup to fail fast when the spawned host exits before answering `get_protocol_info`, instead of silently consuming the full 10-second readiness budget, and made readiness diagnostics honest: an early exit reports the child's exit code, an incompatible host reports its advertised server version and capabilities against the expected values, and a host that never answered keeps the existing timeout message.
+
 ### New Features
 
 ### Breaking Changes
