@@ -53,18 +53,24 @@ function buildExcerpt(text: string, budgetChars: number, totalTokens: number): s
  * text becomes a deterministic, diskless head/tail projection. Re-evaluating projected
  * text under a smaller model window is safe because admission never trusts marker text.
  */
-export function admitToolResult(input: AdmitToolResultInput): AdmitToolResultOutput {
-	const capTokens = resolveToolResultAdmissionCapTokens(input.contextWindow);
-	const totalTokens = estimateTextTokens(input.text);
-	if (totalTokens <= capTokens) return { text: input.text, projected: false };
+export function admitToolResultWithinBudget(text: string, budgetTokens: number): AdmitToolResultOutput {
+	const totalTokens = estimateTextTokens(text);
+	if (totalTokens <= budgetTokens) return { text, projected: false };
+	if (budgetTokens <= 0) return { text: "", projected: true };
 
-	const charsPerToken = input.text.length / Math.max(1, totalTokens);
-	let budgetChars = Math.floor(capTokens * charsPerToken);
-	let excerpt = buildExcerpt(input.text, budgetChars, totalTokens);
-	while (estimateTextTokens(excerpt) > capTokens) {
+	const charsPerToken = text.length / Math.max(1, totalTokens);
+	let budgetChars = Math.floor(budgetTokens * charsPerToken);
+	let excerpt = buildExcerpt(text, budgetChars, totalTokens);
+	while (estimateTextTokens(excerpt) > budgetTokens && budgetChars > 0) {
 		budgetChars = Math.floor(budgetChars * 0.8);
-		excerpt = buildExcerpt(input.text, budgetChars, totalTokens);
+		excerpt = buildExcerpt(text, budgetChars, totalTokens);
 	}
 
-	return { text: excerpt, projected: true };
+	return estimateTextTokens(excerpt) <= budgetTokens
+		? { text: excerpt, projected: true }
+		: { text: "", projected: true };
+}
+
+export function admitToolResult(input: AdmitToolResultInput): AdmitToolResultOutput {
+	return admitToolResultWithinBudget(input.text, resolveToolResultAdmissionCapTokens(input.contextWindow));
 }
