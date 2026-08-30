@@ -168,4 +168,106 @@ describe("TerminalScreen", () => {
 		// but exceed it on the slower Windows CI runner; give this long-session
 		// case explicit headroom rather than weakening the scrollback coverage.
 	}, 30000);
+
+	it("survives an unawaited feed flood beyond xterm's pending-write watermark", async () => {
+		const screen = new TerminalScreen({ cols: 80, rows: 24, scrollback: 100 });
+		const chunk = `${"x".repeat(4095)}\n`;
+
+		const results = await Promise.allSettled(Array.from({ length: 13_000 }, () => screen.feed(chunk)));
+
+		const rejected = results.filter((result) => result.status === "rejected");
+		expect(rejected).toEqual([]);
+
+		await screen.flush();
+		expect(screen.snapshot().visibleGrid.some((line) => line.includes("x"))).toBe(true);
+		screen.dispose();
+	}, 60_000);
+
+	it("settles queued operations on dispose without recreating a terminal", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		const originalDispose = xterm.Terminal.prototype.dispose;
+		let disposeCalls = 0;
+		let writesAfterDispose = 0;
+		let screenDisposed = false;
+
+		xterm.Terminal.prototype.write = function patchedWrite(
+			this: XtermTerminalType,
+			data: string | Uint8Array,
+			callback?: () => void,
+		): void {
+			if (screenDisposed) writesAfterDispose += 1;
+			originalWrite.call(this, data, callback);
+		};
+		xterm.Terminal.prototype.dispose = function patchedDispose(this: XtermTerminalType): void {
+			disposeCalls += 1;
+			originalDispose.call(this);
+		};
+
+		try {
+			const screen = new TerminalScreen({ cols: 20, rows: 4, scrollback: 10 });
+			const outcomes = [screen.feed("before"), screen.resize(40, 5), screen.feed(" after")];
+			screenDisposed = true;
+			screen.dispose();
+
+			await expect(Promise.all(outcomes)).resolves.toEqual([undefined, undefined, undefined]);
+			expect(writesAfterDispose).toBe(0);
+			expect(disposeCalls).toBe(1);
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+			xterm.Terminal.prototype.dispose = originalDispose;
+		}
+	});
+
+	it("bounds the queued write backlog by coalescing into a bounded replay", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		let writtenChars = 0;
+
+		xterm.Terminal.prototype.write = function patchedWrite(
+			this: XtermTerminalType,
+			data: string | Uint8Array,
+			callback?: () => void,
+		): void {
+			writtenChars += typeof data === "string" ? data.length : data.byteLength;
+			originalWrite.call(this, data, callback);
+		};
+
+		try {
+			const screen = new TerminalScreen({ cols: 20, rows: 4, scrollback: 10 });
+			const chunk = "y".repeat(65_536);
+			const results = await Promise.allSettled(Array.from({ length: 96 }, () => screen.feed(chunk)));
+
+			expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+			// 6 MiB submitted; the parsed volume must stay near the 1 MiB pending
+			// cap plus the bounded replay, nowhere near the full submission.
+			expect(writtenChars).toBeLessThan(3 * 1_048_576);
+			screen.dispose();
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	}, 30_000);
+
+	it("delivers write rejections to the owning caller and keeps the queue usable", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+
+		xterm.Terminal.prototype.write = function patchedWrite(
+			this: XtermTerminalType,
+			data: string | Uint8Array,
+			callback?: () => void,
+		): void {
+			const payload = typeof data === "string" ? data : new TextDecoder().decode(data);
+			if (payload.includes("poison")) throw new Error("synthetic xterm write failure");
+			originalWrite.call(this, data, callback);
+		};
+
+		try {
+			const screen = new TerminalScreen({ cols: 20, rows: 2, scrollback: 10 });
+			await screen.feed("ok");
+			await expect(screen.feed("poison")).rejects.toThrow("synthetic xterm write failure");
+			await expect(screen.feed(" fine")).resolves.toBeUndefined();
+			expect(screen.snapshot().visibleGrid[0]).toBe("ok fine");
+			screen.dispose();
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	});
 });
