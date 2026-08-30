@@ -1,5 +1,24 @@
 # changes
 
+## 2026-08-30 - Reconcile the shared-host mirror to the host entry list
+
+### What changed
+
+- `interactive-host-runtime.ts`: `performRefresh()` reconciles the session mirror to the complete entry list the host ships in `get_state`, whenever that list is present, instead of backfilling only an empty mirror. A mismatch rebuilds the mirror from the authoritative list, keeping any entry whose `entry_appended` notification crossed the refresh - such an entry postdates the snapshot, so dropping it would strand it until an unrelated refresh happened to run.
+
+### Why
+
+- The host ships its full entry list only while the session file is still deferred (no assistant message yet, so nothing has been written to disk), which makes that list the only authoritative view of the session. `entry_appended` notifications that cross a concurrent refresh land on whichever manager object is current at that instant, so the mirror could hold an arbitrary partial set rather than a prefix of the host's list; backfill-only-when-empty then wedged it at that partial set permanently. Together with event delivery across the rebind this makes the mirror converge after a replacement.
+
+### Why an extension could not handle it
+
+- The mirror is proxy state beneath every extension surface; no extension hook observes it.
+
+### Expected merge conflict zones
+
+- LOW: the entry-list reconciliation block inside `performRefresh()`.
+
+
 ## 2026-08-30 - Rebind the shared-host proxy on session_replaced
 
 ### What changed
