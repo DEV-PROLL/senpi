@@ -24,6 +24,7 @@ import {
 	HOST_COLD_START_ENV,
 	HOST_IDLE_EXIT_MS_ENV,
 	IdleExitDecider,
+	resolveHostChildLaunch,
 	resolveHostPolicy,
 } from "../src/modes/rpc/host-lifecycle.ts";
 import {
@@ -338,6 +339,41 @@ describe("host watchdog configuration", () => {
 		expect(await reason).toContain("closed");
 		expect(existsSync(scratchDir)).toBe(false);
 	}, 15_000);
+});
+
+describe("resolveHostChildLaunch", () => {
+	const baseLaunch = { socket: "/tmp/qa-public.sock", hostArgs: ["--provider", "mock"] } as const;
+
+	it("forwards explicit child commands untouched", () => {
+		const launch = { ...baseLaunch, childCommand: "/opt/branded/omo", childArgs: ["--mode", "rpc"] };
+		expect(resolveHostChildLaunch(launch, "/tmp/internal.sock", true)).toEqual({
+			command: "/opt/branded/omo",
+			args: ["--mode", "rpc", "--listen", "unix:///tmp/internal.sock"],
+		});
+	});
+
+	it("passes the mode flags directly to the executable in compiled binaries", () => {
+		expect(resolveHostChildLaunch(baseLaunch, "/tmp/internal.sock", true)).toEqual({
+			command: process.execPath,
+			args: ["--mode", "rpc", "--multi-session", "--listen", "unix:///tmp/internal.sock", "--provider", "mock"],
+		});
+	});
+
+	it("re-enters the committed CLI entry outside compiled binaries", () => {
+		const launch = resolveHostChildLaunch(baseLaunch, "/tmp/internal.sock", false);
+		expect(launch.command).toBe(process.execPath);
+		const args = launch.args.slice(process.execArgv.length);
+		expect(args[0]).toMatch(/cli-main\.(ts|js)$/);
+		expect(args.slice(1)).toEqual([
+			"--mode",
+			"rpc",
+			"--multi-session",
+			"--listen",
+			"unix:///tmp/internal.sock",
+			"--provider",
+			"mock",
+		]);
+	});
 });
 
 function scratch(label: string): Scratch {

@@ -45,7 +45,7 @@ import { createConnection, createServer, type Server, type Socket } from "node:n
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getAgentDir } from "../../config.ts";
+import { getAgentDir, isBunBinary } from "../../config.ts";
 import { createHostDaemonPaths } from "./host-ensure.ts";
 import {
 	HOST_CLEANUP_PATHS_ENV,
@@ -215,6 +215,39 @@ export function resolveCliMainPath(): string {
 	return resolve(dirname(modulePath), "..", "..", `cli-main${extension}`);
 }
 
+/**
+ * Resolves the host child spawn. Explicit child commands (desktop launchers)
+ * are forwarded untouched. The default re-enters the committed CLI entry
+ * through the runtime, except in compiled standalone binaries, which always
+ * boot their embedded entrypoint and would parse a script path as CLI
+ * arguments - there the executable itself is the CLI, so the mode flags are
+ * passed directly. Exported for tests.
+ */
+export function resolveHostChildLaunch(
+	launch: SupervisorLaunch,
+	internalSocket: string,
+	compiled: boolean = isBunBinary,
+): { command: string; args: string[] } {
+	if (launch.childCommand) {
+		return {
+			command: launch.childCommand,
+			args: [...(launch.childArgs ?? []), "--listen", `unix://${internalSocket}`],
+		};
+	}
+	return {
+		command: process.execPath,
+		args: [
+			...(compiled ? [] : [...process.execArgv, resolveCliMainPath()]),
+			"--mode",
+			"rpc",
+			"--multi-session",
+			"--listen",
+			`unix://${internalSocket}`,
+			...launch.hostArgs,
+		],
+	};
+}
+
 export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void> {
 	const paths = createHostDaemonPaths(launch.agentDir ?? getAgentDir());
 	const policy = resolveHostPolicy(await readSettingsFile(paths.settingsFile), process.env);
@@ -228,34 +261,20 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	let shuttingDown = false;
 	let shutdownPromise: Promise<never> | undefined;
 
-	const child = spawn(
-		launch.childCommand ?? process.execPath,
-		launch.childCommand
-			? [...(launch.childArgs ?? []), "--listen", `unix://${internalSocket}`]
-			: [
-					...process.execArgv,
-					resolveCliMainPath(),
-					"--mode",
-					"rpc",
-					"--multi-session",
-					"--listen",
-					`unix://${internalSocket}`,
-					...launch.hostArgs,
-				],
-		{
-			env: {
-				...process.env,
-				...(launch.agentDir ? { SENPI_CODING_AGENT_DIR: launch.agentDir } : {}),
-				[HOST_WATCH_FD_ENV]: String(CHILD_WATCH_FD),
-				[HOST_WATCH_PPID_ENV]: String(process.pid),
-				[HOST_SCRATCH_DIR_ENV]: internal.dir,
-				[HOST_CLEANUP_PATHS_ENV]: [publicSocket, paths.pidFile, paths.settingsFile].join("\n"),
-			},
-			// Slot 3 is the lifetime pipe: "pipe" gives the child a read end it can
-			// wait on and keeps the write end owned by this process alone.
-			stdio: ["ignore", "ignore", "inherit", "pipe"],
+	const childLaunch = resolveHostChildLaunch(launch, internalSocket);
+	const child = spawn(childLaunch.command, childLaunch.args, {
+		env: {
+			...process.env,
+			...(launch.agentDir ? { SENPI_CODING_AGENT_DIR: launch.agentDir } : {}),
+			[HOST_WATCH_FD_ENV]: String(CHILD_WATCH_FD),
+			[HOST_WATCH_PPID_ENV]: String(process.pid),
+			[HOST_SCRATCH_DIR_ENV]: internal.dir,
+			[HOST_CLEANUP_PATHS_ENV]: [publicSocket, paths.pidFile, paths.settingsFile].join("\n"),
 		},
-	);
+		// Slot 3 is the lifetime pipe: "pipe" gives the child a read end it can
+		// wait on and keeps the write end owned by this process alone.
+		stdio: ["ignore", "ignore", "inherit", "pipe"],
+	});
 	// Nothing is ever written; the pipe exists purely so its EOF is a reliable
 	// death notification. Errors on it must not crash the supervisor.
 	child.stdio[CHILD_WATCH_FD]?.on("error", () => {});
