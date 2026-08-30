@@ -150,7 +150,7 @@ async function createLocalRuntime(qa: ReturnType<typeof scratch>): Promise<Agent
 		resourceLoaderOptions: { noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true },
 	});
 	const runtime = await createAgentSessionRuntime(
-		async ({ cwd, sessionManager: manager }) => ({
+		async ({ sessionManager: manager }) => ({
 			...(await createAgentSessionFromServices({ services, sessionManager: manager })),
 			services,
 			diagnostics: services.diagnostics,
