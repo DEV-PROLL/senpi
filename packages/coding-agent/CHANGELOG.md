@@ -24,6 +24,10 @@
 
 ### Fixed
 
+- Entries an extension appends while a replaced session is still binding (for example the `pi-rules` scan) now reach every attached RPC connection. The event subscription was reinstalled only after the deferred bind finished, so those durable entries were never delivered, and because the session file is not written until an assistant message exists nothing else could carry them.
+
+- The shared interactive host mirror now reconciles to the complete entry list the host reports, instead of backfilling only when empty, so it no longer stays permanently short of entries after a session replacement.
+
 - Fixed shared RPC socket host startup to fail fast when the spawned host exits before answering `get_protocol_info`, instead of silently consuming the full 10-second readiness budget, and made readiness diagnostics honest: an early exit reports the child's exit code, an incompatible host reports its advertised server version and capabilities against the expected values, and a host that never answered keeps the existing timeout message.
 
 ### New Features
