@@ -1,5 +1,23 @@
 # changes
 
+## 2026-08-30 - Export the RPC transport-gone classifier
+
+### What changed
+
+- `index.ts` and `modes/index.ts` re-export `RpcTransportGoneError` and `isTransportGoneError` beside `RpcClient` so embedders can classify shared-host transport loss.
+
+### Why
+
+- The reconnect-or-fallback orchestration rejects sends with the typed error; consumers of the public client surface need the classifier to distinguish transport loss from real failures.
+
+### Why an extension could not handle it
+
+- Package export surfaces are compile-time module structure; extensions cannot add public exports.
+
+### Expected merge conflict zones
+
+- LOW: export lists in `index.ts` and `modes/index.ts`.
+
 ## 2026-08-30 - Dispatch the internal RPC host route through wrapper-injected argv
 
 ### What changed
