@@ -51,7 +51,25 @@
   `replacementIssuedHere` for the duration of that rebind only.
 - Routed/shared-host behavior is unchanged: those connections still receive the broadcast.
 
+## 2026-08-30 - Fail fast and report honest spawned-host readiness diagnostics
 
+### What changed
+
+- `host-ensure.ts` observes the spawned host's exit event during readiness polling and aborts immediately when the child exits before answering `get_protocol_info`.
+- Readiness retains the last valid protocol answer so incompatible hosts report their advertised server version and capabilities alongside the expected values, while never-answered hosts retain the existing timeout message.
+- Added coverage for early child exit and answered-but-incompatible protocol information.
+
+### Why
+
+- A host that exits before binding can never become ready, but previously consumed the full 10-second readiness budget. An incompatible answer was also incorrectly reported as a host that never answered, obscuring version and capability mismatches.
+
+### Why an extension could not handle it
+
+- Spawn lifecycle observation and readiness diagnostics happen inside the core shared-host startup path before any extension can run.
+
+### Expected merge conflict zones
+
+- LOW: `host-ensure.ts` readiness polling and its focused test coverage.
 
 ## 2026-08-30 - Launch the shared RPC socket host correctly from compiled binaries
 
