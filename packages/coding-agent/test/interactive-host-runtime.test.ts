@@ -190,6 +190,7 @@ describe("interactive host runtime", () => {
 				projectTrusted: false,
 			} as never,
 			undefined,
+			undefined,
 			[
 				{ type: "message_start", sessionId: "own", message: message("own") } as never,
 				{ type: "message_start", message: message("untagged") } as never,
