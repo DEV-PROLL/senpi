@@ -5,7 +5,7 @@
  * The driver creates and removes its own sandbox; the environment variable is
  * accepted only as a compatibility marker and is never used as the sandbox.
  */
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createConnection, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -21,7 +21,8 @@ const agentDir = join(root, "agent");
 const cwd = join(root, "cwd");
 const socketPath = join(root, "rpc.sock");
 const transcriptPath = process.env.QA_TRANSCRIPT ?? join(process.cwd(), "shared-host-widget-qa-transcript.jsonl");
-let host: ChildProcessWithoutNullStreams | undefined;
+type HostProcess = ChildProcessByStdio<null, import("node:stream").Readable, import("node:stream").Readable>;
+let host: HostProcess | undefined;
 let socket: Socket | undefined;
 let fake: Awaited<ReturnType<typeof startFakeModelServer>> | undefined;
 let peerForTranscript: JsonlPeer | undefined;
@@ -34,7 +35,9 @@ class JsonlPeer {
 	readonly records: WireRecord[] = [];
 	private buffer = "";
 	private readonly waiters = new Set<{ predicate: (record: WireRecord) => boolean; resolve: (record: WireRecord) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-	constructor(private readonly peerSocket: Socket) {
+	private readonly peerSocket: Socket;
+	constructor(peerSocket: Socket) {
+		this.peerSocket = peerSocket;
 		peerSocket.on("data", (chunk: Buffer) => {
 			this.buffer += chunk.toString("utf8");
 			for (;;) {
@@ -90,18 +93,19 @@ async function main(): Promise<void> {
 	fake = await startFakeModelServer();
 	writeRpcModelsJson(agentDir, fake.origin);
 	const cli = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "cli.ts");
-	host = spawn(process.execPath, [cli, "--mode", "rpc", "--multi-session", "--listen", `unix://${socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL], {
+	const spawned: HostProcess = spawn(process.execPath, [cli, "--mode", "rpc", "--multi-session", "--listen", `unix://${socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL], {
 		cwd,
 		env: { ...process.env, ...hermeticProviderEnv(), ANTHROPIC_API_KEY: MOCK_API_KEY, PI_OFFLINE: "1", PI_TELEMETRY: "0", SENPI_RUNTIME: "node", SENPI_CODING_AGENT_DIR: agentDir, SENPI_RPC_CLIENT_CAPABILITIES: "extension_events,custom_unsupported" },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
+	host = spawned;
 	const ready = new Promise<void>((resolve, reject) => {
 		let stderr = "";
 		const timer = setTimeout(() => { cleanup(); reject(new Error(`host readiness timeout: ${stderr}`)); }, timeoutMs);
 		const onData = (chunk: Buffer) => { stderr += chunk.toString(); if (stderr.includes(`senpi rpc listening on unix://${socketPath}`)) { cleanup(); resolve(); } };
 		const onExit = () => { cleanup(); reject(new Error(`host exited before readiness: ${stderr}`)); };
-		const cleanup = () => { clearTimeout(timer); host!.stderr.off("data", onData); host!.off("exit", onExit); };
-		host.stderr.on("data", onData); host.once("exit", onExit);
+		const cleanup = () => { clearTimeout(timer); spawned.stderr.off("data", onData); spawned.off("exit", onExit); };
+		spawned.stderr.on("data", onData); spawned.once("exit", onExit);
 	});
 	await ready;
 	const peer = await connect();
