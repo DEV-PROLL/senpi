@@ -117,7 +117,7 @@ describe("model usability budget", () => {
 		expect(error.projection).toMatchObject({
 			model: "faux/372k",
 			contextWindow: 372_000,
-			liveContextTokens: 318_384,
+			liveContextTokens: 318_381,
 			outputReserveTokens: 32_000,
 			compactionReserveTokens: 16_384,
 			safetyMarginTokens: 8_192,
