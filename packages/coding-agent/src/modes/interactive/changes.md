@@ -1,5 +1,13 @@
 # changes
 
+## 2026-08-30 - Forward shared-host switch cwd overrides
+
+- `interactive-host-runtime.ts` forwards the `cwdOverride` field explicitly when the interactive proxy requests a shared-host session replacement, preserving the host-effective cwd through the RPC boundary and subsequent proxy refresh.
+
+### Why
+
+- The interactive runtime's switch options also carry local callbacks. Selecting the wire-supported cwd field explicitly prevents the shared-host request from depending on the broader local callback shape.
+
 ## 2026-08-28 - Hydrate setup-only proxy mirrors from host state
 
 - Proxy refresh now hydrates the explicit session path with authoritative host entries when deferred persistence has not created the file yet, so setup entries are visible immediately in replacement contexts.
