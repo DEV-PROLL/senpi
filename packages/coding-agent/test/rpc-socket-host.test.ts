@@ -299,7 +299,7 @@ describe("JSONL peer waiter lifecycle", () => {
 });
 
 describe("RPC Unix-socket multi-connection host", () => {
-	it("signals unsupported factory widgets while preserving array widgets", async () => {
+	it("renders factory widgets while preserving array widgets", async () => {
 		const qa = scratch("widget-factory");
 		const fake = await startFakeModelServer();
 		writeRpcModelsJson(qa.agentDir, fake.origin);
@@ -310,6 +310,8 @@ describe("RPC Unix-socket multi-connection host", () => {
 				pi.on("session_start", (_event, ctx) => {
 					ctx.ui.setWidget("array-widget", ["array widget"]);
 					ctx.ui.setWidget("factory-widget", () => ({ render: () => ["factory widget"] }));
+					ctx.ui.setHeader(() => ({ render: () => ["factory header"] }));
+					ctx.ui.setFooter(() => ({ render: () => ["factory footer"] }));
 				});
 			}\n`,
 		);
@@ -342,8 +344,17 @@ describe("RPC Unix-socket multi-connection host", () => {
 					value.method === "setWidget" &&
 					value.widgetKey === "array-widget",
 			);
-			const unsupported = peer.peer.waitFor(
-				(value) => value.type === "extension_ui_request" && value.method === "custom_unsupported",
+			const factoryWidget = peer.peer.waitFor(
+				(value) =>
+					value.type === "extension_ui_request" &&
+					value.method === "setWidget" &&
+					value.widgetKey === "factory-widget",
+			);
+			const factoryHeader = peer.peer.waitFor(
+				(value) => value.type === "extension_ui_request" && value.method === "setHeader",
+			);
+			const factoryFooter = peer.peer.waitFor(
+				(value) => value.type === "extension_ui_request" && value.method === "setFooter",
 			);
 			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
 			const sessionId = openedSessionId(opened);
@@ -353,12 +364,26 @@ describe("RPC Unix-socket multi-connection host", () => {
 				widgetKey: "array-widget",
 				widgetLines: ["array widget"],
 			});
-			expect(await unsupported).toMatchObject({
+			expect(await factoryWidget).toMatchObject({
 				type: "extension_ui_request",
-				method: "custom_unsupported",
-				extensionName: "widget component",
+				method: "setWidget",
+				widgetKey: "factory-widget",
+				widgetLines: ["factory widget"],
 				sessionId,
 			});
+			expect(await factoryHeader).toMatchObject({
+				type: "extension_ui_request",
+				method: "setHeader",
+				widgetLines: ["factory header"],
+				sessionId,
+			});
+			expect(await factoryFooter).toMatchObject({
+				type: "extension_ui_request",
+				method: "setFooter",
+				widgetLines: ["factory footer"],
+				sessionId,
+			});
+			expect(peer.peer.messages.some((value) => value.method === "custom_unsupported")).toBe(false);
 		} finally {
 			peer.peer.close();
 			peer.socket.destroy();
