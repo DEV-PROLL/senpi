@@ -4607,6 +4607,7 @@ export class AgentSession {
 			this._invalidateCompactionForModelSelection();
 		}
 		const thinking = this._getThinkingForModelSwitch(model, opts.ephemeralThinkingLevel);
+		const liveContextTokens = this._getDownswitchLiveContextTokens(model);
 		this.agent.state.model = model;
 		this.agent.abortServerSideFallback =
 			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
@@ -4649,10 +4650,11 @@ export class AgentSession {
 		const previousSystemPrompt = this.agent.state.systemPrompt;
 		try {
 			const systemPromptChange = await this._emitModelSelect(model, previousModel, opts.modelSelectSource);
-			this.assertModelUsable(model, this._getDownswitchLiveContextTokens(model));
+			this.assertModelUsable(model, liveContextTokens);
 			return systemPromptChange;
 		} catch (error) {
 			if (previousModel) this.agent.state.model = previousModel;
+			else delete (this.agent.state as { model?: Model<Api> }).model;
 			this.agent.state.systemPrompt = previousSystemPrompt;
 			throw error;
 		}
@@ -4729,17 +4731,26 @@ export class AgentSession {
 		});
 		this._emitServiceTierChangeIfNeeded(previousTier, previousFastMode);
 
-		const systemPromptChange = await this._emitModelSelect(next.model, currentModel, "cycle");
+		const previousSystemPrompt = this.agent.state.systemPrompt;
+		try {
+			const systemPromptChange = await this._emitModelSelect(next.model, currentModel, "cycle");
+			this.assertModelUsable(next.model, this._getDownswitchLiveContextTokens(next.model));
 
-		const cycleResult: ModelCycleResult = {
-			model: next.model,
-			thinkingLevel: this.thinkingLevel,
-			isScoped: true,
-		};
-		if (systemPromptChange) {
-			cycleResult.systemPromptChange = systemPromptChange;
+			const cycleResult: ModelCycleResult = {
+				model: next.model,
+				thinkingLevel: this.thinkingLevel,
+				isScoped: true,
+			};
+			if (systemPromptChange) {
+				cycleResult.systemPromptChange = systemPromptChange;
+			}
+			return cycleResult;
+		} catch (error) {
+			if (currentModel) this.agent.state.model = currentModel;
+			else delete (this.agent.state as { model?: Model<Api> }).model;
+			this.agent.state.systemPrompt = previousSystemPrompt;
+			throw error;
 		}
-		return cycleResult;
 	}
 
 	// =========================================================================
