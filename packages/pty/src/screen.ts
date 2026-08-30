@@ -7,7 +7,6 @@ import {
 	type ScreenOperation,
 	settleOperation,
 	sharedSettler,
-	trackSettler,
 } from "./screen-operations.ts";
 
 import {
@@ -85,8 +84,8 @@ export class TerminalScreen {
 			return this.coalesceFeedIntoReplay(payload);
 		}
 		this.pendingChars += payload.length;
-		const operation: ScreenOperation = { kind: "write", payload, settlers: [] };
-		return this.enqueue(operation, trackSettler(operation.settlers));
+		const operation: ScreenOperation = { kind: "write", payload, settled: null, settlers: [] };
+		return this.enqueue(operation, sharedSettler(operation));
 	}
 
 	resize(cols: number, rows: number): Promise<void> {
@@ -117,10 +116,18 @@ export class TerminalScreen {
 		return this.enqueue(operation, sharedSettler(operation));
 	}
 
+	/**
+	 * Resolves once everything fed before this call has been parsed. Attaches
+	 * to the queue tail instead of enqueueing a marker so a flush can never
+	 * split a tail replay (which would let over-cap feeds mint unbounded new
+	 * replay operations); only an empty queue enqueues a zero-length write.
+	 */
 	flush(): Promise<void> {
 		if (this.disposed) return Promise.resolve();
-		const operation: ScreenOperation = { kind: "write", payload: "", settlers: [] };
-		return this.enqueue(operation, trackSettler(operation.settlers));
+		const tail = this.operations[this.operations.length - 1];
+		if (tail !== undefined) return sharedSettler(tail);
+		const operation: ScreenOperation = { kind: "write", payload: "", settled: null, settlers: [] };
+		return this.enqueue(operation, sharedSettler(operation));
 	}
 
 	snapshot(): TerminalScreenSnapshot {

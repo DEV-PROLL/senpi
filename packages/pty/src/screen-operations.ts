@@ -6,6 +6,7 @@ export interface OperationSettler {
 export interface WriteOperation {
 	readonly kind: "write";
 	readonly payload: string;
+	settled: Promise<void> | null;
 	readonly settlers: OperationSettler[];
 }
 
@@ -51,11 +52,11 @@ export function trackSettler(settlers: OperationSettler[]): Promise<void> {
 }
 
 /**
- * Every caller coalesced into the same replay or merged resize shares ONE
- * promise and ONE settler, so a flood or resize storm cannot grow an
+ * Every caller attached to the same queued operation shares ONE promise and
+ * ONE settler, so a flood, resize storm, or flush storm cannot grow an
  * operation's settler memory with the number of callers.
  */
-export function sharedSettler(operation: ReplayOperation | ResizeOperation): Promise<void> {
+export function sharedSettler(operation: ScreenOperation): Promise<void> {
 	if (operation.settled === null) {
 		operation.settled = trackSettler(operation.settlers);
 	}

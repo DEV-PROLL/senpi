@@ -388,6 +388,35 @@ describe("TerminalScreen", () => {
 		}
 	});
 
+	it("keeps one bounded replay when flushes interleave an over-cap flood", async () => {
+		const originalWrite = xterm.Terminal.prototype.write;
+		xterm.Terminal.prototype.write = function heldWrite(): void {};
+
+		try {
+			const screen = new TerminalScreen({ cols: 20, rows: 4, scrollback: 10 });
+			const chunk = "y".repeat(65_536);
+			const outcomes: Promise<void>[] = [];
+			for (let index = 0; index < 17; index += 1) {
+				outcomes.push(screen.feed(chunk));
+			}
+			const firstCoalesced = screen.feed(chunk);
+			outcomes.push(firstCoalesced);
+
+			for (let index = 0; index < 30; index += 1) {
+				outcomes.push(screen.flush());
+				const coalesced = screen.feed(chunk);
+				outcomes.push(coalesced);
+				expect(coalesced).toBe(firstCoalesced);
+			}
+
+			screen.dispose();
+			const results = await Promise.allSettled(outcomes);
+			expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+		} finally {
+			xterm.Terminal.prototype.write = originalWrite;
+		}
+	});
+
 	it("keeps a queued resize replay intact when later floods trim history", async () => {
 		const originalWrite = xterm.Terminal.prototype.write;
 		const heldWrite: { release: (() => void) | null } = { release: null };
