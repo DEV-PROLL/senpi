@@ -29,29 +29,25 @@ export class FileHookStateStorage implements HookStateStorage {
 
 	read(scope: HookTrustStorageScope): HookTrustState {
 		const path = statePathForScope(scope, this.globalStatePath, this.projectStatePath);
-		const lockPath = `${path}.lock`;
-		const maxAttempts = 10;
-		const delayMs = 20;
-
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			const lockWasActive = existsSync(lockPath);
-			const snapshot = parseHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined);
-			if (snapshot !== undefined) {
-				return snapshot;
-			}
-			const lockIsActive = existsSync(lockPath);
-			if ((!lockWasActive && !lockIsActive) || attempt === maxAttempts) {
-				return emptyHookTrustState();
-			}
-			if (lockIsActive) {
-				const start = Date.now();
-				while (Date.now() - start < delayMs) {
-					Date.now();
-				}
-			}
+		const snapshot = parseHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined);
+		if (snapshot !== undefined) {
+			return snapshot;
 		}
 
-		return emptyHookTrustState();
+		let release: () => void;
+		try {
+			release = acquireHookStateLockSync(path);
+		} catch (error) {
+			if (errorCode(error) === "ELOCKED") {
+				return emptyHookTrustState();
+			}
+			throw error;
+		}
+		try {
+			return readHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined);
+		} finally {
+			release();
+		}
 	}
 
 	update(scope: HookTrustStorageScope, updater: (current: HookTrustState) => HookTrustState): HookTrustState {

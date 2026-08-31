@@ -5,10 +5,10 @@
 ### What changed
 
 - `packages/coding-agent/src/core/extensions/builtin/hooks/trust-storage.ts`: complete trust-state snapshots remain on a
-  lock-free read path. Malformed or empty reads compare the exact legacy writer lock before and after each read and
-  retry for at most ten 20 ms intervals when a writer was active, so publication followed by lock removal cannot make
-  a reader return bytes captured during the earlier truncate phase. Malformed or empty unlocked snapshots still fail
-  closed.
+  lock-free read path. After any malformed or empty read, the reader boundedly acquires the exact writer lock and
+  re-reads while excluding writers. It returns a complete exclusive reread, returns fail-closed empty state when the
+  exclusive reread is still malformed, and also fails closed without surfacing `ELOCKED` when a live writer outlasts
+  the bounded acquisition window.
 - `packages/coding-agent/src/core/extensions/builtin/hooks/trust-state-json.ts`: snapshot JSON parsing now reports
   completeness separately from the fail-closed empty state, allowing storage to retry only incomplete reads without
   changing trust parsing behavior.
@@ -22,10 +22,11 @@
 
 - Concurrent session startup only reads hook trust state and must not fail because another process temporarily owns the
   writer lock. New writers publish by rename, but mixed-version deployments still include legacy writers that truncate
-  the destination under the same lock before rewriting it. A reader that captured those incomplete bytes could observe
-  the lock disappear after valid publication and return stale empty trust state; bounded retries around only incomplete
-  snapshots close that race without making complete reads contend. Applying the intended mode after creation keeps both
-  preserved and new-file modes independent of process umask.
+  the destination under the same lock before rewriting it. Sampling lock absence before and after an incomplete read is
+  ABA-vulnerable: a legacy writer can acquire, truncate, publish, and unlock between both samples. Acquiring the writer
+  lock after an incomplete read establishes a writer-excluding revalidation interval, making that ABA harmless without
+  making complete reads contend. Applying the intended mode after creation keeps both preserved and new-file modes
+  independent of process umask.
 - Cleanup must not mask the publication failure that caused it, but losing the cleanup failure would hide a leaked
   temporary file and make the storage fault incomplete to diagnose.
 
@@ -39,9 +40,9 @@
 
 - LOW in `packages/coding-agent/src/core/extensions/builtin/hooks/trust-storage.ts` around `FileHookStateStorage.read`
   and `FileHookStateStorage.update`, and in `trust-state-json.ts` around snapshot completeness parsing. Upstream edits to
-  hook trust persistence should retain lock-free complete reads, bounded legacy-writer recovery for incomplete reads,
-  same-directory atomic publication, umask-independent mode preservation/default `0600`, and ordered aggregate cleanup
-  errors.
+  hook trust persistence should retain lock-free complete reads, writer-excluding bounded revalidation for incomplete
+  reads, fail-closed `ELOCKED` exhaustion, same-directory atomic publication, umask-independent mode
+  preservation/default `0600`, and ordered aggregate cleanup errors.
 
 ## service-tier: clear the fast indicator when the session leaves the Codex family (2026-08-28)
 
