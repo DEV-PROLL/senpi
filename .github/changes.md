@@ -1,5 +1,23 @@
 # changes
 
+## Windows fs.watch regression joins the terminal cross-OS CI job (2026-08-31)
+
+### What changed
+
+- `.github/workflows/ci.yml` appends `test/suite/regressions/issue-1229-win-fswatch-noncanonical-abort.test.ts` to the `terminal-cross-os` job's Vitest invocation so the win32-only regression actually executes on the windows-latest runner.
+
+### Why
+
+- The main coding-agent test shards run on ubuntu only, where the win32-gated regression for the `/resume` fs.watch abort ([#1229](https://github.com/code-yeongyu/senpi/issues/1229)) always skips; the 3-OS terminal job is the only lane with a real Windows runner.
+
+### Why an extension could not handle it
+
+- CI workflow wiring is repository build plumbing; no runtime extension hook can add a test to a GitHub Actions job.
+
+### Expected merge conflict zones
+
+- The `Terminal extension + shell resolution tests` step's file list in `.github/workflows/ci.yml`.
+
 ## Release workflow re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed

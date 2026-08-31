@@ -1,5 +1,23 @@
 # changes
 
+## Canonicalize Windows fs.watch paths before watching (2026-08-31)
+
+### What changed
+
+- `packages/coding-agent/src/utils/fs-watch.ts` resolves existing watch paths with `realpathSync.native()` on Windows before calling `fs.watch()`, keeping the raw path when resolution fails (missing paths still surface through the existing `onError` flow).
+
+### Why
+
+- libuv's Windows fs-event implementation `abort()`s the whole process (`Assertion failed: !_wcsnicmp(filename, dir, dirlen), src\win\fs-event.c:72`) when a watched directory path carries a non-canonical component (8.3 short name, junction) and an incoming event's long-path conversion no longer prefix-matches the stored watch path. Entering a session from the `/resume` selector re-creates the runtime while such watchers are armed, killing the app ([#1229](https://github.com/code-yeongyu/senpi/issues/1229)).
+
+### Why an extension could not handle it
+
+- The abort happens inside libuv native code before any JavaScript `error` event fires, and every repository watcher (footer git watchers, theme watcher, config-reload) routes through this shared wrapper.
+
+### Expected merge conflict zones
+
+- LOW: the `watchWithErrorHandler` body in `packages/coding-agent/src/utils/fs-watch.ts`.
+
 ## Utils re-diverge from upstream dcd4619 (2026-08-25)
 
 ### What changed

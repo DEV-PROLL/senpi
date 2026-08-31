@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Windows session resume no longer aborts the process when `fs.watch()` receives an event for a watch path containing a non-canonical component; existing paths are canonicalized before watching ([#1229](https://github.com/code-yeongyu/senpi/issues/1229)).
+
 ### New Features
 
 ### Breaking Changes

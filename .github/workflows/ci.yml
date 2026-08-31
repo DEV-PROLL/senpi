@@ -214,7 +214,7 @@ jobs:
 
       - name: Terminal extension + shell resolution tests
         shell: bash
-        run: npx vitest run test/suite/terminal-extension.test.ts test/suite/terminal-settings-notify.test.ts test/suite/shell-config-kind.test.ts
+        run: npx vitest run test/suite/terminal-extension.test.ts test/suite/terminal-settings-notify.test.ts test/suite/shell-config-kind.test.ts test/suite/regressions/issue-1229-win-fswatch-noncanonical-abort.test.ts
         working-directory: packages/coding-agent
 
   inspector-handoff:
