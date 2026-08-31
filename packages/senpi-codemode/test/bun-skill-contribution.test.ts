@@ -90,4 +90,11 @@ describe("bun-1-4 skill assets", () => {
 		const references = readdirSync(bunSkillRefs).filter((name) => name.endsWith(".md"));
 		expect(references).toHaveLength(10);
 	});
+
+	it("ships a single document: one frontmatter block and one H1", () => {
+		const text = readFileSync(bunSkillMd, "utf8");
+		expect(text.match(/^---$/gm)).toHaveLength(2);
+		expect(text.match(/^# Bun 1\.4/gm)).toHaveLength(1);
+		expect(text.match(/^## Operating rules$/gm)).toHaveLength(1);
+	});
 });

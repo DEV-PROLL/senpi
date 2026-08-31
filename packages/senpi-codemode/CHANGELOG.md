@@ -6,8 +6,9 @@
 
 ### Added
 
-- The codemode extension now bundles the `bun-1-4` skill and contributes it via `resources_discover` when
-  bun >= 1.4 is detected (PATH probe with `process.versions.bun` fallback).
+- The codemode extension now bundles the `bun-1-4` skill and contributes it via `resources_discover` only
+  when the js eval kernel itself runs bun >= 1.4 (`process.versions.bun`); node-kernel sessions never
+  receive the skill, regardless of any bun binary on PATH.
 
 ### Changed
 
