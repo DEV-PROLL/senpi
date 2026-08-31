@@ -72,11 +72,11 @@ async function startServer(handler: (stream: http2.ServerHttp2Stream) => void): 
 	return `http://127.0.0.1:${address.port}`;
 }
 
-async function runStream(baseUrl: string, sessionId: string, userContent = "hello") {
+async function runStream(baseUrl: string, sessionId: string, userContent = "hello", conversationId?: string) {
 	const result = streamCursorAgent(
 		buildModel(baseUrl),
 		{ messages: [{ role: "user", content: userContent, timestamp: 0 }] },
-		{ apiKey: "test-token", sessionId, signal: neverAbortedSignal },
+		{ apiKey: "test-token", sessionId, conversationId, signal: neverAbortedSignal },
 	);
 	for await (const _event of result) {
 		// drain
@@ -95,9 +95,11 @@ describe("cursor-agent conversation cache eviction (#1024)", () => {
 		originalEnv = {
 			PI_CURSOR_CONVERSATION_CACHE_LIMIT: process.env.PI_CURSOR_CONVERSATION_CACHE_LIMIT,
 			PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES: process.env.PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES,
+			PI_CURSOR_CONVERSATION_TOTAL_BLOB_LIMIT_BYTES: process.env.PI_CURSOR_CONVERSATION_TOTAL_BLOB_LIMIT_BYTES,
 		};
 		delete process.env.PI_CURSOR_CONVERSATION_CACHE_LIMIT;
 		delete process.env.PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES;
+		delete process.env.PI_CURSOR_CONVERSATION_TOTAL_BLOB_LIMIT_BYTES;
 		cleanupSessionResources();
 	});
 
@@ -163,14 +165,17 @@ describe("cursor-agent conversation cache eviction (#1024)", () => {
 		expect(stats.keys).not.toContain("sess-rotate-cache");
 	});
 
-	it("caps the number of cached conversations, evicting the oldest first", async () => {
+	it("caps the number of conversations one session caches, evicting the oldest first", async () => {
+		// The cap is per owning session: one session's churn must never forget
+		// another session's conversation, so the overflow is driven from a single
+		// session cycling conversation ids.
 		process.env.PI_CURSOR_CONVERSATION_CACHE_LIMIT = "3";
 		const baseUrl = await startServer((stream) => {
 			stream.write(turnEndedFrame());
 			stream.end();
 		});
-		for (const sessionId of ["cap-1", "cap-2", "cap-3", "cap-4", "cap-5"]) {
-			await runStream(baseUrl, sessionId);
+		for (const conversationId of ["cap-1", "cap-2", "cap-3", "cap-4", "cap-5"]) {
+			await runStream(baseUrl, "sess-cap", "hello", conversationId);
 		}
 
 		const stats = getCursorConversationCacheStats();
