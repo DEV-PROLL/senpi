@@ -1519,7 +1519,10 @@ export class SessionManager {
 
 	private _getFullHistoryEntries(): FileEntry[] {
 		if (!this.sessionFile) return this.fileEntries;
-		return (this.fullHistoryEntriesCache ??= sessionEntryLoader(this.sessionFile));
+		if (this.fullHistoryEntriesCache === null) {
+			this.fullHistoryEntriesCache = sessionEntryLoader(this.sessionFile);
+		}
+		return this.fullHistoryEntriesCache;
 	}
 
 	/**
