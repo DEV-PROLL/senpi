@@ -2,12 +2,12 @@ import { mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ResidentStringStore } from "../../src/core/session-resident-store.ts";
 import {
 	loadEntriesFromFile,
-	setSessionEntryLoaderForTesting,
 	SessionManager,
+	setSessionEntryLoaderForTesting,
 } from "../../src/core/session-manager.ts";
+import { ResidentStringStore } from "../../src/core/session-resident-store.ts";
 import { assistantMsg, userMsg } from "../utilities.ts";
 
 const LARGE_TEXT = "x".repeat(1024 * 1024);
@@ -91,7 +91,8 @@ describe("SessionManager resident mirror", () => {
 			session.buildContextEntries();
 			expect(loadCount).toBe(1);
 			expect(session.getResidentStoreStats().blobBytes).toBeLessThanOrEqual(64 * 1024 * 1024);
-			const compactCache = (session as unknown as { compactEntriesCache: { entries: unknown[] } }).compactEntriesCache;
+			const compactCache = (session as unknown as { compactEntriesCache: { entries: unknown[] } })
+				.compactEntriesCache;
 			expect(JSON.stringify(compactCache.entries)).not.toContain(LARGE_TEXT);
 			const firstReadCount = loadCount;
 			session.buildContextEntries();

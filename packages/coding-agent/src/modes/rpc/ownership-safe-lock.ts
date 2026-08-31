@@ -81,7 +81,9 @@ export async function acquireOwnershipSafeLock(
 			// it as the typed legacy error instead of a raw SQLITE_CANTOPEN.
 			await rejectLegacyDirectory(lockPath);
 			if (isBusy(error) && Date.now() < deadline) {
-				await new Promise((resolve) => setTimeout(resolve, Math.min(retries.minTimeout, Math.max(1, deadline - Date.now()))));
+				await new Promise((resolve) =>
+					setTimeout(resolve, Math.min(retries.minTimeout, Math.max(1, deadline - Date.now()))),
+				);
 				continue;
 			}
 			throw error;
