@@ -6,7 +6,8 @@
 
 - `packages/coding-agent/src/core/extensions/builtin/hooks/trust-storage.ts`: trust-state reads use the last complete
   snapshot without taking the bounded writer lock; serialized writers create a same-directory temporary snapshot,
-  preserve an existing destination's mode (or use `0600` for a new file), and atomically publish it with rename.
+  apply an existing destination's mode (or `0600` for a new file) exactly with `chmod` after creation so process umask
+  cannot mask it, and atomically publish it with rename.
 - Failed publication removes the temporary snapshot. If publication and cleanup both fail, the storage throws an
   `AggregateError` containing the publication error first and cleanup error second; successful cleanup preserves the
   original publication error unchanged.
@@ -15,7 +16,8 @@
 
 - Concurrent session startup only reads hook trust state and must not fail because another process temporarily owns the
   writer lock. Publishing a complete snapshot by same-directory rename keeps those lock-free readers from observing
-  partial JSON, while explicit modes prevent a permissive umask from widening a newly created trust-state file.
+  partial JSON, while applying the intended mode after creation makes both preserved and new-file modes independent of
+  process umask.
 - Cleanup must not mask the publication failure that caused it, but losing the cleanup failure would hide a leaked
   temporary file and make the storage fault incomplete to diagnose.
 
@@ -29,7 +31,8 @@
 
 - LOW in `packages/coding-agent/src/core/extensions/builtin/hooks/trust-storage.ts` around `FileHookStateStorage.read`
   and `FileHookStateStorage.update`; upstream edits to hook trust persistence should retain lock-free reads,
-  same-directory atomic publication, mode preservation/default `0600`, and ordered aggregate cleanup errors.
+  same-directory atomic publication, umask-independent mode preservation/default `0600`, and ordered aggregate cleanup
+  errors.
 
 ## service-tier: clear the fast indicator when the session leaves the Codex family (2026-08-28)
 

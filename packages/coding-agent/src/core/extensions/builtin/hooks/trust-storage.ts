@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../../../../config.ts";
@@ -40,6 +40,7 @@ export class FileHookStateStorage implements HookStateStorage {
 			const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
 			try {
 				writeFileSync(tempPath, serializeHookTrustState(next), { encoding: "utf-8", mode });
+				chmodSync(tempPath, mode);
 				renameSync(tempPath, path);
 			} catch (publicationError) {
 				try {

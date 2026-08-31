@@ -244,7 +244,7 @@ describe("builtin hooks trust", () => {
 		10_000,
 	);
 
-	it.runIf(process.platform !== "win32")("preserves an existing snapshot's restrictive mode", async () => {
+	it.runIf(process.platform !== "win32")("preserves an existing snapshot's mode despite a masking umask", async () => {
 		// Given
 		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
 		createdDirs.push(root);
@@ -254,22 +254,25 @@ describe("builtin hooks trust", () => {
 		mkdirSync(dirname(statePath), { recursive: true });
 		mkdirSync(cwd, { recursive: true });
 		writeFileSync(statePath, '{"version":1,"hooks":{}}\n', "utf-8");
-		chmodSync(statePath, 0o600);
+		chmodSync(statePath, 0o644);
 		const storage = new FileHookStateStorage({ agentDir, cwd });
-		const previousUmask = process.umask(0);
+		const previousUmask = process.umask();
 
 		try {
 			// When
-			storage.update("global", (current) => current);
+			storage.update("global", (current) => {
+				process.umask(0o077);
+				return current;
+			});
 
 			// Then
-			expect(statSync(statePath).mode & 0o777).toBe(0o600);
+			expect(statSync(statePath).mode & 0o777).toBe(0o644);
 		} finally {
 			process.umask(previousUmask);
 		}
 	});
 
-	it.runIf(process.platform !== "win32")("creates a new snapshot with mode 0600 regardless of umask", async () => {
+	it.runIf(process.platform !== "win32")("creates a new snapshot with mode 0600 despite a masking umask", async () => {
 		// Given
 		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
 		createdDirs.push(root);
@@ -278,11 +281,14 @@ describe("builtin hooks trust", () => {
 		mkdirSync(cwd, { recursive: true });
 		const storage = new FileHookStateStorage({ agentDir, cwd });
 		const statePath = join(agentDir, "hooks-state.json");
-		const previousUmask = process.umask(0);
+		const previousUmask = process.umask();
 
 		try {
 			// When
-			storage.update("global", (current) => current);
+			storage.update("global", (current) => {
+				process.umask(0o777);
+				return current;
+			});
 
 			// Then
 			expect(statSync(statePath).mode & 0o777).toBe(0o600);

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const injectedFailures = vi.hoisted(() => ({
+	chmod: undefined as Error | undefined,
 	cleanup: undefined as Error | undefined,
 	publication: undefined as Error | undefined,
 }));
@@ -13,6 +14,12 @@ vi.mock("node:fs", async (importOriginal) => {
 	const original = await importOriginal<typeof import("node:fs")>();
 	return {
 		...original,
+		chmodSync: (...args: Parameters<typeof original.chmodSync>) => {
+			if (injectedFailures.chmod !== undefined) {
+				throw injectedFailures.chmod;
+			}
+			return original.chmodSync(...args);
+		},
 		renameSync: (...args: Parameters<typeof original.renameSync>) => {
 			if (injectedFailures.publication !== undefined) {
 				throw injectedFailures.publication;
@@ -33,6 +40,7 @@ import { FileHookStateStorage } from "../../src/core/extensions/builtin/hooks/tr
 const createdDirs: string[] = [];
 
 afterEach(async () => {
+	injectedFailures.chmod = undefined;
 	injectedFailures.publication = undefined;
 	injectedFailures.cleanup = undefined;
 	for (const dir of createdDirs.splice(0)) {
@@ -67,6 +75,35 @@ describe("builtin hooks trust storage failures", () => {
 		expect(thrown).toMatchObject({
 			message: "Failed to publish and clean up hook trust state snapshot",
 			errors: [publicationError, cleanupError],
+		});
+	});
+
+	it("preserves chmod and cleanup failures in order", async () => {
+		// Given
+		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-errors-"));
+		createdDirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "repo");
+		actualFs.mkdirSync(cwd, { recursive: true });
+		const storage = new FileHookStateStorage({ agentDir, cwd });
+		const chmodError = new Error("injected chmod failure");
+		const cleanupError = new Error("injected cleanup failure");
+		injectedFailures.chmod = chmodError;
+		injectedFailures.cleanup = cleanupError;
+
+		// When
+		let thrown: unknown;
+		try {
+			storage.update("global", (current) => current);
+		} catch (error) {
+			thrown = error;
+		}
+
+		// Then
+		expect(thrown).toBeInstanceOf(AggregateError);
+		expect(thrown).toMatchObject({
+			message: "Failed to publish and clean up hook trust state snapshot",
+			errors: [chmodError, cleanupError],
 		});
 	});
 
