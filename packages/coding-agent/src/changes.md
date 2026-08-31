@@ -1,23 +1,5 @@
 # changes
 
-## 2026-08-31 - Canonicalize Windows fs.watch paths before watching
-
-### What changed
-
-- `packages/coding-agent/src/utils/fs-watch.ts` resolves existing watch paths with `realpathSync.native()` on Windows before calling `fs.watch()`, while preserving the raw path when resolution fails.
-
-### Why
-
-- libuv can abort the process on Windows when a watch path contains a non-canonical component such as an 8.3 short name or junction and an event arrives with its canonical long path ([#1229](https://github.com/code-yeongyu/senpi/issues/1229)).
-
-### Why an extension could not handle it
-
-- The abort occurs inside libuv's native Windows fs-event implementation before JavaScript can receive an error event, and all repository watchers share this wrapper.
-
-### Expected merge conflict zones
-
-- LOW: `packages/coding-agent/src/utils/fs-watch.ts` watcher setup.
-
 ## 2026-08-30 - Export the RPC transport-gone classifier
 
 ### What changed
