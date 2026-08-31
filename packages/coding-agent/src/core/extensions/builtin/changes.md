@@ -4,10 +4,16 @@
 
 ### What changed
 
-- `packages/coding-agent/src/core/extensions/builtin/hooks/trust-storage.ts`: trust-state reads use the last complete
-  snapshot without taking the bounded writer lock; serialized writers create a same-directory temporary snapshot,
-  apply an existing destination's mode (or `0600` for a new file) exactly with `chmod` after creation so process umask
-  cannot mask it, and atomically publish it with rename.
+- `packages/coding-agent/src/core/extensions/builtin/hooks/trust-storage.ts`: complete trust-state snapshots remain on a
+  lock-free read path. Malformed or empty reads compare the exact legacy writer lock before and after each read and
+  retry for at most ten 20 ms intervals when a writer was active, so publication followed by lock removal cannot make
+  a reader return bytes captured during the earlier truncate phase. Malformed or empty unlocked snapshots still fail
+  closed.
+- `packages/coding-agent/src/core/extensions/builtin/hooks/trust-state-json.ts`: snapshot JSON parsing now reports
+  completeness separately from the fail-closed empty state, allowing storage to retry only incomplete reads without
+  changing trust parsing behavior.
+- Serialized writers create a same-directory temporary snapshot, apply an existing destination's mode (or `0600` for a
+  new file) exactly with `chmod` after creation so process umask cannot mask it, and atomically publish it with rename.
 - Failed publication removes the temporary snapshot. If publication and cleanup both fail, the storage throws an
   `AggregateError` containing the publication error first and cleanup error second; successful cleanup preserves the
   original publication error unchanged.
@@ -15,9 +21,11 @@
 ### Why
 
 - Concurrent session startup only reads hook trust state and must not fail because another process temporarily owns the
-  writer lock. Publishing a complete snapshot by same-directory rename keeps those lock-free readers from observing
-  partial JSON, while applying the intended mode after creation makes both preserved and new-file modes independent of
-  process umask.
+  writer lock. New writers publish by rename, but mixed-version deployments still include legacy writers that truncate
+  the destination under the same lock before rewriting it. A reader that captured those incomplete bytes could observe
+  the lock disappear after valid publication and return stale empty trust state; bounded retries around only incomplete
+  snapshots close that race without making complete reads contend. Applying the intended mode after creation keeps both
+  preserved and new-file modes independent of process umask.
 - Cleanup must not mask the publication failure that caused it, but losing the cleanup failure would hide a leaked
   temporary file and make the storage fault incomplete to diagnose.
 
@@ -30,7 +38,8 @@
 ### Expected merge conflict zones
 
 - LOW in `packages/coding-agent/src/core/extensions/builtin/hooks/trust-storage.ts` around `FileHookStateStorage.read`
-  and `FileHookStateStorage.update`; upstream edits to hook trust persistence should retain lock-free reads,
+  and `FileHookStateStorage.update`, and in `trust-state-json.ts` around snapshot completeness parsing. Upstream edits to
+  hook trust persistence should retain lock-free complete reads, bounded legacy-writer recovery for incomplete reads,
   same-directory atomic publication, umask-independent mode preservation/default `0600`, and ordered aggregate cleanup
   errors.
 

@@ -3,7 +3,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../../../../config.ts";
-import { emptyHookTrustState, type HookTrustStorageScope, readHookTrustStateJson } from "./trust.ts";
+import type { HookTrustStorageScope } from "./trust.ts";
+import { emptyHookTrustState, parseHookTrustStateJson, readHookTrustStateJson } from "./trust-state-json.ts";
 import type { HookTrustEntry, HookTrustState } from "./types.ts";
 
 export interface HookStateStorage {
@@ -28,7 +29,29 @@ export class FileHookStateStorage implements HookStateStorage {
 
 	read(scope: HookTrustStorageScope): HookTrustState {
 		const path = statePathForScope(scope, this.globalStatePath, this.projectStatePath);
-		return readHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined);
+		const lockPath = `${path}.lock`;
+		const maxAttempts = 10;
+		const delayMs = 20;
+
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			const lockWasActive = existsSync(lockPath);
+			const snapshot = parseHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined);
+			if (snapshot !== undefined) {
+				return snapshot;
+			}
+			const lockIsActive = existsSync(lockPath);
+			if ((!lockWasActive && !lockIsActive) || attempt === maxAttempts) {
+				return emptyHookTrustState();
+			}
+			if (lockIsActive) {
+				const start = Date.now();
+				while (Date.now() - start < delayMs) {
+					Date.now();
+				}
+			}
+		}
+
+		return emptyHookTrustState();
 	}
 
 	update(scope: HookTrustStorageScope, updater: (current: HookTrustState) => HookTrustState): HookTrustState {
