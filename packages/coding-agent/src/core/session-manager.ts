@@ -1517,9 +1517,7 @@ export class SessionManager {
 		if (this.compactEntriesCache?.mutation !== this.mutationCount) {
 			this.compactEntriesCache = {
 				mutation: this.mutationCount,
-				entries: this.fileEntries
-					.filter((e): e is SessionEntry => e.type !== "session")
-					.map((entry) => this.residentStore.externalize(this.residentStore.materialize(entry))),
+				entries: this.fileEntries.filter((e): e is SessionEntry => e.type !== "session"),
 			};
 		}
 
