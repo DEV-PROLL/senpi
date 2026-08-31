@@ -1,6 +1,25 @@
 # Core Extensions Changes
 
 
+## Expose the extension event bus for session activity signals (2026-08-31)
+
+### What changed
+
+- `runner.ts`: `ExtensionRunner.onBusEvent(channel, handler)` subscribes to a raw bus channel and returns an unsubscribe, mirroring the existing `onRpcEvent` helper.
+
+### Why
+
+- The session must observe `wake_source_state` publications (background terminal jobs, terminal monitors, loop-guard holds) to know whether work outlives the current turn; the shared RPC host's idle eviction consults that through `AgentSession.isSessionBusy`. The bus was private to the runner, so the session had no way to read activity extensions already publish.
+
+### Why an extension could not handle it
+
+- The subscription is made by the session that owns the runner, beneath every extension surface; an extension cannot grant the host visibility into another extension's activity.
+
+### Expected merge conflict zones
+
+- LOW: the accessor block next to `onRpcEvent` in `runner.ts`.
+
+
 ## Builtin /account command (2026-08-27)
 
 ### What changed

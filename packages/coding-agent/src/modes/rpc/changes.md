@@ -1,5 +1,28 @@
 # changes
 
+## 2026-08-31 - Shared-host occupancy: idle eviction, session cap, empty-host exit
+
+### What changed
+
+- `session-registry.ts`: entries track `lastCommandAt` (refreshed by every routed command and by path attach), the registry exposes its live entry count, and `openSession` enforces an optional `maxSessions` admission cap (attach-on-open exempt) with the new `too_many_sessions` error code.
+- `rpc-types.ts`: `too_many_sessions` joins the stable multi-session protocol error codes (`RPC_ERROR_TOO_MANY_SESSIONS` and the `RpcErrorCode` union member), so the session-cap failure is machine-matchable like every other routing error.
+- `session-command-router.ts`: an optional `RpcSessionIdlePolicy` constructor argument arms an unref'd sweep that evicts sessions idle past `idleEvictionMs` through the existing `beginClose`→`closeMarked` path (all attachments drained, pending extension UI requests cancelled, `session_closed` broadcast). Eviction defers to the complete session activity contract (`AgentSession.isSessionBusy`: agent run, bash, background terminal jobs and other published wake sources, compaction, barrier-held session work), restarting the idle clock while work is live. It also fires a once-only `onEmptyExit` after `emptyExitMs` of continuous registry emptiness, gated by `canExitWhenEmpty`, and drops the writer's per-session bookkeeping for the evicted handle; `dispose()` stops the sweep.
+- `session-event-writer.ts`: `forgetSession(sessionId)` drops the sealed-handle and snapshot entries for a handle whose runtime is fully disposed, so host-driven eviction no longer retains one sealed id per session for the process epoch.
+- `multi-session-host.ts`: `createHostCore` is exported and resolves the policy from `SENPI_RPC_SESSION_IDLE_EVICTION_MS` / `SENPI_RPC_MAX_SESSIONS` / `SENPI_RPC_HOST_EMPTY_EXIT_MS` (defaults 30 min / 8 / 15 min) with explicit overrides for tests; both host flavors pass their shutdown path as `onEmptyExit`, and the socket host passes `canExitWhenEmpty` so a connected-but-sessionless client counts as occupancy. `MultiSessionHostOptions` gains an optional `createBinding` test seam (defaults to the real binding), mirroring the router's existing injection point.
+- `host-lifecycle.ts`: `classifyChildExit()` treats a host that exits 0 without a signal as an intentional stop on its own idle policy (supervisor exit 0, same cleanup) instead of reporting `exited unexpectedly` and exiting 1; any non-zero code or signal remains a crash.
+
+### Why
+
+- The shared host reclaimed nothing without client cooperation: an abandoned session kept its full runtime, watchers, and transcript resident forever; `open_session` was unbounded (each open owns hundreds of MB; a measured desktop host reached 1.28 GB in 54 minutes); and an empty host lived until its pipe died. The supervisor only covers supervised socket hosts with zero connections, and it read the host's own clean idle exit as a crash - reachable whenever a client stayed connected without a session - so the intentional shutdown had to become part of the supervised contract rather than an exit-1 path.
+
+### Why an extension could not handle it
+
+- Idle accounting, admission, and host lifetime live in the routing and supervisor layers beneath every extension surface; extensions cannot observe routed-command timing, registry occupancy, or process exit classification.
+
+### Expected merge conflict zones
+
+- LOW: the registry options/entry tail in `session-registry.ts`, the router constructor tail plus the sweep/eviction methods in `session-command-router.ts`, `createHostCore` with the policy constants in `multi-session-host.ts`, the child-exit handler in `host-lifecycle.ts`, and the `forgetSession` accessor in `session-event-writer.ts`.
+
 ## 2026-08-30 - Shared-host rendered component capability lifecycle
 
 ### What changed

@@ -34,11 +34,19 @@ export interface RpcSessionEntry {
 	cwd: string;
 	/** Live attachments (open + later attaches). The runtime is disposed only when the last one closes. */
 	attachments: number;
+	/** Timestamp of the last routed command / observed activity; drives idle eviction. */
+	lastCommandAt: number;
 	lifecycleMutex: Promise<void>;
 }
 
 export class RpcSessionRegistryError extends Error {
-	readonly code: "unknown_session" | "session_closing" | "session_path_in_use" | "invalid_path" | "open_failed";
+	readonly code:
+		| "unknown_session"
+		| "session_closing"
+		| "session_path_in_use"
+		| "invalid_path"
+		| "open_failed"
+		| "too_many_sessions";
 
 	constructor(code: RpcSessionRegistryError["code"], reason?: string) {
 		super(code === "open_failed" && reason ? `${code}: ${reason}` : code);
@@ -50,6 +58,10 @@ export class RpcSessionRegistryError extends Error {
 export interface RpcSessionRegistryOptions {
 	agentDir: string;
 	createRuntime: CreateAgentSessionRuntimeFactory;
+	/** Injectable clock (defaults to Date.now) so idle bookkeeping is testable. */
+	now?: () => number;
+	/** Cap on concurrently opening/open sessions; attach-on-open is exempt. */
+	maxSessions?: number;
 }
 
 export interface OpenRpcSession {
@@ -79,9 +91,16 @@ export class RpcSessionRegistry {
 	private readonly reservations = new Set<string>();
 	private nextHandle = 0;
 	private readonly options: RpcSessionRegistryOptions;
+	private readonly now: () => number;
 
 	constructor(options: RpcSessionRegistryOptions) {
 		this.options = options;
+		this.now = options.now ?? Date.now;
+	}
+
+	/** Number of live entries, including ones still opening or closing. */
+	get size(): number {
+		return this.entries.size;
 	}
 
 	async openSession(profile: RpcSessionLaunchProfile): Promise<OpenRpcSession> {
@@ -100,12 +119,20 @@ export class RpcSessionRegistry {
 			const [handle, entry] = existing;
 			entry.attachments += 1;
 			if (!entry.durableSessionId) throw new RpcSessionRegistryError("session_path_in_use");
+			entry.lastCommandAt = this.now();
 			return {
 				sessionId: handle,
 				durableSessionId: entry.durableSessionId,
 				sessionPath: entry.sessionPath,
 				attached: true,
 			};
+		}
+		const maxSessions = this.options.maxSessions;
+		if (maxSessions !== undefined && this.countActiveSessions() >= maxSessions) {
+			// Reconnect-churn backstop: every open_session owns a complete runtime
+			// (hundreds of MB measured), so admission is bounded. Attachments to a
+			// live session add none and stay allowed via the branch above.
+			throw new RpcSessionRegistryError("too_many_sessions");
 		}
 		if (sessionPath) this.reservations.add(sessionPath);
 
@@ -128,6 +155,7 @@ export class RpcSessionRegistry {
 			reservationKey: sessionPath,
 			cwd: storedProfile.cwd,
 			attachments: 1,
+			lastCommandAt: this.now(),
 			lifecycleMutex: Promise.resolve(),
 		};
 		entry.switchSession = (sessionPath, options) => {
@@ -220,6 +248,9 @@ export class RpcSessionRegistry {
 			throw new RpcSessionRegistryError("session_closing");
 		}
 		if (entry.state !== "open" && entry.state !== "closing") throw new RpcSessionRegistryError("unknown_session");
+		// Every routed command counts as activity for idle eviction. Lookups that
+		// must not refresh idleness (sweeps, listing) use peek()/list() instead.
+		entry.lastCommandAt = this.now();
 		return entry;
 	}
 
@@ -313,5 +344,13 @@ export class RpcSessionRegistry {
 		if (!isAbsolute(profile.cwd) || (profile.sessionPath !== undefined && !isAbsolute(profile.sessionPath))) {
 			throw new RpcSessionRegistryError("invalid_path");
 		}
+	}
+
+	private countActiveSessions(): number {
+		let count = 0;
+		for (const entry of this.entries.values()) {
+			if (entry.state === "opening" || entry.state === "open") count += 1;
+		}
+		return count;
 	}
 }

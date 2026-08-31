@@ -19,6 +19,31 @@ import { RpcSessionRegistryError } from "./session-registry.ts";
 
 const controls = new Set(["get_protocol_info", "open_session", "close_session", "list_sessions"]);
 
+/** Binding factory seam, injectable so host wiring is testable without a full runtime stack. */
+export type RpcBindingFactory = typeof createRpcSessionBinding;
+
+/**
+ * Occupancy policy for the shared multi-session host. All fields are opt-in:
+ * a router constructed without a policy keeps today's behavior (sessions live
+ * until close_session; the host never self-exits).
+ */
+export interface RpcSessionIdlePolicy {
+	/** Injectable clock (defaults to Date.now) for deterministic tests. */
+	now?: () => number;
+	/** Evict open sessions whose last routed command or session-owned work settled longer ago than this. */
+	idleEvictionMs?: number;
+	/** Invoke onEmptyExit once the registry has stayed empty for this long. */
+	emptyExitMs?: number;
+	/** Host shutdown hook fired by the empty-exit window; called at most once. */
+	onEmptyExit?: () => void;
+	/**
+	 * Consulted every tick before the empty-exit window advances. Returning false
+	 * both blocks the exit and resets the window, so a host with a connected but
+	 * sessionless client stays up instead of exiting under its supervisor.
+	 */
+	canExitWhenEmpty?: () => boolean;
+}
+
 function error(id: string | undefined, command: string, code: string): RpcResponse {
 	return { id, type: "response", command, success: false, error: code };
 }
@@ -42,6 +67,13 @@ export class SessionCommandRouter {
 	private readonly connectionOptions: Parameters<typeof createRpcSessionBinding>[4];
 	private readonly widths = new Map<string, Map<string, number>>();
 	private readonly pendingCapabilities = new Map<string, string[]>();
+	private readonly idleNow: () => number;
+	private readonly idleEvictionMs: number;
+	private readonly emptyExitMs: number;
+	private readonly onEmptyExit?: () => void;
+	private readonly canExitWhenEmpty?: () => boolean;
+	private sweepTimer: ReturnType<typeof setInterval> | undefined;
+	private emptySince: number | undefined;
 
 	constructor(
 		registry: RpcSessionRegistry,
@@ -49,12 +81,24 @@ export class SessionCommandRouter {
 		defaults: Pick<RpcSessionLaunchProfile, "cwd" | "permissionPreset" | "creationModel" | "initialThinkingLevel">,
 		createBinding: typeof createRpcSessionBinding = createRpcSessionBinding,
 		connectionOptions: Parameters<typeof createRpcSessionBinding>[4] = {},
+		idle?: RpcSessionIdlePolicy,
 	) {
 		this.registry = registry;
 		this.writer = writer;
 		this.defaults = defaults;
 		this.createBinding = createBinding;
 		this.connectionOptions = connectionOptions;
+		this.idleNow = idle?.now ?? Date.now;
+		this.idleEvictionMs = idle?.idleEvictionMs ?? Number.POSITIVE_INFINITY;
+		this.emptyExitMs = idle?.emptyExitMs ?? Number.POSITIVE_INFINITY;
+		this.onEmptyExit = idle?.onEmptyExit;
+		this.canExitWhenEmpty = idle?.canExitWhenEmpty;
+		if (Number.isFinite(this.idleEvictionMs) || Number.isFinite(this.emptyExitMs)) {
+			// Unref'd: occupancy hygiene must never be the reason the event loop stays open.
+			const tickMs = Math.max(20, Math.min(5_000, Math.min(this.idleEvictionMs, this.emptyExitMs) / 4));
+			this.sweepTimer = setInterval(() => this.sweepIdleSessions(), tickMs);
+			this.sweepTimer.unref?.();
+		}
 	}
 
 	async handle(command: RpcCommand): Promise<RpcResponse | undefined> {
@@ -105,6 +149,7 @@ export class SessionCommandRouter {
 	}
 
 	async dispose(): Promise<void> {
+		this.stopSweep();
 		await Promise.all(
 			[...this.bindings.entries()].map(async ([sessionId, binding]) => {
 				let entry: RpcSessionEntry | undefined;
@@ -125,6 +170,94 @@ export class SessionCommandRouter {
 			}),
 		);
 		this.bindings.clear();
+	}
+
+	/**
+	 * One occupancy sweep. Evicts open sessions idle longer than idleEvictionMs,
+	 * where "idle" is the COMPLETE session-owned activity contract
+	 * (`AgentSession.isSessionBusy`: agent run, bash, background terminal jobs and
+	 * other published wake sources, compaction, barrier-held session work) - busy
+	 * sessions restart their idle clock instead, so work that outlives a turn is
+	 * never killed. Fires onEmptyExit once the registry has STAYED empty for
+	 * emptyExitMs with the exit permitted; any live session or connected client
+	 * resets that window. Runs on an unref'd interval and is safe to call directly.
+	 */
+	sweepIdleSessions(): void {
+		const now = this.idleNow();
+		if (Number.isFinite(this.idleEvictionMs)) {
+			for (const { sessionId, status } of this.registry.list()) {
+				if (status !== "open") continue;
+				const entry = this.registry.peek(sessionId);
+				if (!entry) continue;
+				if (entry.runtime?.session.isSessionBusy) {
+					// Session-owned work defers eviction; the window restarts when it settles.
+					entry.lastCommandAt = now;
+					continue;
+				}
+				if (now - entry.lastCommandAt >= this.idleEvictionMs) void this.evictIdleSession(sessionId);
+			}
+		}
+		if (Number.isFinite(this.emptyExitMs)) {
+			if (this.registry.size === 0 && (this.canExitWhenEmpty?.() ?? true)) {
+				if (this.emptySince === undefined) this.emptySince = now;
+				else if (now - this.emptySince >= this.emptyExitMs) {
+					this.stopSweep();
+					this.onEmptyExit?.();
+				}
+			} else {
+				this.emptySince = undefined;
+			}
+		}
+	}
+
+	/**
+	 * Idle-session eviction: the same refcounted close sequence as an explicit
+	 * close_session, draining every attachment because eviction ends the shared
+	 * session, not one client's claim. Races with concurrent lifecycle paths are
+	 * tolerated the same way releaseOwnedSession tolerates them.
+	 */
+	private async evictIdleSession(sessionId: string): Promise<void> {
+		let entry: RpcSessionEntry;
+		try {
+			entry = this.registry.beginClose(sessionId);
+			while (entry.state === "open") entry = this.registry.beginClose(sessionId);
+		} catch {
+			// Raced with an explicit close; that path owns the entry now.
+			return;
+		}
+		try {
+			this.bindings.get(sessionId)?.cancelPendingExtensionUiRequests?.();
+			await this.bindings.get(sessionId)?.dispose();
+		} finally {
+			this.bindings.delete(sessionId);
+			this.forgetSessionOwnership(sessionId);
+			if (entry.state === "closing") await this.registry.closeMarked(sessionId);
+			this.writer.closeSession(sessionId, {
+				type: "response",
+				command: "close_session",
+				success: true,
+				data: {},
+			});
+			// The runtime is disposed and routing handles are unique per process
+			// epoch, so nothing can emit under this id again: drop the writer's
+			// per-session bookkeeping instead of retaining it for the host's life.
+			this.writer.forgetSession(sessionId);
+		}
+	}
+
+	/** Drops per-connection records for a handle the host closed on its own. */
+	private forgetSessionOwnership(sessionId: string): void {
+		for (const [connection, owned] of this.sessionsByConnection) {
+			owned.delete(sessionId);
+			if (owned.size === 0) this.sessionsByConnection.delete(connection);
+		}
+		this.widths.delete(sessionId);
+	}
+
+	private stopSweep(): void {
+		if (this.sweepTimer === undefined) return;
+		clearInterval(this.sweepTimer);
+		this.sweepTimer = undefined;
 	}
 
 	private openWithBarrier(command: Extract<RpcCommand, { type: "open_session" }>): Promise<RpcResponse | undefined> {

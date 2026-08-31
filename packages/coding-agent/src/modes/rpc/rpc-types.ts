@@ -163,6 +163,7 @@ export const RPC_ERROR_MISSING_SESSION_ID = "missing_session_id";
 export const RPC_ERROR_MULTI_SESSION_DISABLED = "multi_session_disabled";
 export const RPC_ERROR_INVALID_PATH = "invalid_path";
 export const RPC_ERROR_OPEN_FAILED = "open_failed";
+export const RPC_ERROR_TOO_MANY_SESSIONS = "too_many_sessions";
 
 export type RpcErrorCode =
 	| typeof RPC_ERROR_UNKNOWN_SESSION
@@ -171,7 +172,8 @@ export type RpcErrorCode =
 	| typeof RPC_ERROR_MISSING_SESSION_ID
 	| typeof RPC_ERROR_MULTI_SESSION_DISABLED
 	| typeof RPC_ERROR_INVALID_PATH
-	| typeof RPC_ERROR_OPEN_FAILED;
+	| typeof RPC_ERROR_OPEN_FAILED
+	| typeof RPC_ERROR_TOO_MANY_SESSIONS;
 
 /** Every established command accepts an additive routing envelope. */
 export type RpcCommand =
