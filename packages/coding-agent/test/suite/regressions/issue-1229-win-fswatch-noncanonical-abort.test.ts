@@ -108,6 +108,8 @@ writeFileSync(join(directory, "regression-write-1229.txt"), "change");
 			});
 		});
 
-		expect(exit.code, `Child exited with code ${exit.code} (signal ${exit.signal}). stderr: ${stderr.trim()}`).toBe(0);
+		expect(exit.code, `Child exited with code ${exit.code} (signal ${exit.signal}). stderr: ${stderr.trim()}`).toBe(
+			0,
+		);
 	});
 });
