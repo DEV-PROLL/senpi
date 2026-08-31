@@ -41,13 +41,12 @@ type CodemodeEvent = SessionLifecycleEvent | "model_select";
 export interface CodemodeExtensionAPI {
 	registerTool(tool: ReturnType<typeof createEvalTool>): void;
 	registerRemovedToolHint(name: string, hint: string): void;
-	on(event: CodemodeEvent, handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
 	on(
-		event: "resources_discover",
+		event: CodemodeEvent | "resources_discover",
 		handler: (
 			event: unknown,
 			ctx: ExtensionContext,
-		) => Promise<{ skillPaths?: string[] } | undefined> | { skillPaths?: string[] } | undefined,
+		) => Promise<{ skillPaths?: string[] } | undefined | void> | { skillPaths?: string[] } | undefined | void,
 	): void;
 	executeTool: AgentExecuteTool;
 	getActiveTools(): string[];
