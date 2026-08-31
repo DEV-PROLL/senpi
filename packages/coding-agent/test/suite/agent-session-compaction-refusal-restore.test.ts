@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CompactionResult } from "../../src/core/compaction/index.ts";
 import { createHarness, type Harness } from "./harness.ts";
@@ -278,5 +279,71 @@ describe("agent-session compaction refusal unpin + eager restore", () => {
 		]);
 		expect(harness.eventsOfType("retry_fallback_reverted")).toMatchObject([{ from: fallback, to: primary }]);
 		expect(fallbackState(harness)).toMatchObject({ pinned: true, pinnedByRefusal: true, pinnedByBilling: false });
+	});
+
+	it("(6) restores the primary before the queued continuation admitted after a mid-run compaction", async () => {
+		// A tool result large enough to push the post-tool context over the
+		// threshold of a 40k-token window, so compaction runs while the agent run
+		// is still active (isStreaming) and its queued continuation follows.
+		const largeToolResult = "tool output ".repeat(20_000);
+		const harness = await createHarness({
+			models: [
+				{ id: "faux-1", contextWindow: 40_000 },
+				{ id: "faux-2", contextWindow: 40_000 },
+			],
+			fallbackNow: () => 0,
+			settings: {
+				compaction: { enabled: true, keepRecentTokens: 1, reserveTokens: 1_000 },
+				retry: { enabled: true, baseDelayMs: 1, fallbackChains: { [primary]: [fallback] } },
+			},
+			extensionFactories: [
+				(pi) => {
+					pi.registerTool({
+						name: "large_result",
+						label: "Large Result",
+						description: "Return text that pushes the session over the compaction threshold",
+						parameters: Type.Object({}),
+						execute: async () => ({ content: [{ type: "text", text: largeToolResult }], details: {} }),
+					});
+					pi.on("session_before_compact", async (event) => ({
+						compaction: {
+							summary: "mid-run compaction summary",
+							firstKeptEntryId: event.preparation.firstKeptEntryId,
+							tokensBefore: event.preparation.tokensBefore,
+							details: {},
+						},
+					}));
+				},
+			],
+		});
+		harnesses.push(harness);
+
+		const modelAtContinuation: string[] = [];
+		const revertsBeforeContinuation: number[] = [];
+		harness.setResponses([
+			refusal("primary refusal"),
+			fauxAssistantMessage(fauxToolCall("large_result", {}), { stopReason: "toolUse" }),
+			() => {
+				modelAtContinuation.push(harness.session.model?.id ?? "");
+				revertsBeforeContinuation.push(harness.eventsOfType("retry_fallback_reverted").length);
+				return fauxAssistantMessage("continuation answer");
+			},
+			fauxAssistantMessage("unexpected extra call"),
+		]);
+
+		await harness.session.prompt("run the large result tool");
+		await harness.session.waitForIdle();
+
+		// A senpi-owned compaction did succeed while the run was active.
+		expect(harness.eventsOfType("compaction_end").filter((event) => event.accepted === true)).toHaveLength(1);
+
+		// The next provider request after that compaction must run on the primary,
+		// with exactly one revert emitted before it.
+		expect(revertsBeforeContinuation).toEqual([1]);
+		expect(modelAtContinuation).toEqual(["faux-1"]);
+		expect(harness.faux.getCallLog().map((call) => call.modelId)).toEqual(["faux-1", "faux-2", "faux-1"]);
+		expect(harness.eventsOfType("retry_fallback_reverted")).toMatchObject([{ from: fallback, to: primary }]);
+		expect(harness.session.model?.id).toBe("faux-1");
+		expect(fallbackState(harness)).toBeUndefined();
 	});
 });
