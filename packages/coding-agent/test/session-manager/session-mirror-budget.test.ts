@@ -1,3 +1,4 @@
+import type { TextContent } from "@earendil-works/pi-ai";
 import { mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -5,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ResidentStringStore } from "../../src/core/session-resident-store.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 
-const LARGE_PAYLOAD = "x".repeat(1024 * 1024);
+const LARGE_TEXT = "x".repeat(1024 * 1024);
+const LARGE_PAYLOAD: TextContent[] = [{ type: "text", text: LARGE_TEXT }];
 
 describe("SessionManager resident mirror", () => {
 	let tempDir: string;
@@ -22,7 +24,7 @@ describe("SessionManager resident mirror", () => {
 	it("keeps the resident blob cache within its documented budget", () => {
 		const session = SessionManager.create(tempDir, tempDir);
 		for (let i = 0; i < 70; i++) {
-			session.appendCustomEntry("large-result", { payload: `${i}:${LARGE_PAYLOAD}` });
+			session.appendCustomEntry("large-result", { payload: `${i}:${LARGE_TEXT}` });
 		}
 
 		expect(session.getResidentStoreStats().blobBytes).toBeLessThanOrEqual(64 * 1024 * 1024);
@@ -38,8 +40,8 @@ describe("SessionManager resident mirror", () => {
 
 		session.appendCompaction("summary", firstKeptEntryId, 100);
 
-		expect(session.getEntries()).toHaveLength(3);
-		expect(session.getEntry(prunedEntryId)).toBeUndefined();
+		expect(session.getEntries()).toHaveLength(5);
+		expect(session.getEntry(prunedEntryId)?.id).toBe(prunedEntryId);
 		expect(session.getResidentStoreStats().blobBytes).toBeLessThan(beforeBlobBytes);
 
 		session.branch(prunedEntryId);
@@ -49,7 +51,7 @@ describe("SessionManager resident mirror", () => {
 
 	it("bounds standalone resident stores too", () => {
 		const store = new ResidentStringStore();
-		for (let i = 0; i < 70; i++) store.externalize(`${i}:${LARGE_PAYLOAD}`);
+		for (let i = 0; i < 70; i++) store.externalize(`${i}:${LARGE_TEXT}`);
 		expect(store.stats().blobBytes).toBeLessThanOrEqual(64 * 1024 * 1024);
 	});
 });

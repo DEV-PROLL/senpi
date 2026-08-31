@@ -1469,6 +1469,14 @@ export class SessionManager {
 	 * you need to filter/reorder.
 	 */
 	getEntries(): SessionEntry[] {
+		if (this.persist && this.sessionFile) {
+			// get_entries is an authoritative read surface (including RPC). The
+			// compact mirror may omit old entries, so read the JSONL on demand without
+			// retaining this full materialized snapshot in the manager cache.
+			return loadEntriesFromFile(this.sessionFile)
+				.filter((e): e is SessionEntry => e.type !== "session")
+				.map((entry) => this.residentStore.materialize(entry));
+		}
 		if (this.entriesCache !== null && this.entriesCache.mutation === this.mutationCount) {
 			return this.entriesCache.entries;
 		}
