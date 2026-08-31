@@ -10,13 +10,14 @@ import {
 import { SummarizationOverflowExhaustedError } from "./overflow-retry.ts";
 import { resolveEffectiveReserveTokens } from "./policy.ts";
 import { hasUnsafeRetainedContent } from "./retained-message-safety.ts";
-import { SummaryRequestError } from "./speculative.ts";
+import { SummaryGenerationError, SummaryRequestError } from "./speculative.ts";
 import { capUtf8Bytes } from "./task-intent.ts";
 
 export type RequiredCompactionFallbackFailure =
 	| "summarization-timeout"
 	| "upstream-stream-truncated"
-	| "summarization-overflow-exhausted";
+	| "summarization-overflow-exhausted"
+	| "summarization-empty-summary";
 
 interface RecoveryMetadata {
 	taskIntent?: string;
@@ -100,6 +101,9 @@ export function classifyRequiredCompactionFallbackFailure(
 	}
 	if (error instanceof SummarizationOverflowExhaustedError) {
 		return "summarization-overflow-exhausted";
+	}
+	if (error instanceof SummaryGenerationError && error.kind === "empty-summary") {
+		return "summarization-empty-summary";
 	}
 	return undefined;
 }

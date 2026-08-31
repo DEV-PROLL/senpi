@@ -94,6 +94,7 @@ function summarizationStream(
 
 export async function generateSummaryMessage(options: {
 	context: SpeculativeCompactionContext;
+	forbidToolCalls?: boolean;
 	messages: AgentMessage[];
 	onProgress?: CompactionProgressCallback;
 	prompt: ReturnType<typeof buildPrompt>;
@@ -150,6 +151,7 @@ export async function generateSummaryMessage(options: {
 			maxTokens: summaryMaxTokens(options.snapshot.model, options.snapshot.contextWindow),
 			signal: requestController.signal,
 			...summarizationReasoningOptions(options.snapshot.model),
+			...(options.forbidToolCalls ? { toolChoice: "none" as const } : {}),
 		});
 		await consumeStreamWithIdleTimeout(responseStream, {
 			idleTimeoutMs: DEFAULT_SUMMARIZATION_IDLE_TIMEOUT_MS,

@@ -135,7 +135,8 @@ const UPSTREAM_STREAM_TRUNCATED_PATTERN = /(?:^|[^A-Za-z0-9_])upstream_stream_tr
  * Only failures with no cheaper recovery earn another billed request.
  *
  * Every class that `classifyRequiredCompactionFallbackFailure` recognizes
- * (watchdog timeouts, `upstream-stream-truncated`, overflow exhaustion) already
+ * (watchdog timeouts, `upstream-stream-truncated`, overflow exhaustion,
+ * empty-summary generation failures) already
  * has a deterministic zero-LLM recovery, and context overflow is answered by
  * shrinking the input in the surrounding loop - replaying those would pay for a
  * summarization the fallback can rebuild for free. The classes checked here are
@@ -269,6 +270,8 @@ export async function runExtensionCompaction(
 	);
 	const overflowRetryStartMs = Date.now();
 	let overflowAttempts = 0;
+	const summarizationToolsOffered = (requestSnapshot.tools?.length ?? 0) > 0;
+	let toolUseRetrySpent = false;
 
 	while (true) {
 		if (signal?.aborted) return undefined;
@@ -290,6 +293,7 @@ export async function runExtensionCompaction(
 				async () => {
 					const attempt = await generateSummaryMessage({
 						context,
+						forbidToolCalls: toolUseRetrySpent,
 						messages: currentMessages,
 						onProgress,
 						prompt,
@@ -363,6 +367,15 @@ export async function runExtensionCompaction(
 		const summary = getSummaryText(response);
 		if (!summary) {
 			const stopReason = isAssistantMessage(response) ? response.stopReason : "unknown";
+			// A summarizer can hijack the forwarded agent tools and answer with a
+			// bare tool call (observed on openai-codex gpt-5.6-sol, 2026-08-31),
+			// which used to surface as a terminal empty-summary failure. Spend one
+			// retry with tool calling forbidden; the tools stay in the request
+			// because Anthropic rejects tool_use history without the tools param.
+			if (stopReason === "toolUse" && summarizationToolsOffered && !toolUseRetrySpent) {
+				toolUseRetrySpent = true;
+				continue;
+			}
 			throw new SummaryGenerationError(
 				"empty-summary",
 				`summarization response contained no text (stopReason: ${stopReason})`,
