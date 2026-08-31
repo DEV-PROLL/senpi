@@ -1,7 +1,8 @@
+import * as fs from "fs";
 import { mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResidentStringStore } from "../../src/core/session-resident-store.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import { assistantMsg, userMsg } from "../utilities.ts";
@@ -45,6 +46,23 @@ describe("SessionManager resident mirror", () => {
 		session.branch(prunedEntryId);
 		expect(session.getEntry(prunedEntryId)?.id).toBe(prunedEntryId);
 		expect(session.buildSessionContext().messages).toHaveLength(2);
+	});
+
+	it("loads trimmed full history once for consecutive reads", () => {
+		const session = SessionManager.create(tempDir, tempDir);
+		session.appendMessage(assistantMsg("ready"));
+		const firstKeptEntryId = session.appendMessage(userMsg("before"));
+		session.appendMessage(assistantMsg("after"));
+		session.appendCompaction("summary", firstKeptEntryId, 100);
+
+		const openSpy = vi.spyOn(fs, "openSync").mockClear();
+		try {
+			session.getEntries();
+			session.getEntries();
+			expect(openSpy.mock.calls.filter(([path]) => path === session.getSessionFile()).length).toBe(1);
+		} finally {
+			openSpy.mockRestore();
+		}
 	});
 
 	it("bounds standalone resident stores too", () => {
