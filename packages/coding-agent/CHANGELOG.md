@@ -12,6 +12,8 @@
 
 ### New Features
 
+- Refusal-caused model fallbacks now release their pin when a senpi-owned compaction successfully rewrites the context and eagerly re-attempt the original model once per compaction, while billing-caused pins never release and `fallbackRevertPolicy: "never"` still suppresses the restore ([#1232](https://github.com/code-yeongyu/senpi/pull/1232)).
+
 ### Breaking Changes
 
 ### Added
