@@ -100,6 +100,27 @@ jobs:
             echo "- Status: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  hooks-trust-storage-windows:
+    name: Hooks trust storage (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run hooks trust-storage regressions
+        run: npx vitest run test/suite/hooks-trust.test.ts test/suite/hooks-trust-storage-errors.test.ts test/suite/hooks-trust-storage-release-errors.test.ts test/suite/hooks-trust-storage-aba.test.ts
+        working-directory: packages/coding-agent
+
   test-workspaces:
     name: Test (workspaces + scripts)
     runs-on: ubuntu-latest
@@ -156,7 +177,7 @@ jobs:
   # so the required-status contract is unchanged while the work runs in parallel.
   check-and-test:
     name: Check and test
-    needs: [check, test-coding-agent, test-workspaces]
+    needs: [check, test-coding-agent, hooks-trust-storage-windows, test-workspaces]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -181,6 +202,7 @@ jobs:
             echo "## Check and test (fan-in)"
             echo "- check: ${{ needs.check.result }}"
             echo "- test-coding-agent: ${{ needs.test-coding-agent.result }}"
+            echo "- hooks-trust-storage-windows: ${{ needs.hooks-trust-storage-windows.result }}"
             echo "- test-workspaces: ${{ needs.test-workspaces.result }}"
           } >> "$GITHUB_STEP_SUMMARY"
 

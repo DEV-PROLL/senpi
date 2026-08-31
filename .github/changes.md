@@ -18,6 +18,31 @@
 
 - The `Terminal extension + shell resolution tests` step's file list in `.github/workflows/ci.yml`.
 
+## Hooks trust storage gains focused Windows CI coverage (2026-08-31)
+
+### What changed
+
+- `.github/workflows/ci.yml` adds a `windows-latest` job that installs dependencies and runs only
+  `hooks-trust.test.ts`, `hooks-trust-storage-errors.test.ts`, `hooks-trust-storage-release-errors.test.ts`, and
+  `hooks-trust-storage-aba.test.ts`; the required `Check and test` fan-in includes this job. The existing Ubuntu
+  coding-agent shards continue to run the same tests on POSIX.
+
+### Why
+
+- Same-directory replacement for ordinary same-account application state has Windows-specific behavior, and the
+  writer-excluding malformed-read recovery relies on the same exact lock semantics across platforms, but the general
+  coding-agent shards run only on Ubuntu. A focused Windows job exercises those contracts without claiming custom DACL
+  preservation or duplicating the unrelated coding-agent suite.
+
+### Why an extension could not handle it
+
+- Runner selection and test execution are repository CI policy evaluated before the coding-agent runtime or extension
+  loader starts.
+
+### Expected merge conflict zones
+
+- LOW: `.github/workflows/ci.yml` around focused cross-platform regression jobs and the `Check and test` fan-in needs.
+
 ## Release workflow re-diverges from upstream dcd4619 (2026-08-25)
 
 ### What changed

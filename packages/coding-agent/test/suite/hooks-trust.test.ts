@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -181,6 +181,150 @@ describe("builtin hooks trust", () => {
 		expect(hookTrustStorageScope(globalHook, { projectTrusted: false })).toBe("global");
 		expect(isCommandHookTrusted(hook, persisted)).toBe(false);
 		expect(isCommandHookTrusted(globalHook, persisted)).toBe(true);
+	});
+
+	it("reads the last complete snapshot without contending on the writer lock", async () => {
+		// Given
+		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
+		createdDirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "repo");
+		const statePath = join(agentDir, "hooks-state.json");
+		mkdirSync(dirname(statePath), { recursive: true });
+		mkdirSync(cwd, { recursive: true });
+		const hook = commandHook();
+		const state = {
+			version: 1,
+			hooks: {
+				[hookTrustId(hook)]: createHookTrustEntry(hook, { updatedAt: UPDATED_AT }),
+			},
+		} as const;
+		writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+		const storage = new FileHookStateStorage({ agentDir, cwd });
+		const release = lockfile.lockSync(dirname(statePath), { realpath: false, lockfilePath: `${statePath}.lock` });
+
+		try {
+			// When
+			const persisted = storage.read("global");
+
+			// Then
+			expect(persisted).toEqual(state);
+		} finally {
+			release();
+		}
+	});
+
+	it.runIf(process.platform === "win32")(
+		"atomically replaces an existing snapshot on Windows",
+		async () => {
+			// Given
+			const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
+			createdDirs.push(root);
+			const agentDir = join(root, "agent");
+			const cwd = join(root, "repo");
+			const statePath = join(agentDir, "hooks-state.json");
+			mkdirSync(dirname(statePath), { recursive: true });
+			mkdirSync(cwd, { recursive: true });
+			writeFileSync(statePath, '{"version":1,"hooks":{}}\n', "utf-8");
+			const storage = new FileHookStateStorage({ agentDir, cwd });
+			const hook = commandHook();
+
+			// When
+			storage.update("global", () => ({
+				version: 1,
+				hooks: {
+					[hookTrustId(hook)]: createHookTrustEntry(hook, { updatedAt: UPDATED_AT }),
+				},
+			}));
+
+			// Then
+			expect(storage.read("global").hooks[hookTrustId(hook)]).toBeDefined();
+			expect(readdirSync(agentDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+		},
+		10_000,
+	);
+
+	it.runIf(process.platform !== "win32")("preserves an existing snapshot's mode despite a masking umask", async () => {
+		// Given
+		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
+		createdDirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "repo");
+		const statePath = join(agentDir, "hooks-state.json");
+		mkdirSync(dirname(statePath), { recursive: true });
+		mkdirSync(cwd, { recursive: true });
+		writeFileSync(statePath, '{"version":1,"hooks":{}}\n', "utf-8");
+		chmodSync(statePath, 0o644);
+		const storage = new FileHookStateStorage({ agentDir, cwd });
+		const previousUmask = process.umask();
+
+		try {
+			// When
+			storage.update("global", (current) => {
+				process.umask(0o077);
+				return current;
+			});
+
+			// Then
+			expect(statSync(statePath).mode & 0o777).toBe(0o644);
+		} finally {
+			process.umask(previousUmask);
+		}
+	});
+
+	it.runIf(process.platform !== "win32")("creates a new snapshot with mode 0600 despite a masking umask", async () => {
+		// Given
+		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
+		createdDirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "repo");
+		mkdirSync(cwd, { recursive: true });
+		const storage = new FileHookStateStorage({ agentDir, cwd });
+		const statePath = join(agentDir, "hooks-state.json");
+		const previousUmask = process.umask();
+
+		try {
+			// When
+			storage.update("global", (current) => {
+				process.umask(0o777);
+				return current;
+			});
+
+			// Then
+			expect(statSync(statePath).mode & 0o777).toBe(0o600);
+		} finally {
+			process.umask(previousUmask);
+		}
+	});
+
+	it("publishes through a same-directory rename and cleans the temp file when publication fails", async () => {
+		// Given
+		const root = await mkdtemp(join(tmpdir(), "senpi-hooks-trust-"));
+		createdDirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "repo");
+		const statePath = join(agentDir, "hooks-state.json");
+		mkdirSync(dirname(statePath), { recursive: true });
+		mkdirSync(cwd, { recursive: true });
+		writeFileSync(statePath, '{"version":1,"hooks":{}}\n', "utf-8");
+		const storage = new FileHookStateStorage({ agentDir, cwd });
+
+		// When
+		let publicationError: unknown;
+		try {
+			storage.update("global", (current) => {
+				expect(current).toEqual({ version: 1, hooks: {} });
+				rmSync(statePath);
+				mkdirSync(statePath);
+				return current;
+			});
+		} catch (error) {
+			publicationError = error;
+		}
+
+		// Then
+		expect(publicationError).toMatchObject({ syscall: "rename" });
+		expect(readdirSync(agentDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 	});
 
 	it("uses a bounded proper-lockfile-compatible file lock for writes", async () => {
