@@ -773,6 +773,17 @@ export function findMostRecentSession(sessionDir: string, cwd?: string): string 
  * Use buildSessionContext() to get the resolved message list for the LLM, which
  * handles compaction summaries and follows the path from root to current leaf.
  */
+let sessionEntryLoader = loadEntriesFromFile;
+
+/** Test seam for observing disk reloads without mocking ESM filesystem exports. */
+export function setSessionEntryLoaderForTesting(loader: typeof loadEntriesFromFile): () => void {
+	const previous = sessionEntryLoader;
+	sessionEntryLoader = loader;
+	return () => {
+		sessionEntryLoader = previous;
+	};
+}
+
 export class SessionManager {
 	private sessionId: string = "";
 	private sessionFile: string | undefined;
@@ -792,6 +803,8 @@ export class SessionManager {
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
 	private residentStore = new ResidentStringStore();
+	private mirrorTrimmed = false;
+	private compactEntriesCache: { mutation: number; entries: SessionEntry[] } | null = null;
 	// Monotonic counter bumped by every mutator; memoized materialized views are
 	// keyed on it so read hot paths (footer, RPC) never re-materialize unchanged sessions.
 	private mutationCount = 0;
@@ -857,6 +870,7 @@ export class SessionManager {
 
 	private _setSessionFile(sessionFile: string, preloadedFileEntries?: FileEntry[]): void {
 		this.sessionFile = resolvePath(sessionFile);
+		this.mirrorTrimmed = false;
 		this.residentStore.clear();
 		if (existsSync(this.sessionFile)) {
 			this.fileEntries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
@@ -908,6 +922,7 @@ export class SessionManager {
 			parentSession: options?.parentSession,
 		};
 		this.fileEntries = [header];
+		this.mirrorTrimmed = false;
 		this.residentStore.clear();
 		this.byId.clear();
 		this.entryOrdersById.clear();
@@ -1076,7 +1091,17 @@ export class SessionManager {
 	}
 
 	private _materializeEntry(entry: SessionEntry): SessionEntry {
-		const materialized = this.residentStore.materialize(entry);
+		let missingResidentString = false;
+		const materialized = this.residentStore.materialize(entry, () => {
+			missingResidentString = true;
+			return undefined;
+		});
+		// The resident store is a bounded cache. The JSONL remains authoritative
+		// when an evicted blob is needed by a branch or read operation.
+		if (missingResidentString && this.sessionFile) {
+			const persisted = loadEntriesFromFile(this.sessionFile).find((candidate) => candidate.id === entry.id);
+			if (persisted) return persisted as SessionEntry;
+		}
 		if (materialized.type === "message") {
 			const order = this.entryOrdersById.get(materialized.id);
 			if (order !== undefined) {
@@ -1205,10 +1230,36 @@ export class SessionManager {
 			fromHook,
 		};
 		this._appendEntry(entry);
+		this._trimMirrorAfterCompaction(entry);
 		return entry.id;
 	}
 
-	/** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
+	private _trimMirrorAfterCompaction(compaction: CompactionEntry): void {
+		if (!this.persist) return;
+		const firstKeptIndex = this.fileEntries.findIndex((entry) => entry.id === compaction.firstKeptEntryId);
+		const compactionIndex = this.fileEntries.findIndex((entry) => entry.id === compaction.id);
+		if (firstKeptIndex < 0 || compactionIndex < firstKeptIndex) return;
+
+		const header = this.fileEntries.find((entry) => entry.type === "session");
+		const retained = [
+			...this.fileEntries.slice(0, firstKeptIndex).filter((entry) => entry.type !== "message"),
+			...this.fileEntries.slice(firstKeptIndex, compactionIndex + 1),
+		];
+		let parentId: string | null = null;
+		for (const entry of retained) {
+			if (entry.type !== "session") entry.parentId = parentId;
+			parentId = entry.type === "session" ? null : entry.id;
+		}
+		this.residentStore.clear();
+		this.mirrorTrimmed = true;
+		this.fileEntries = [header, ...retained]
+			.filter((entry): entry is FileEntry => entry !== undefined)
+			.map((entry) => this.residentStore.externalize(entry));
+		this._buildIndex();
+		this.mutationCount++;
+	}
+
+	/** Append a custom entry (for extensions) as child of current leaf, then advance leaf. */
 	appendCustomEntry(customType: string, data?: unknown): string {
 		const entry: CustomEntry = {
 			type: "custom",
@@ -1288,7 +1339,12 @@ export class SessionManager {
 
 	getEntry(id: string): SessionEntry | undefined {
 		const entry = this.byId.get(id);
-		return entry ? this._materializeEntry(entry) : undefined;
+		if (entry) return this._materializeEntry(entry);
+		if (this.mirrorTrimmed && this.sessionFile) {
+			const persisted = this._loadFullHistoryEntries().find((candidate) => candidate.id === id);
+			return persisted ? (this.residentStore.materialize(persisted) as SessionEntry) : undefined;
+		}
+		return undefined;
 	}
 
 	/**
@@ -1357,10 +1413,18 @@ export class SessionManager {
 		}
 		const path: SessionEntry[] = [];
 		const startId = fromId ?? this.leafId;
-		let current = startId ? this.byId.get(startId) : undefined;
+		let entriesById = this.byId;
+		if (fromId !== undefined && !entriesById.has(fromId) && this.mirrorTrimmed && this.sessionFile) {
+			entriesById = new Map(
+				this._loadFullHistoryEntries()
+					.filter((entry) => entry.type !== "session")
+					.map((entry) => [entry.id, this.residentStore.materialize(entry) as SessionEntry]),
+			);
+		}
+		let current = startId ? entriesById.get(startId) : undefined;
 		while (current) {
 			path.unshift(this._materializeEntry(current));
-			current = current.parentId ? this.byId.get(current.parentId) : undefined;
+			current = current.parentId ? entriesById.get(current.parentId) : undefined;
 		}
 		if (fromId === undefined) {
 			this.branchCache = { leafId: this.leafId, mutation: this.mutationCount, entries: path };
@@ -1373,7 +1437,7 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildContextEntries(): SessionEntry[] {
-		return buildContextEntries(this.getEntries(), this.leafId);
+		return buildContextEntries(this._getCompactEntries(), this.leafId);
 	}
 
 	/**
@@ -1381,7 +1445,7 @@ export class SessionManager {
 	 * Uses tree traversal from current leaf.
 	 */
 	buildSessionContext(): SessionContext {
-		return buildSessionContext(this.getEntries(), this.leafId);
+		return buildSessionContext(this._getCompactEntries(), this.leafId);
 	}
 
 	hasContextMessages(): boolean {
@@ -1434,6 +1498,11 @@ export class SessionManager {
 	 * you need to filter/reorder.
 	 */
 	getEntries(): SessionEntry[] {
+		if (this.mirrorTrimmed && this.sessionFile) {
+			return this._loadFullHistoryEntries()
+				.filter((e): e is SessionEntry => e.type !== "session")
+				.map((entry) => this.residentStore.materialize(entry));
+		}
 		if (this.entriesCache !== null && this.entriesCache.mutation === this.mutationCount) {
 			return this.entriesCache.entries;
 		}
@@ -1442,6 +1511,44 @@ export class SessionManager {
 			.map((entry) => this._materializeEntry(entry));
 		this.entriesCache = { mutation: this.mutationCount, entries };
 		return entries;
+	}
+
+	private _getCompactEntries(): SessionEntry[] {
+		if (this.compactEntriesCache?.mutation !== this.mutationCount) {
+			this.compactEntriesCache = {
+				mutation: this.mutationCount,
+				entries: this.fileEntries.filter((e): e is SessionEntry => e.type !== "session"),
+			};
+		}
+
+		const entries = this.compactEntriesCache.entries;
+		const missingEntryIds = new Set<string>();
+		for (const entry of entries) {
+			this.residentStore.materialize(entry, () => {
+				missingEntryIds.add(entry.id);
+				return undefined;
+			});
+		}
+		if (missingEntryIds.size > 0 && this.sessionFile) {
+			const persistedById = new Map(this._loadFullHistoryEntries().map((entry) => [entry.id, entry]));
+			for (let index = 0; index < entries.length; index++) {
+				const entry = entries[index]!;
+				if (!missingEntryIds.has(entry.id)) continue;
+				const persisted = persistedById.get(entry.id);
+				if (persisted) entries[index] = this.residentStore.externalize(persisted) as SessionEntry;
+			}
+		}
+		const materialized = entries.map((entry) => this.residentStore.materialize(entry) as SessionEntry);
+		for (const entry of materialized) {
+			if (entry.type !== "message") continue;
+			const order = this.entryOrdersById.get(entry.id);
+			if (order !== undefined) this.messageEntryPositions.set(entry.message, { entryId: entry.id, order });
+		}
+		return materialized;
+	}
+
+	private _loadFullHistoryEntries(): FileEntry[] {
+		return this.sessionFile ? sessionEntryLoader(this.sessionFile) : this.fileEntries;
 	}
 
 	/**
@@ -1500,6 +1607,9 @@ export class SessionManager {
 	 * are not modified or deleted.
 	 */
 	branch(branchFromId: string): void {
+		if (!this.byId.has(branchFromId) && this.sessionFile) {
+			this.reloadFromDisk();
+		}
 		if (!this.byId.has(branchFromId)) {
 			throw new Error(`Entry ${branchFromId} not found`);
 		}
@@ -1615,6 +1725,7 @@ export class SessionManager {
 			}
 
 			this.residentStore.clear();
+			this.mirrorTrimmed = false;
 			this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries].map((entry) =>
 				this.residentStore.externalize(entry),
 			);

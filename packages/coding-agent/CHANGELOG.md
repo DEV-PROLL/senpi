@@ -17,6 +17,7 @@
 - TTSR stream buffers keep only a tail window sized above the longest rule pattern instead of the whole turn's stream, and are cleared when a message completes, so long agent turns no longer retain (and re-concatenate) their full streamed text.
 
 - The claude-sdk-oauth session registry derives entry generations from a monotonic counter instead of a per-session-id map, so close/reopen cycles keep stale async work gated while dropping the unbounded id-keyed bookkeeping.
+- Bound the in-memory session mirror: large resident strings now use a 64 MiB FIFO cache, and compaction drops superseded entries while preserving disk-backed branching and resume.
 ### New Features
 
 - Refusal-caused model fallbacks now release their pin when a senpi-owned compaction successfully rewrites the context and eagerly re-attempt the original model once per compaction, while billing-caused pins never release and `fallbackRevertPolicy: "never"` still suppresses the restore ([#1232](https://github.com/code-yeongyu/senpi/pull/1232)).
