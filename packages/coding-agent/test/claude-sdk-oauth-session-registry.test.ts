@@ -256,6 +256,28 @@ describe("Claude SDK OAuth session registry", () => {
 		expect(closed).toEqual([expired.sdkSessionId]);
 	});
 
+	it("never reuses a generation number across repeated close/reopen cycles", () => {
+		let now = 1_000;
+		overrideSessionRegistryBoundary({ now: () => now, queryFactory: () => fakeQuery() });
+		const registry = new ClaudeSdkOauthSessionRegistry();
+		const generations: number[] = [];
+		for (let cycle = 0; cycle < 3; cycle++) {
+			const entry = registry.getOrCreate(input("cycle"));
+			generations.push(entry.generation);
+			transitionSessionState(entry, "IDLE_SYNCED");
+			now += SESSION_REGISTRY_IDLE_TTL_MS;
+			registry.closeSession("cycle", "test_cycle");
+		}
+		expect(generations[0]).toBeLessThan(generations[1]);
+		expect(generations[1]).toBeLessThan(generations[2]);
+		const reopened = registry.getOrCreate(input("cycle"));
+		expect(reopened.generation).toBeGreaterThan(generations[2]);
+		expect(registry.isCurrentGeneration("cycle", reopened.generation)).toBe(true);
+		for (const generation of generations) {
+			expect(registry.isCurrentGeneration("cycle", generation)).toBe(false);
+		}
+	});
+
 	it("cold-seeds a resident entry idle at the TTL on the admission decision path", () => {
 		let now = 1_000;
 		overrideSessionRegistryBoundary({ now: () => now, queryFactory: () => fakeQuery() });
