@@ -10,6 +10,14 @@
 
 ### Fixed
 
+- Cursor conversation caches no longer grow for process lifetime: entries are dropped when their session's resources are cleaned up, the pre-rotation key is deleted when a poisoned conversation rotates to a fresh wire id, rotation records are count-bounded, and defensive byte/count bounds cap the state and blob stores for sessions that never dispose.
+
+- Cursor conversation cache eviction can no longer break a live request: blobs the in-flight request references are pinned for the duration of its stream (the byte cap evicts only unpinned blobs and reads promote recency, so the server's mid-turn `getBlobArgs` always resolves), the conversation count cap is enforced per owning session instead of across the process (one session's churn can no longer forget another session's conversation) and never evicts a conversation with a request in flight, and a new process-global blob ceiling (`PI_CURSOR_CONVERSATION_TOTAL_BLOB_LIMIT_BYTES`, default 1 GiB) bounds all cached conversations together, shedding cold conversations first.
+
+- The Anthropic unsigned-thinking replay fallback capability is forgotten when its session's resources are cleaned up, so long-lived multi-session hosts stop collecting one entry per (session, model) that ever hit the invalid-signature retry.
+
+- The OpenAI Responses session websocket idle expiry re-arms itself when it fires while a socket is busy, and drops a busy entry whose socket already died, so a lost release can no longer pin a cached websocket forever.
+
 ### Removed
 
 ## [2026.8.30-3] - 2026-08-30

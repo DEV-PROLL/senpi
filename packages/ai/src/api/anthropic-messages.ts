@@ -9,6 +9,7 @@ import type {
 	RefusalStopDetails,
 } from "@anthropic-ai/sdk/resources/messages.js";
 import { calculateCost } from "../models.ts";
+import { registerSessionResourceCleanup } from "../session-resources.ts";
 import type {
 	AnthropicRefusalFallback,
 	Api,
@@ -281,6 +282,20 @@ type UnsignedThinkingReplay = "text" | "empty-signature";
 // A provider can reject its own empty signatures. Learn that capability for one
 // conversation without changing the shared model definition used by other sessions.
 const unsignedThinkingTextReplayFallbacks = new Set<string>();
+
+registerSessionResourceCleanup((sessionId?: string) => {
+	// One small entry per (session, base URL, model) that ever hit the fallback;
+	// drop the session's entries at teardown so long-lived hosts do not collect
+	// them for every session that ever ran.
+	if (sessionId === undefined) {
+		unsignedThinkingTextReplayFallbacks.clear();
+		return;
+	}
+	const prefix = `${sessionId}\u0000`;
+	for (const key of unsignedThinkingTextReplayFallbacks) {
+		if (key.startsWith(prefix)) unsignedThinkingTextReplayFallbacks.delete(key);
+	}
+});
 
 function unsignedThinkingFallbackKey(
 	model: Model<"anthropic-messages">,

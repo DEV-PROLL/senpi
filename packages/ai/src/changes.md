@@ -1,3 +1,46 @@
+## Cursor conversation cache eviction cannot break a live request (2026-08-31)
+
+### What changed
+
+- `api/cursor-agent.ts`: `ConversationBlobStore` is now a true LRU (reads promote recency, not only writes) and pins every blob the in-flight request stores or the server reads back, for the lifetime of that request's stream. The byte cap evicts unpinned blobs only; if the pinned working set alone exceeds the cap the store stays temporarily over budget and logs once, and trims back when the stream settles.
+- `api/cursor-agent.ts`: the conversation count cap is enforced per owning session (the `conversationId -> sessionId` map added in this pass) instead of over the process-global maps, and never evicts a conversation with a request in flight.
+- `api/cursor-agent.ts`: a process-global blob ceiling (`PI_CURSOR_CONVERSATION_TOTAL_BLOB_LIMIT_BYTES`, default 1 GiB) bounds every cached conversation together, shedding cold conversations before live ones and never dropping a pinned blob.
+
+### Why
+
+- Cursor resolves history blobs by id mid-turn (`getBlobArgs`); the client answers a miss with an unset `blobData`. Immediate byte-cap eviction could drop a blob the request being built or streamed still references, so a long history silently lost context or failed the turn.
+- The count cap iterated the process-global maps, so session B's 65th conversation could forget session A's live conversation key; A's retry/resume then re-entered through the same global map and fell back to fresh empty state.
+- Per-conversation caps multiply (count cap x byte cap per session), so the only number that actually bounds the process is a shared ceiling.
+
+### Why an extension could not handle it
+
+- The conversation state cache, blob stores and their eviction are module-local to the Cursor adapter; no extension seam can observe a blob id the wire protocol resolves mid-stream.
+
+### Expected merge conflict zones
+
+- MEDIUM: `ConversationBlobStore` and the cache-limit helpers in `api/cursor-agent.ts`.
+- LOW: the per-attempt live/pin retain-release pair in the `stream` retry loop.
+
+## Session-scoped provider state hygiene (2026-08-31)
+
+### What changed
+
+- `api/anthropic-messages.ts`: the learned unsigned-thinking text-replay fallback set is cleared for a session when its session resources are cleaned up (registered on the shared session-resource cleanup seam).
+- `api/openai-responses.ts`: the session-websocket idle expiry re-arms itself when it fires while the socket is busy, and drops a busy entry whose socket already died, so a lost release can no longer pin a cached websocket forever.
+
+### Why
+
+- Both collections previously lived for process lifetime once touched: long-lived multi-session hosts accumulated one fallback key per (session, base URL, model) that ever hit the invalid-signature retry, and a cached websocket whose release path never ran stayed pinned forever. Part of the #1024 memory-hygiene pass.
+
+### Why an extension could not handle it
+
+- The fallback set and the websocket session cache are module-local state inside the provider adapters; no extension seam can reach or dispose them.
+
+### Expected merge conflict zones
+
+- LOW: the fallback set declaration and its cleanup registration in `api/anthropic-messages.ts`.
+- LOW: the `scheduleSessionWebSocketExpiry` timer body in `api/openai-responses.ts`.
+
 ## Stop replaying the Anthropic server-side fallback marker (2026-08-30)
 
 ### What changed
