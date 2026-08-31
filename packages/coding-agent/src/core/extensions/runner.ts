@@ -666,6 +666,14 @@ export class ExtensionRunner {
 		});
 	}
 
+	/**
+	 * Subscribe to a raw bus channel. Used by the session to observe activity
+	 * signals extensions publish about work that outlives a turn (`wake_source_state`).
+	 */
+	onBusEvent(channel: string, handler: (data: unknown) => void): () => void {
+		return this.eventBus.on(channel, handler);
+	}
+
 	/** Get extension-declared MCP servers (first declaration per name wins). */
 	getRegisteredMcpServers(): readonly RegisteredMcpServerDeclaration[] {
 		const serversByName = new Map<string, RegisteredMcpServerDeclaration>();

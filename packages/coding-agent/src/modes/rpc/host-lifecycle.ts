@@ -130,6 +130,20 @@ export interface HostActivity {
 	readonly activeTurns: number;
 }
 
+/**
+ * How the supervisor reads its child's exit. The RPC host exits 0 only through
+ * its own clean shutdown path - including its idle/empty-host policy - so that
+ * is an intentional stop, not a crash: the supervisor mirrors its own idle exit
+ * instead of reporting failure. Any non-zero code or signal stays a crash.
+ */
+export function classifyChildExit(
+	code: number | null,
+	signal: NodeJS.Signals | null,
+): { reason: string; exitCode: number } {
+	if (code === 0 && signal === null) return { reason: "rpc host exited on its own idle policy", exitCode: 0 };
+	return { reason: `rpc host process exited unexpectedly (${code ?? signal})`, exitCode: 1 };
+}
+
 export type IdleExitDecision = "active" | "idle" | "exit";
 
 /**
@@ -314,7 +328,9 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	// death notification. Errors on it must not crash the supervisor.
 	child.stdio[CHILD_WATCH_FD]?.on("error", () => {});
 	child.once("exit", (code, signal) => {
-		if (!shuttingDown) void shutdown(`rpc host process exited unexpectedly (${code ?? signal})`, 1);
+		if (shuttingDown) return;
+		const { reason, exitCode } = classifyChildExit(code, signal);
+		void shutdown(reason, exitCode);
 	});
 
 	const server = createServer((client) => {

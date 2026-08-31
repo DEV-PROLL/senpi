@@ -30,12 +30,18 @@ export type RpcBindingFactory = typeof createRpcSessionBinding;
 export interface RpcSessionIdlePolicy {
 	/** Injectable clock (defaults to Date.now) for deterministic tests. */
 	now?: () => number;
-	/** Evict open sessions whose last routed command or active work settled longer ago than this. */
+	/** Evict open sessions whose last routed command or session-owned work settled longer ago than this. */
 	idleEvictionMs?: number;
 	/** Invoke onEmptyExit once the registry has stayed empty for this long. */
 	emptyExitMs?: number;
 	/** Host shutdown hook fired by the empty-exit window; called at most once. */
 	onEmptyExit?: () => void;
+	/**
+	 * Consulted every tick before the empty-exit window advances. Returning false
+	 * both blocks the exit and resets the window, so a host with a connected but
+	 * sessionless client stays up instead of exiting under its supervisor.
+	 */
+	canExitWhenEmpty?: () => boolean;
 }
 
 function error(id: string | undefined, command: string, code: string): RpcResponse {
@@ -65,6 +71,7 @@ export class SessionCommandRouter {
 	private readonly idleEvictionMs: number;
 	private readonly emptyExitMs: number;
 	private readonly onEmptyExit?: () => void;
+	private readonly canExitWhenEmpty?: () => boolean;
 	private sweepTimer: ReturnType<typeof setInterval> | undefined;
 	private emptySince: number | undefined;
 
@@ -85,6 +92,7 @@ export class SessionCommandRouter {
 		this.idleEvictionMs = idle?.idleEvictionMs ?? Number.POSITIVE_INFINITY;
 		this.emptyExitMs = idle?.emptyExitMs ?? Number.POSITIVE_INFINITY;
 		this.onEmptyExit = idle?.onEmptyExit;
+		this.canExitWhenEmpty = idle?.canExitWhenEmpty;
 		if (Number.isFinite(this.idleEvictionMs) || Number.isFinite(this.emptyExitMs)) {
 			// Unref'd: occupancy hygiene must never be the reason the event loop stays open.
 			const tickMs = Math.max(20, Math.min(5_000, Math.min(this.idleEvictionMs, this.emptyExitMs) / 4));
@@ -165,12 +173,14 @@ export class SessionCommandRouter {
 	}
 
 	/**
-	 * One occupancy sweep. Evicts open sessions whose last activity is older
-	 * than idleEvictionMs - never one with an active turn or running session-owned
-	 * bash; their idle clock restarts when the work settles, mirroring the
-	 * headless completion contract. Fires onEmptyExit once the registry has
-	 * STAYED empty for emptyExitMs; any live session resets that window. Runs on
-	 * an unref'd interval and is also safe to call directly.
+	 * One occupancy sweep. Evicts open sessions idle longer than idleEvictionMs,
+	 * where "idle" is the COMPLETE session-owned activity contract
+	 * (`AgentSession.isSessionBusy`: agent run, bash, background terminal jobs and
+	 * other published wake sources, compaction, barrier-held session work) - busy
+	 * sessions restart their idle clock instead, so work that outlives a turn is
+	 * never killed. Fires onEmptyExit once the registry has STAYED empty for
+	 * emptyExitMs with the exit permitted; any live session or connected client
+	 * resets that window. Runs on an unref'd interval and is safe to call directly.
 	 */
 	sweepIdleSessions(): void {
 		const now = this.idleNow();
@@ -179,9 +189,8 @@ export class SessionCommandRouter {
 				if (status !== "open") continue;
 				const entry = this.registry.peek(sessionId);
 				if (!entry) continue;
-				const session = entry.runtime?.session;
-				if (session?.isStreaming || session?.isBashRunning) {
-					// Active work defers eviction; the window restarts at settlement.
+				if (entry.runtime?.session.isSessionBusy) {
+					// Session-owned work defers eviction; the window restarts when it settles.
 					entry.lastCommandAt = now;
 					continue;
 				}
@@ -189,7 +198,7 @@ export class SessionCommandRouter {
 			}
 		}
 		if (Number.isFinite(this.emptyExitMs)) {
-			if (this.registry.size === 0) {
+			if (this.registry.size === 0 && (this.canExitWhenEmpty?.() ?? true)) {
 				if (this.emptySince === undefined) this.emptySince = now;
 				else if (now - this.emptySince >= this.emptyExitMs) {
 					this.stopSweep();
@@ -229,6 +238,10 @@ export class SessionCommandRouter {
 				success: true,
 				data: {},
 			});
+			// The runtime is disposed and routing handles are unique per process
+			// epoch, so nothing can emit under this id again: drop the writer's
+			// per-session bookkeeping instead of retaining it for the host's life.
+			this.writer.forgetSession(sessionId);
 		}
 	}
 

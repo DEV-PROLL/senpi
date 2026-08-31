@@ -285,6 +285,17 @@ export class SessionEventWriter {
 		this.requestFlush();
 	}
 
+	/**
+	 * Drops per-session bookkeeping for a handle whose runtime is fully disposed.
+	 * Routing handles are unique per process epoch, so nothing can legitimately
+	 * emit under this id again; without this every host-closed session would
+	 * leave a permanent sealed-handle (and snapshot) entry behind.
+	 */
+	forgetSession(sessionId: string): void {
+		this.sealedSessions.delete(sessionId);
+		this.sessionSnapshots.delete(sessionId);
+	}
+
 	/** Drain every retained lane and the current in-flight record. */
 	flush(): Promise<void> {
 		if (this.failure !== undefined) return Promise.reject(this.failure);

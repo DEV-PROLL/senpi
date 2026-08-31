@@ -6,6 +6,7 @@ import type {
 	CreateAgentSessionRuntimeFactory,
 	CreateAgentSessionRuntimeResult,
 } from "../src/core/agent-session-runtime.ts";
+import { isSessionBusySnapshot } from "../src/core/session-activity.ts";
 import { ProjectTrustStore } from "../src/core/trust-manager.ts";
 import type { MultiSessionHostOptions } from "../src/modes/rpc/multi-session-host.ts";
 import * as multiSessionHost from "../src/modes/rpc/multi-session-host.ts";
@@ -31,9 +32,14 @@ import { type RpcSessionLaunchProfile, RpcSessionRegistry } from "../src/modes/r
 
 const IDLE_WINDOW_MS = 1_000;
 
+/** Mirrors the real session-owned activity sources the sweep must respect. */
 interface FakeRuntimeState {
 	isStreaming: boolean;
 	isBashRunning: boolean;
+	isCompacting: boolean;
+	hasSessionWork: boolean;
+	/** Stands in for a background terminal job (published wake source). */
+	hasBackgroundJob: boolean;
 	runtimeDisposals: number;
 }
 
@@ -44,7 +50,14 @@ function createRuntimeFactory(): {
 	const states: FakeRuntimeState[] = [];
 	const createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
 		new ProjectTrustStore(options.agentDir).set(options.cwd, true);
-		const state: FakeRuntimeState = { isStreaming: false, isBashRunning: false, runtimeDisposals: 0 };
+		const state: FakeRuntimeState = {
+			isStreaming: false,
+			isBashRunning: false,
+			isCompacting: false,
+			hasSessionWork: false,
+			hasBackgroundJob: false,
+			runtimeDisposals: 0,
+		};
 		states.push(state);
 		return {
 			session: {
@@ -59,6 +72,17 @@ function createRuntimeFactory(): {
 				},
 				get isBashRunning() {
 					return state.isBashRunning;
+				},
+				// Composed through the production predicate so this fake cannot drift
+				// from the contract the real AgentSession exposes.
+				get isSessionBusy() {
+					return isSessionBusySnapshot({
+						isStreaming: state.isStreaming,
+						isBashRunning: state.isBashRunning,
+						isCompacting: state.isCompacting,
+						hasSessionWork: state.hasSessionWork,
+						hasActiveWakeSource: state.hasBackgroundJob,
+					});
 				},
 				extensionRunner: { hasHandlers: () => false, emit: async () => {} },
 				abort: async () => {},
@@ -80,6 +104,7 @@ function createRuntimeFactory(): {
 interface RouterRig {
 	router: SessionCommandRouter;
 	registry: RpcSessionRegistry;
+	writer: SessionEventWriter;
 	records: Array<Record<string, unknown>>;
 	bindingDisposals: () => number;
 	uiRequestsCancelled: () => number;
@@ -108,12 +133,13 @@ function createRouterRig(
 	let bindingDisposals = 0;
 	let uiRequestsCancelled = 0;
 	const registry = new RpcSessionRegistry({ agentDir: dir, createRuntime, maxSessions });
+	const writer = new SessionEventWriter(
+		(chunk) => records.push(JSON.parse(chunk) as Record<string, unknown>),
+		(flush) => flush(),
+	);
 	const router = new SessionCommandRouter(
 		registry,
-		new SessionEventWriter(
-			(chunk) => records.push(JSON.parse(chunk) as Record<string, unknown>),
-			(flush) => flush(),
-		),
+		writer,
 		{ cwd: dir },
 		fakeBindingFactory(
 			() => {
@@ -129,6 +155,7 @@ function createRouterRig(
 	return {
 		router,
 		registry,
+		writer,
 		records,
 		bindingDisposals: () => bindingDisposals,
 		uiRequestsCancelled: () => uiRequestsCancelled,
@@ -246,23 +273,40 @@ describe("shared RPC host occupancy", () => {
 		expect(rig.registry.list()).toHaveLength(0);
 	});
 
-	test("(4.1a) defers eviction while a session-owned bash job is running", async () => {
-		const dir = await tempDir();
-		const { createRuntime, states } = createRuntimeFactory();
-		const rig = createRouterRig(dir, createRuntime, {
-			idleEvictionMs: IDLE_WINDOW_MS,
-			emptyExitMs: Number.POSITIVE_INFINITY,
-		});
-		await rig.router.handle({ id: "open", type: "open_session", cwd: dir, sessionPath: join(dir, "bash.jsonl") });
+	test.each([
+		["a background terminal job", "hasBackgroundJob"],
+		["a running bash command", "isBashRunning"],
+		["compaction", "isCompacting"],
+		["barrier-held session work", "hasSessionWork"],
+	] as Array<[string, "hasBackgroundJob" | "isBashRunning" | "isCompacting" | "hasSessionWork"]>)(
+		"(4.1a) defers eviction while %s outlives the turn",
+		async (_label, source) => {
+			const dir = await tempDir();
+			const { createRuntime, states } = createRuntimeFactory();
+			const rig = createRouterRig(dir, createRuntime, {
+				idleEvictionMs: IDLE_WINDOW_MS,
+				emptyExitMs: Number.POSITIVE_INFINITY,
+			});
+			await rig.router.handle({
+				id: "open",
+				type: "open_session",
+				cwd: dir,
+				sessionPath: join(dir, `${source}.jsonl`),
+			});
 
-		states[0]!.isBashRunning = true;
-		await vi.advanceTimersByTimeAsync(IDLE_WINDOW_MS * 3);
-		expect(rig.registry.list()).toHaveLength(1);
+			states[0]![source] = true;
+			await vi.advanceTimersByTimeAsync(IDLE_WINDOW_MS * 4);
+			expect(rig.registry.list()).toHaveLength(1);
+			expect(states[0]?.runtimeDisposals).toBe(0);
 
-		states[0]!.isBashRunning = false;
-		await vi.advanceTimersByTimeAsync(IDLE_WINDOW_MS * 2);
-		expect(rig.registry.list()).toHaveLength(0);
-	});
+			// Only once the work settles does the idle window start running again.
+			states[0]![source] = false;
+			await vi.advanceTimersByTimeAsync(IDLE_WINDOW_MS / 2);
+			expect(rig.registry.list()).toHaveLength(1);
+			await vi.advanceTimersByTimeAsync(IDLE_WINDOW_MS * 2);
+			expect(rig.registry.list()).toHaveLength(0);
+		},
+	);
 
 	test("(4.1a) routing a command refreshes the idle window", async () => {
 		const dir = await tempDir();
@@ -332,6 +376,49 @@ describe("shared RPC host occupancy", () => {
 		// The sweep stops after exit: exactly once, ever.
 		await vi.advanceTimersByTimeAsync(10_000);
 		expect(onEmptyExit).toHaveBeenCalledTimes(1);
+	});
+
+	test("(B2) never exits while a client is connected but sessionless, and exits once it disconnects", async () => {
+		const dir = await tempDir();
+		const { createRuntime } = createRuntimeFactory();
+		const onEmptyExit = vi.fn();
+		let connectedClients = 1;
+		createRouterRig(dir, createRuntime, {
+			idleEvictionMs: Number.POSITIVE_INFINITY,
+			emptyExitMs: 2_000,
+			onEmptyExit,
+			canExitWhenEmpty: () => connectedClients === 0,
+		});
+
+		// A connected client with zero sessions is occupancy: exiting here would drop
+		// its socket and read as a crash to the supervisor.
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(onEmptyExit).not.toHaveBeenCalled();
+
+		connectedClients = 0;
+		// The window starts at disconnect, not before it.
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(onEmptyExit).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(3_000);
+		expect(onEmptyExit).toHaveBeenCalledTimes(1);
+	});
+
+	test("(follow-up) eviction leaves no sealed-handle residue for the evicted epoch", async () => {
+		const dir = await tempDir();
+		const { createRuntime } = createRuntimeFactory();
+		const rig = createRouterRig(dir, createRuntime, {
+			idleEvictionMs: IDLE_WINDOW_MS,
+			emptyExitMs: Number.POSITIVE_INFINITY,
+		});
+		await rig.router.handle({ id: "open", type: "open_session", cwd: dir, sessionPath: join(dir, "sealed.jsonl") });
+		const sessionId = openedSessionId(rig.records);
+
+		await vi.advanceTimersByTimeAsync(IDLE_WINDOW_MS * 2);
+		expect(rig.registry.list()).toHaveLength(0);
+
+		// Sealing keeps a torn-down session's records from trailing its close
+		// response; it must not outlive the runtime it protected.
+		expect(rig.writer.enqueue(sessionId, { type: "message_update" })).toBe(true);
 	});
 
 	test("(4.1b) router dispose stops the occupancy sweep", async () => {

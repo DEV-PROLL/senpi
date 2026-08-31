@@ -113,6 +113,7 @@ import {
 	projectModelUsabilityBudget,
 } from "./extensions/builtin/compaction/model-usability-budget.ts";
 import { resolveReserveTokens } from "./extensions/builtin/compaction/policy.ts";
+import { WAKE_SOURCE_STATE_EVENT } from "./extensions/builtin/monitor-state-event.ts";
 import { CODEX_RESPONSES_API, type ServiceTier } from "./extensions/builtin/service-tier.ts";
 import { deriveExtensionRegistrationId } from "./extensions/builtin/tool-search/engine/marker.ts";
 import { getToolSearchService } from "./extensions/builtin/tool-search/service.ts";
@@ -186,6 +187,7 @@ import {
 import { createFallbackLogger } from "./retry-fallback/log.ts";
 import { ProbeBackScheduler } from "./retry-fallback/probe-scheduler.ts";
 import { validateFallbackChains } from "./retry-fallback/validate.ts";
+import { isSessionBusySnapshot, type SessionActivitySnapshot, WakeSourceTracker } from "./session-activity.ts";
 import { createSessionLogger, type SessionLogger } from "./session-log.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionManager } from "./session-manager.ts";
 import {
@@ -1031,6 +1033,14 @@ export class AgentSession {
 	private _pendingCompactionAdmission: PendingCompactionAdmission | undefined = undefined;
 	private readonly _compactionLifecycle = new CompactionLifecycleCoordinator();
 	private readonly _sessionWorkBarrier = new SessionWorkBarrier();
+	/**
+	 * Extension-published activity that outlives a turn (background terminal
+	 * jobs, terminal monitors, loop-guard holds). Counts persist across extension
+	 * reloads on purpose: a stale "busy" only delays reclamation, while a lost
+	 * one would let the host evict a session still doing work.
+	 */
+	private readonly _wakeSources = new WakeSourceTracker();
+	private _unsubscribeWakeSources: (() => void) | undefined;
 	private _overflowRecoveryAttempted = false;
 	private _compactionSkippedTooSmall = false;
 	private _requiredCompactionAdmissionError: RequiredCompactionError | undefined;
@@ -2790,8 +2800,32 @@ export class AgentSession {
 		this._disconnectFromAgent();
 		this._unsubscribeSettingsSource?.();
 		this._unsubscribeSettingsSource = undefined;
+		this._unsubscribeWakeSources?.();
+		this._unsubscribeWakeSources = undefined;
 		this._eventListeners = [];
 		cleanupSessionResources(this.sessionId);
+	}
+
+	/** Live in-session activity signals; see `session-activity.ts` for the contract. */
+	get activitySnapshot(): SessionActivitySnapshot {
+		return {
+			isStreaming: this._isAgentRunActive,
+			isBashRunning: this.isBashRunning,
+			isCompacting: this.isCompacting,
+			hasSessionWork: this._sessionWorkBarrier.hasActiveWork,
+			hasActiveWakeSource: this._wakeSources.hasActive,
+		};
+	}
+
+	/**
+	 * Whether this session owns work that must outlive a teardown decision: an
+	 * agent run, bash, compaction, barrier-held session work, or an
+	 * extension-published wake source. Occupancy sweeps (the shared RPC host's
+	 * idle eviction) MUST consult this rather than individual flags, so a new
+	 * activity source is picked up by every call site at once.
+	 */
+	get isSessionBusy(): boolean {
+		return isSessionBusySnapshot(this.activitySnapshot);
 	}
 
 	// =========================================================================
@@ -6631,6 +6665,14 @@ export class AgentSession {
 	}
 
 	private _bindExtensionCore(runner: ExtensionRunner): void {
+		// Activity extensions publish about work outliving a turn (background
+		// terminal jobs, monitors, holds) feeds the session-busy contract. Re-bound
+		// per runner; counts survive the swap so a reload cannot make live work
+		// look idle to an occupancy sweep.
+		this._unsubscribeWakeSources?.();
+		this._unsubscribeWakeSources = runner.onBusEvent(WAKE_SOURCE_STATE_EVENT, (data) =>
+			this._wakeSources.observe(data),
+		);
 		const getCommands = (): SlashCommandInfo[] => {
 			const extensionCommands: SlashCommandInfo[] = runner.getRegisteredCommands().map((command) => ({
 				name: command.invocationName,

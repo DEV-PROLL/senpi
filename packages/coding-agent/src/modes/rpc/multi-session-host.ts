@@ -54,6 +54,8 @@ export interface HostIdleOverrides {
 	maxSessions?: number;
 	/** Shutdown hook the empty-exit window invokes; hosts pass their exit path. */
 	onEmptyExit?: () => void;
+	/** Gate consulted before the empty-exit window advances (connected clients block it). */
+	canExitWhenEmpty?: () => boolean;
 }
 
 function parseSessionCap(value: string | undefined): number | undefined {
@@ -66,7 +68,7 @@ function parseSessionCap(value: string | undefined): number | undefined {
 export function resolveHostIdlePolicy(
 	env: Readonly<Record<string, string | undefined>>,
 	overrides: HostIdleOverrides = {},
-): Required<Omit<HostIdleOverrides, "onEmptyExit">> {
+): { now: () => number; idleEvictionMs: number; emptyExitMs: number; maxSessions: number } {
 	return {
 		now: overrides.now ?? Date.now,
 		idleEvictionMs:
@@ -120,6 +122,7 @@ export function createHostCore(
 			idleEvictionMs: policy.idleEvictionMs,
 			emptyExitMs: policy.emptyExitMs,
 			onEmptyExit: idle.onEmptyExit,
+			canExitWhenEmpty: idle.canExitWhenEmpty,
 		},
 	);
 	const handle = async (line: string): Promise<void> => {
@@ -178,6 +181,7 @@ async function runStdioHost(options: MultiSessionHostOptions): Promise<never> {
 async function runSocketHost(options: MultiSessionHostOptions, socketPath: string): Promise<never> {
 	await prepareSocketPath(socketPath);
 	const writer = new SessionEventWriter(() => {});
+	const connections = new Map<string, Connection>();
 	const { router, handle } = createHostCore(
 		options,
 		writer,
@@ -186,9 +190,10 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 		),
 		// Supervised hosts idle-exit via the supervisor, but a socket host that
 		// outlives its supervisor (or is started bare) still self-exits when empty.
-		{ onEmptyExit: () => void shutdown(0) },
+		// A connected client counts as occupancy even with no session open: exiting
+		// under it would drop its socket and read as a crash to the supervisor.
+		{ onEmptyExit: () => void shutdown(0), canExitWhenEmpty: () => connections.size === 0 },
 	);
-	const connections = new Map<string, Connection>();
 	let nextConnection = 0;
 	let shuttingDown = false;
 	const server = createServer((socket) => {
