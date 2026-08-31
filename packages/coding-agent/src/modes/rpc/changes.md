@@ -5,7 +5,7 @@
 - Replaced proper-lockfile for the shared RPC-host and app-server daemon locks with a persistent regular SQLite lock file using `BEGIN EXCLUSIVE`; release commits and closes without unlinking.
 - Legacy proper-lockfile lock directories fail closed as typed `ELEGACY_LOCK_ARTIFACT` errors and are never removed; a directory racing in between the stat guard and the open is also surfaced as the typed error.
 - The lock opens through a runtime adapter: `bun:sqlite` inside the Bun binary, `node:sqlite` for npm-installed Node executions. Both drive the same kernel advisory locks, so cross-runtime contenders exclude each other; a static `bun:sqlite` import would break every Node entrypoint before command dispatch.
-- Waiting uses ONE cumulative budget (`retries.retries * retries.maxTimeout`, ~10s with the default profile) applied through SQLite's `busy_timeout`; attempts never stack JS backoff on top of the SQLite wait, keeping contention latency contract-equivalent to the old proper-lockfile profile.
+- Waiting uses ONE cumulative deadline (`retries.retries * retries.maxTimeout`, ~10s with the default profile). Each SQLite `busy_timeout` stays SHORT (<= maxTimeout) because it blocks the event loop synchronously - a long busy wait deadlocks a same-process holder mid-critical-section (caught by the ensureHost cross-agent-dir serialization test) - and the async inter-attempt sleep yields without extending the budget; the deadline is the only limit, so contention latency stays contract-equivalent to the old proper-lockfile profile.
 
 ## 2026-08-31 - Shared-host occupancy: idle eviction, session cap, empty-host exit
 
