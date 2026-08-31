@@ -15,6 +15,8 @@
 - The claude-sdk-oauth session registry derives entry generations from a monotonic counter instead of a per-session-id map, so close/reopen cycles keep stale async work gated while dropping the unbounded id-keyed bookkeeping.
 ### New Features
 
+- Refusal-caused model fallbacks now release their pin when a senpi-owned compaction successfully rewrites the context and eagerly re-attempt the original model once per compaction, while billing-caused pins never release and `fallbackRevertPolicy: "never"` still suppresses the restore ([#1232](https://github.com/code-yeongyu/senpi/pull/1232)).
+
 ### Breaking Changes
 
 ### Added

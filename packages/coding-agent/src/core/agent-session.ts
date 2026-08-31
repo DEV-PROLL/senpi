@@ -4619,6 +4619,17 @@ export class AgentSession {
 		}
 	}
 
+	/**
+	 * A senpi-owned compaction just rewrote the conversation context: release any
+	 * refusal-caused fallback pin (the "same context refuses again" assumption no
+	 * longer holds) and, while no run is active, eagerly re-attempt the original
+	 * model through the existing revert gate. Billing-caused pins never release.
+	 */
+	private async _onCompactionContextChanged(): Promise<void> {
+		const released = this._retryFallback.notifyCompactionApplied();
+		if (released && !this.isStreaming) await this._maybeRestoreFallbackPrimary();
+	}
+
 	private async _switchActiveModel(
 		model: Model<Api>,
 		opts: {
@@ -5675,6 +5686,11 @@ export class AgentSession {
 				willRetry: request.willRetry,
 			});
 
+			// Shared success seam: every senpi-owned compaction apply (manual /compact,
+			// extension applyCompaction, pre-prompt and auto compaction) funnels through
+			// here after the compaction entry is appended and the success event emitted.
+			await this._onCompactionContextChanged();
+
 			return {
 				accepted: true,
 				requestId,
@@ -6272,6 +6288,22 @@ export class AgentSession {
 		await this.agent.waitForIdle();
 		try {
 			if (this.agent.state.isStreaming) return "taken-over";
+
+			// Pre-admission restore point. A senpi-owned compaction that succeeds
+			// while a run is still active releases its refusal pin through
+			// _onCompactionContextChanged() but cannot restore there: model-select
+			// work must stay ordered behind the session-work barrier while the run
+			// owns it. Every post-compaction continuation admission - auto/overflow
+			// compaction recovery, _resumeQueuedMessagesAfterCompaction(), the
+			// agent_end queued continuation and the retry continuation - is scheduled
+			// through _scheduleContinuationAfterCurrentEvent() and funnels here, so
+			// this is the single choke point every such request passes before
+			// reaching the provider. Restoring here (a no-op when nothing is pending)
+			// keeps the guarantee that the very next request after a compaction runs
+			// on the primary, and precedes the admission revalidation below so that
+			// check samples the restored model's context window - the same ordering
+			// the retry-continuation restore uses.
+			await this._maybeRestoreFallbackPrimary();
 
 			await this._revalidateScheduledContinuationAdmission();
 			if (this.agent.state.isStreaming) return "taken-over";
