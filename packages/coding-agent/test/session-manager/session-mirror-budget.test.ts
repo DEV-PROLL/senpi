@@ -1,13 +1,12 @@
-import type { TextContent } from "@earendil-works/pi-ai";
 import { mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ResidentStringStore } from "../../src/core/session-resident-store.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
+import { assistantMsg, userMsg } from "../utilities.ts";
 
 const LARGE_TEXT = "x".repeat(1024 * 1024);
-const LARGE_PAYLOAD: TextContent[] = [{ type: "text", text: LARGE_TEXT }];
 
 describe("SessionManager resident mirror", () => {
 	let tempDir: string;
@@ -32,10 +31,10 @@ describe("SessionManager resident mirror", () => {
 
 	it("trims pre-compaction mirror entries but reloads them for branching", () => {
 		const session = SessionManager.create(tempDir, tempDir);
-		session.appendMessage({ role: "assistant", content: [{ type: "text", text: "ready" }], timestamp: 0 });
-		const prunedEntryId = session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 1 });
-		const firstKeptEntryId = session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 2 });
-		session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 3 });
+		session.appendMessage(assistantMsg("ready"));
+		const prunedEntryId = session.appendMessage(userMsg(LARGE_TEXT));
+		const firstKeptEntryId = session.appendMessage(userMsg(LARGE_TEXT));
+		session.appendMessage(userMsg(LARGE_TEXT));
 		const beforeBlobBytes = session.getResidentStoreStats().blobBytes;
 
 		session.appendCompaction("summary", firstKeptEntryId, 100);
