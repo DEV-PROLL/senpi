@@ -1076,14 +1076,16 @@ export class SessionManager {
 	}
 
 	private _materializeEntry(entry: SessionEntry): SessionEntry {
-		const materialized = this.residentStore.materialize(entry);
-		if (JSON.stringify(materialized).includes("\u0000senpi-resident-string:v1:")) {
-			// The resident store is a bounded cache. The JSONL remains authoritative
-			// when an evicted blob is needed by a branch or read operation.
-			if (this.sessionFile) {
-				const persisted = loadEntriesFromFile(this.sessionFile).find((candidate) => candidate.id === entry.id);
-				if (persisted) return persisted as SessionEntry;
-			}
+		let missingResidentString = false;
+		const materialized = this.residentStore.materialize(entry, () => {
+			missingResidentString = true;
+			return undefined;
+		});
+		// The resident store is a bounded cache. The JSONL remains authoritative
+		// when an evicted blob is needed by a branch or read operation.
+		if (missingResidentString && this.sessionFile) {
+			const persisted = loadEntriesFromFile(this.sessionFile).find((candidate) => candidate.id === entry.id);
+			if (persisted) return persisted as SessionEntry;
 		}
 		if (materialized.type === "message") {
 			const order = this.entryOrdersById.get(materialized.id);
@@ -1224,17 +1226,19 @@ export class SessionManager {
 		if (firstKeptIndex < 0 || compactionIndex < firstKeptIndex) return;
 
 		const header = this.fileEntries.find((entry) => entry.type === "session");
-		const retained = this.fileEntries.slice(firstKeptIndex, compactionIndex + 1);
-		const firstKept = retained[0];
-		if (firstKept && firstKept.type !== "session") firstKept.parentId = null;
-		const retainedCompaction = retained[retained.length - 1];
-		if (retainedCompaction?.type === "compaction" && retainedCompaction.id === compaction.id) {
-			retainedCompaction.parentId = compaction.firstKeptEntryId;
+		const retained = [
+			...this.fileEntries.slice(0, firstKeptIndex).filter((entry) => entry.type !== "message"),
+			...this.fileEntries.slice(firstKeptIndex, compactionIndex + 1),
+		];
+		let parentId: string | null = null;
+		for (const entry of retained) {
+			if (entry.type !== "session") entry.parentId = parentId;
+			parentId = entry.type === "session" ? null : entry.id;
 		}
 		this.residentStore.clear();
-		this.fileEntries = [header, ...retained].filter((entry): entry is FileEntry => entry !== undefined).map((entry) =>
-			this.residentStore.externalize(entry),
-		);
+		this.fileEntries = [header, ...retained]
+			.filter((entry): entry is FileEntry => entry !== undefined)
+			.map((entry) => this.residentStore.externalize(entry));
 		this._buildIndex();
 		this.mutationCount++;
 	}
