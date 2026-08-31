@@ -30,6 +30,7 @@ describe("SessionManager resident mirror", () => {
 
 	it("trims pre-compaction mirror entries but reloads them for branching", () => {
 		const session = SessionManager.create(tempDir, tempDir);
+		session.appendMessage({ role: "assistant", content: "ready", timestamp: 0 });
 		const prunedEntryId = session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 1 });
 		const firstKeptEntryId = session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 2 });
 		session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 3 });
@@ -43,7 +44,7 @@ describe("SessionManager resident mirror", () => {
 
 		session.branch(prunedEntryId);
 		expect(session.getEntry(prunedEntryId)?.id).toBe(prunedEntryId);
-		expect(session.buildSessionContext().messages).toHaveLength(1);
+		expect(session.buildSessionContext().messages).toHaveLength(2);
 	});
 
 	it("bounds standalone resident stores too", () => {
