@@ -773,6 +773,17 @@ export function findMostRecentSession(sessionDir: string, cwd?: string): string 
  * Use buildSessionContext() to get the resolved message list for the LLM, which
  * handles compaction summaries and follows the path from root to current leaf.
  */
+let sessionEntryLoader = loadEntriesFromFile;
+
+/** Test seam for observing disk reloads without mocking ESM filesystem exports. */
+export function setSessionEntryLoaderForTesting(loader: typeof loadEntriesFromFile): () => void {
+	const previous = sessionEntryLoader;
+	sessionEntryLoader = loader;
+	return () => {
+		sessionEntryLoader = previous;
+	};
+}
+
 export class SessionManager {
 	private sessionId: string = "";
 	private sessionFile: string | undefined;
@@ -1508,7 +1519,7 @@ export class SessionManager {
 
 	private _getFullHistoryEntries(): FileEntry[] {
 		if (!this.sessionFile) return this.fileEntries;
-		return (this.fullHistoryEntriesCache ??= loadEntriesFromFile(this.sessionFile));
+		return (this.fullHistoryEntriesCache ??= sessionEntryLoader(this.sessionFile));
 	}
 
 	/**

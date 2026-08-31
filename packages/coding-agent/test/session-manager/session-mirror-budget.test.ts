@@ -1,10 +1,13 @@
-import * as fs from "fs";
 import { mkdirSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ResidentStringStore } from "../../src/core/session-resident-store.ts";
-import { SessionManager } from "../../src/core/session-manager.ts";
+import {
+	loadEntriesFromFile,
+	setSessionEntryLoaderForTesting,
+	SessionManager,
+} from "../../src/core/session-manager.ts";
 import { assistantMsg, userMsg } from "../utilities.ts";
 
 const LARGE_TEXT = "x".repeat(1024 * 1024);
@@ -55,13 +58,17 @@ describe("SessionManager resident mirror", () => {
 		session.appendMessage(assistantMsg("after"));
 		session.appendCompaction("summary", firstKeptEntryId, 100);
 
-		const openSpy = vi.spyOn(fs, "openSync").mockClear();
+		let loadCount = 0;
+		const restoreLoader = setSessionEntryLoaderForTesting((filePath) => {
+			loadCount++;
+			return loadEntriesFromFile(filePath);
+		});
 		try {
 			session.getEntries();
 			session.getEntries();
-			expect(openSpy.mock.calls.filter(([path]) => path === session.getSessionFile()).length).toBe(1);
+			expect(loadCount).toBe(1);
 		} finally {
-			openSpy.mockRestore();
+			restoreLoader();
 		}
 	});
 
