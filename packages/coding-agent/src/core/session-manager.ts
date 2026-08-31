@@ -792,6 +792,7 @@ export class SessionManager {
 	private labelTimestampsById: Map<string, string> = new Map();
 	private leafId: string | null = null;
 	private residentStore = new ResidentStringStore();
+	private mirrorTrimmed = false;
 	// Monotonic counter bumped by every mutator; memoized materialized views are
 	// keyed on it so read hot paths (footer, RPC) never re-materialize unchanged sessions.
 	private mutationCount = 0;
@@ -857,6 +858,7 @@ export class SessionManager {
 
 	private _setSessionFile(sessionFile: string, preloadedFileEntries?: FileEntry[]): void {
 		this.sessionFile = resolvePath(sessionFile);
+		this.mirrorTrimmed = false;
 		this.residentStore.clear();
 		if (existsSync(this.sessionFile)) {
 			this.fileEntries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
@@ -908,6 +910,7 @@ export class SessionManager {
 			parentSession: options?.parentSession,
 		};
 		this.fileEntries = [header];
+		this.mirrorTrimmed = false;
 		this.residentStore.clear();
 		this.byId.clear();
 		this.entryOrdersById.clear();
@@ -1236,6 +1239,7 @@ export class SessionManager {
 			parentId = entry.type === "session" ? null : entry.id;
 		}
 		this.residentStore.clear();
+		this.mirrorTrimmed = true;
 		this.fileEntries = [header, ...retained]
 			.filter((entry): entry is FileEntry => entry !== undefined)
 			.map((entry) => this.residentStore.externalize(entry));
@@ -1469,7 +1473,7 @@ export class SessionManager {
 	 * you need to filter/reorder.
 	 */
 	getEntries(): SessionEntry[] {
-		if (this.persist && this.sessionFile) {
+		if (this.mirrorTrimmed && this.sessionFile) {
 			// get_entries is an authoritative read surface (including RPC). The
 			// compact mirror may omit old entries, so read the JSONL on demand without
 			// retaining this full materialized snapshot in the manager cache.

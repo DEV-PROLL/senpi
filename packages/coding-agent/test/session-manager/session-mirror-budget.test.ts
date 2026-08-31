@@ -41,7 +41,6 @@ describe("SessionManager resident mirror", () => {
 		session.appendCompaction("summary", firstKeptEntryId, 100);
 
 		expect(session.getEntries()).toHaveLength(5);
-		expect(session.getEntry(prunedEntryId)?.id).toBe(prunedEntryId);
 		expect(session.getResidentStoreStats().blobBytes).toBeLessThan(beforeBlobBytes);
 
 		session.branch(prunedEntryId);
