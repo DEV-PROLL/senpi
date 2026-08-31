@@ -145,19 +145,22 @@ hosts) sees neither variable and is unaffected. A host whose supervisor is alive
 Every open session owns a complete runtime (a lone idle session measures 340-510 MB RSS), so the host enforces three
 occupancy bounds itself, independent of the supervisor and of client cooperation:
 
-- **Idle eviction**: a session with no routed command, no active turn, and no session-owned bash for
+- **Idle eviction**: a session with no routed command and no session-owned work for
   `SENPI_RPC_SESSION_IDLE_EVICTION_MS` (default 30 minutes) is closed through the exact `close_session` sequence
   (abort → waitForIdle → dispose, all attachments drained, path reservation released) and every attached connection
-  receives that handle's `session_closed` broadcast plus a final `close_session` response record. Eviction never
-  touches a session with an active turn or running session-owned bash; their idle clock restarts when the work
-  settles. An evicted session resumes like any other: the next `open_session` with the same `sessionPath` reopens it.
+  receives that handle's `session_closed` broadcast plus a final `close_session` response record. "Session-owned
+  work" is the complete activity contract, not just a streaming turn: an agent run, a running bash command,
+  background terminal jobs and any other published wake source (terminal monitors, loop-guard holds), compaction,
+  and barrier-held session work all defer eviction, and the idle clock restarts when that work settles. An evicted
+  session resumes like any other: the next `open_session` with the same `sessionPath` reopens it.
 - **Session cap**: `open_session` beyond `SENPI_RPC_MAX_SESSIONS` concurrently opening/open sessions (default 8)
   fails with `too_many_sessions`. Attaching to an already-hosted session (`attached: true`) adds no runtime and never
   counts against the cap, so resume and second-surface flows keep working while at it.
-- **Empty-host exit**: when the registry holds zero sessions continuously for `SENPI_RPC_HOST_EMPTY_EXIT_MS`
-  (default 15 minutes), the host exits through its clean shutdown path (flush, socket removal), for stdio and
-  `--listen` hosts alike. The supervisor's own idle exit is unchanged and usually fires first for supervised hosts
-  with no connections; the in-host bound covers connected-but-sessionless and bare/embedded hosts.
+- **Empty-host exit**: when the registry holds zero sessions AND no client is connected, continuously for
+  `SENPI_RPC_HOST_EMPTY_EXIT_MS` (default 15 minutes), the host exits through its clean shutdown path (flush, socket
+  removal), for stdio and `--listen` hosts alike. A connected client counts as occupancy even with no session open,
+  so the host never drops a live socket under itself. Supervised hosts stay clean either way: a supervisor reads a
+  child exit of 0 without a signal as an intentional idle stop and exits 0 with the same cleanup, not as a crash.
 
 Values are positive integers; invalid values fall through to the defaults. These bounds run inside the host process,
 so they hold even for embedders and hand-started hosts that have no supervisor.

@@ -1,5 +1,25 @@
 # changes
 
+## 2026-08-31 - Session activity contract for host occupancy decisions
+
+### What changed
+
+- `session-activity.ts` (new): the single definition of session-owned activity - `SessionActivitySnapshot` (agent run, bash, compaction, session-work barrier), `WakeSourceTracker` for extension-published `wake_source_state` counts, and the `isSessionBusySnapshot()` predicate composing them.
+- `agent-session.ts`: `AgentSession` exposes `activitySnapshot` and `isSessionBusy`, and subscribes to `wake_source_state` on every extension bind so background terminal jobs, terminal monitors, and loop-guard holds count as live work; the subscription is dropped on dispose and counts deliberately survive an extension reload.
+- `extensions/runner.ts`: `onBusEvent(channel, handler)` exposes the session's extension event bus for those activity signals, alongside the existing `onRpcEvent`.
+
+### Why
+
+- The shared RPC host's idle eviction asked only `isStreaming`/`isBashRunning`, so a session whose work outlives the turn - an auto-detached background terminal job, a running compaction, or barrier-held continuation work - could be torn down at the idle threshold, killing the user's job. Teardown decisions now consult one composed predicate, so a future activity source is picked up by every call site at once instead of being missed per call site.
+
+### Why an extension could not handle it
+
+- The predicate is consumed by host lifecycle code beneath every extension surface, and it must aggregate in-session state (`_isAgentRunActive`, the compaction lifecycle, the session-work barrier) that no extension can observe.
+
+### Expected merge conflict zones
+
+- LOW: the new `session-activity.ts` module, the activity getters and `_bindExtensionCore` subscription in `agent-session.ts`, and the `onBusEvent` helper in `extensions/runner.ts`.
+
 ## 2026-08-31 - Shared session host is OFF by default (opt-in)
 
 - Interactive sessions no longer join the shared RPC host implicitly. `main.ts` now gates
