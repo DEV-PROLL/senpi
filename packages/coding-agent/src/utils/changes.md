@@ -1,5 +1,23 @@
 # changes
 
+## Fix biome import-order format drift from #1230 (2026-08-31)
+
+### What changed
+
+- `packages/coding-agent/src/utils/fs-watch.ts` import specifiers reordered by `biome check --write` (type-only `FSWatcher` after `realpathSync`). Formatting only; zero behavior change.
+
+### Why
+
+- #1230 merged with biome format drift on this file, so every subsequent contributor's pre-commit `--write` pass re-fixed it and smuggled the hunk into unrelated commits. Same class as #1231.
+
+### Why an extension could not handle it
+
+- Not applicable: repository formatting hygiene, no runtime surface.
+
+### Expected merge conflict zones
+
+- LOW: `fs-watch.ts` import block only.
+
 ## Canonicalize Windows fs.watch paths before watching (2026-08-31)
 
 ### What changed
