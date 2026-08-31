@@ -804,6 +804,7 @@ export class SessionManager {
 	private leafId: string | null = null;
 	private residentStore = new ResidentStringStore();
 	private mirrorTrimmed = false;
+	private compactEntriesCache: { mutation: number; entries: SessionEntry[] } | null = null;
 	// Monotonic counter bumped by every mutator; memoized materialized views are
 	// keyed on it so read hot paths (footer, RPC) never re-materialize unchanged sessions.
 	private mutationCount = 0;
@@ -1513,9 +1514,25 @@ export class SessionManager {
 	}
 
 	private _getCompactEntries(): SessionEntry[] {
-		return this.fileEntries
-			.filter((e): e is SessionEntry => e.type !== "session")
-			.map((entry) => this._materializeEntry(entry));
+		if (this.compactEntriesCache?.mutation === this.mutationCount) return this.compactEntriesCache.entries;
+		const entries = this.fileEntries.filter((e): e is SessionEntry => e.type !== "session");
+		const missingEntryIds = new Set<string>();
+		const materialized = entries.map((entry) =>
+			this.residentStore.materialize(entry, () => {
+				if (entry.type === "message" || entry.type === "custom_message") missingEntryIds.add(entry.id);
+				return undefined;
+			}),
+		);
+		if (missingEntryIds.size > 0 && this.sessionFile) {
+			const persistedById = new Map(this._loadFullHistoryEntries().map((entry) => [entry.id, entry]));
+			for (const entry of entries) {
+				if (!missingEntryIds.has(entry.id)) continue;
+				const persisted = persistedById.get(entry.id);
+				if (persisted) materialized[entries.indexOf(entry)] = this.residentStore.materialize(persisted);
+			}
+		}
+		this.compactEntriesCache = { mutation: this.mutationCount, entries: materialized };
+		return materialized;
 	}
 
 	private _loadFullHistoryEntries(): FileEntry[] {

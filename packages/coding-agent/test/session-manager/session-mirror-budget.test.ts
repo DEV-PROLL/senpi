@@ -74,6 +74,30 @@ describe("SessionManager resident mirror", () => {
 		}
 	});
 
+	it("batches compact-context recovery after resident eviction", () => {
+		const session = SessionManager.create(tempDir, tempDir);
+		session.appendMessage(assistantMsg("ready"));
+		for (let i = 0; i < 70; i++) session.appendCustomEntry("large-metadata", { payload: `${i}:${LARGE_TEXT}` });
+		const firstKeptEntryId = session.appendMessage(userMsg("before"));
+		session.appendMessage(assistantMsg("after"));
+		session.appendCompaction("summary", firstKeptEntryId, 100);
+
+		let loadCount = 0;
+		const restoreLoader = setSessionEntryLoaderForTesting((filePath) => {
+			loadCount++;
+			return loadEntriesFromFile(filePath);
+		});
+		try {
+			session.buildContextEntries();
+			expect(loadCount).toBeLessThanOrEqual(1);
+			const firstReadCount = loadCount;
+			session.buildContextEntries();
+			expect(loadCount - firstReadCount).toBeLessThanOrEqual(1);
+		} finally {
+			restoreLoader();
+		}
+	});
+
 	it("resets trimmed state when replacing the session with a branched file", () => {
 		const session = SessionManager.create(tempDir, tempDir);
 		session.appendMessage(assistantMsg("ready"));
