@@ -4619,6 +4619,17 @@ export class AgentSession {
 		}
 	}
 
+	/**
+	 * A senpi-owned compaction just rewrote the conversation context: release any
+	 * refusal-caused fallback pin (the "same context refuses again" assumption no
+	 * longer holds) and, while no run is active, eagerly re-attempt the original
+	 * model through the existing revert gate. Billing-caused pins never release.
+	 */
+	private async _onCompactionContextChanged(): Promise<void> {
+		const released = this._retryFallback.notifyCompactionApplied();
+		if (released && !this.isStreaming) await this._maybeRestoreFallbackPrimary();
+	}
+
 	private async _switchActiveModel(
 		model: Model<Api>,
 		opts: {
@@ -5674,6 +5685,11 @@ export class AgentSession {
 				fromExtension,
 				willRetry: request.willRetry,
 			});
+
+			// Shared success seam: every senpi-owned compaction apply (manual /compact,
+			// extension applyCompaction, pre-prompt and auto compaction) funnels through
+			// here after the compaction entry is appended and the success event emitted.
+			await this._onCompactionContextChanged();
 
 			return {
 				accepted: true,
