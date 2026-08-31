@@ -793,6 +793,7 @@ export class SessionManager {
 	private leafId: string | null = null;
 	private residentStore = new ResidentStringStore();
 	private mirrorTrimmed = false;
+	private fullHistoryEntriesCache: FileEntry[] | null = null;
 	// Monotonic counter bumped by every mutator; memoized materialized views are
 	// keyed on it so read hot paths (footer, RPC) never re-materialize unchanged sessions.
 	private mutationCount = 0;
@@ -859,6 +860,7 @@ export class SessionManager {
 	private _setSessionFile(sessionFile: string, preloadedFileEntries?: FileEntry[]): void {
 		this.sessionFile = resolvePath(sessionFile);
 		this.mirrorTrimmed = false;
+		this.fullHistoryEntriesCache = null;
 		this.residentStore.clear();
 		if (existsSync(this.sessionFile)) {
 			this.fileEntries = preloadedFileEntries ?? loadEntriesFromFile(this.sessionFile);
@@ -911,6 +913,7 @@ export class SessionManager {
 		};
 		this.fileEntries = [header];
 		this.mirrorTrimmed = false;
+		this.fullHistoryEntriesCache = null;
 		this.residentStore.clear();
 		this.byId.clear();
 		this.entryOrdersById.clear();
@@ -1046,6 +1049,7 @@ export class SessionManager {
 	}
 
 	private _appendEntry(entry: SessionEntry): void {
+		this.fullHistoryEntriesCache = null;
 		const residentEntry = this.residentStore.externalize(entry);
 		this.fileEntries.push(residentEntry);
 		this.byId.set(residentEntry.id, residentEntry);
@@ -1240,6 +1244,7 @@ export class SessionManager {
 		}
 		this.residentStore.clear();
 		this.mirrorTrimmed = true;
+		this.fullHistoryEntriesCache = null;
 		this.fileEntries = [header, ...retained]
 			.filter((entry): entry is FileEntry => entry !== undefined)
 			.map((entry) => this.residentStore.externalize(entry));
@@ -1327,7 +1332,12 @@ export class SessionManager {
 
 	getEntry(id: string): SessionEntry | undefined {
 		const entry = this.byId.get(id);
-		return entry ? this._materializeEntry(entry) : undefined;
+		if (entry) return this._materializeEntry(entry);
+		if (this.mirrorTrimmed && this.sessionFile) {
+			const persisted = this._getFullHistoryEntries().find((candidate) => candidate.id === id);
+			return persisted ? (this.residentStore.materialize(persisted) as SessionEntry) : undefined;
+		}
+		return undefined;
 	}
 
 	/**
@@ -1396,10 +1406,18 @@ export class SessionManager {
 		}
 		const path: SessionEntry[] = [];
 		const startId = fromId ?? this.leafId;
-		let current = startId ? this.byId.get(startId) : undefined;
+		let entriesById = this.byId;
+		if (fromId !== undefined && !entriesById.has(fromId) && this.mirrorTrimmed && this.sessionFile) {
+			entriesById = new Map(
+				this._getFullHistoryEntries()
+					.filter((entry) => entry.type !== "session")
+					.map((entry) => [entry.id, this.residentStore.materialize(entry) as SessionEntry]),
+			);
+		}
+		let current = startId ? entriesById.get(startId) : undefined;
 		while (current) {
 			path.unshift(this._materializeEntry(current));
-			current = current.parentId ? this.byId.get(current.parentId) : undefined;
+			current = current.parentId ? entriesById.get(current.parentId) : undefined;
 		}
 		if (fromId === undefined) {
 			this.branchCache = { leafId: this.leafId, mutation: this.mutationCount, entries: path };
@@ -1474,10 +1492,7 @@ export class SessionManager {
 	 */
 	getEntries(): SessionEntry[] {
 		if (this.mirrorTrimmed && this.sessionFile) {
-			// get_entries is an authoritative read surface (including RPC). The
-			// compact mirror may omit old entries, so read the JSONL on demand without
-			// retaining this full materialized snapshot in the manager cache.
-			return loadEntriesFromFile(this.sessionFile)
+			return this._getFullHistoryEntries()
 				.filter((e): e is SessionEntry => e.type !== "session")
 				.map((entry) => this.residentStore.materialize(entry));
 		}
@@ -1489,6 +1504,11 @@ export class SessionManager {
 			.map((entry) => this._materializeEntry(entry));
 		this.entriesCache = { mutation: this.mutationCount, entries };
 		return entries;
+	}
+
+	private _getFullHistoryEntries(): FileEntry[] {
+		if (!this.sessionFile) return this.fileEntries;
+		return (this.fullHistoryEntriesCache ??= loadEntriesFromFile(this.sessionFile));
 	}
 
 	/**
