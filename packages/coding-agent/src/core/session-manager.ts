@@ -1517,18 +1517,18 @@ export class SessionManager {
 		if (this.compactEntriesCache?.mutation === this.mutationCount) return this.compactEntriesCache.entries;
 		const entries = this.fileEntries.filter((e): e is SessionEntry => e.type !== "session");
 		const missingEntryIds = new Set<string>();
-		const materialized = entries.map((entry) =>
+		const materialized: SessionEntry[] = entries.map((entry) =>
 			this.residentStore.materialize(entry, () => {
-				if (entry.type === "message" || entry.type === "custom_message") missingEntryIds.add(entry.id);
+				missingEntryIds.add(entry.id);
 				return undefined;
-			}),
+			}) as SessionEntry,
 		);
 		if (missingEntryIds.size > 0 && this.sessionFile) {
 			const persistedById = new Map(this._loadFullHistoryEntries().map((entry) => [entry.id, entry]));
 			for (const entry of entries) {
 				if (!missingEntryIds.has(entry.id)) continue;
 				const persisted = persistedById.get(entry.id);
-				if (persisted) materialized[entries.indexOf(entry)] = this.residentStore.materialize(persisted);
+				if (persisted) materialized[entries.indexOf(entry)] = this.residentStore.materialize(persisted) as SessionEntry;
 			}
 		}
 		this.compactEntriesCache = { mutation: this.mutationCount, entries: materialized };

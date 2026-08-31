@@ -89,10 +89,10 @@ describe("SessionManager resident mirror", () => {
 		});
 		try {
 			session.buildContextEntries();
-			expect(loadCount).toBeLessThanOrEqual(1);
+			expect(loadCount).toBe(1);
 			const firstReadCount = loadCount;
 			session.buildContextEntries();
-			expect(loadCount - firstReadCount).toBeLessThanOrEqual(1);
+			expect(loadCount - firstReadCount).toBe(0);
 		} finally {
 			restoreLoader();
 		}
