@@ -12,6 +12,7 @@ import {
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import type { RpcConnectionSink } from "./connection-handler.ts";
 import { parseClientCapabilities } from "./custom-capability.ts";
+import { parseIdleExitMs } from "./host-lifecycle.ts";
 import { armHostWatchdog, readHostWatchdogConfigFromBrandEnv } from "./host-watchdog.ts";
 import { attachJsonlLineReader, MAX_RPC_LINE_CHARACTERS } from "./jsonl.ts";
 import { rpcCommandShapeError } from "./rpc-input-validation.ts";
@@ -28,6 +29,52 @@ export interface MultiSessionHostOptions {
 	creationModel?: { provider: string; modelId: string };
 	initialThinkingLevel?: string;
 	listen?: string;
+}
+
+/** Environment override for the idle-session eviction window, in milliseconds. */
+export const RPC_SESSION_IDLE_EVICTION_MS_ENV = "SENPI_RPC_SESSION_IDLE_EVICTION_MS";
+/** Environment override for the concurrent open-session cap. */
+export const RPC_MAX_SESSIONS_ENV = "SENPI_RPC_MAX_SESSIONS";
+/** Environment override for the empty-host exit window, in milliseconds. */
+export const RPC_HOST_EMPTY_EXIT_MS_ENV = "SENPI_RPC_HOST_EMPTY_EXIT_MS";
+/** Default idle-eviction window: 30 minutes after a session's last routed command or settled turn. */
+export const DEFAULT_SESSION_IDLE_EVICTION_MS = 30 * 60_000;
+/** Default session cap: an idle session holds a full runtime (~340-510 MB RSS measured). */
+export const DEFAULT_MAX_SESSIONS = 8;
+/** Default empty-host exit: 15 minutes with zero open sessions, matching the supervisor's idle window. */
+export const DEFAULT_HOST_EMPTY_EXIT_MS = 15 * 60_000;
+
+/** Explicit occupancy-policy overrides for createHostCore; tests inject clocks and hooks here. */
+export interface HostIdleOverrides {
+	now?: () => number;
+	idleEvictionMs?: number;
+	emptyExitMs?: number;
+	maxSessions?: number;
+	/** Shutdown hook the empty-exit window invokes; hosts pass their exit path. */
+	onEmptyExit?: () => void;
+}
+
+function parseSessionCap(value: string | undefined): number | undefined {
+	if (value === undefined || !/^\d+$/.test(value.trim())) return undefined;
+	const parsed = Number(value.trim());
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+/** Precedence: explicit overrides beat environment variables beat documented defaults. */
+export function resolveHostIdlePolicy(
+	env: Readonly<Record<string, string | undefined>>,
+	overrides: HostIdleOverrides = {},
+): Required<Omit<HostIdleOverrides, "onEmptyExit">> {
+	return {
+		now: overrides.now ?? Date.now,
+		idleEvictionMs:
+			overrides.idleEvictionMs ??
+			parseIdleExitMs(env[RPC_SESSION_IDLE_EVICTION_MS_ENV]) ??
+			DEFAULT_SESSION_IDLE_EVICTION_MS,
+		emptyExitMs:
+			overrides.emptyExitMs ?? parseIdleExitMs(env[RPC_HOST_EMPTY_EXIT_MS_ENV]) ?? DEFAULT_HOST_EMPTY_EXIT_MS,
+		maxSessions: overrides.maxSessions ?? parseSessionCap(env[RPC_MAX_SESSIONS_ENV]) ?? DEFAULT_MAX_SESSIONS,
+	};
 }
 
 interface Connection {
@@ -48,17 +95,30 @@ export async function runMultiSessionHost(options: MultiSessionHostOptions): Pro
 	return runSocketHost(options, resolveSocketPath(options.listen, options.agentDir));
 }
 
-function createHostCore(
+export function createHostCore(
 	options: MultiSessionHostOptions,
 	writer: SessionEventWriter,
 	capabilities = parseClientCapabilities(envValue("RPC_CLIENT_CAPABILITIES")),
+	idle: HostIdleOverrides = {},
 ) {
+	const policy = resolveHostIdlePolicy(process.env, idle);
 	const router = new SessionCommandRouter(
-		new RpcSessionRegistry({ agentDir: options.agentDir, createRuntime: options.createRuntime }),
+		new RpcSessionRegistry({
+			agentDir: options.agentDir,
+			createRuntime: options.createRuntime,
+			now: policy.now,
+			maxSessions: policy.maxSessions,
+		}),
 		writer,
 		options,
 		undefined,
 		{ capabilities },
+		{
+			now: policy.now,
+			idleEvictionMs: policy.idleEvictionMs,
+			emptyExitMs: policy.emptyExitMs,
+			onEmptyExit: idle.onEmptyExit,
+		},
 	);
 	const handle = async (line: string): Promise<void> => {
 		let parsed: unknown;
@@ -84,7 +144,11 @@ async function runStdioHost(options: MultiSessionHostOptions): Promise<never> {
 	takeOverStdout();
 	const sink: RpcConnectionSink = { writeRaw: writeRawStdout, waitForBackpressure: waitForRawStdoutBackpressure };
 	const writer = new SessionEventWriter(sink.writeRaw, sink.waitForBackpressure);
-	const { router, handle } = createHostCore(options, writer);
+	// An empty host (no session ever opened, or all closed) must not stay resident
+	// forever: exit through the normal shutdown path once the window elapses.
+	const { router, handle } = createHostCore(options, writer, undefined, {
+		onEmptyExit: () => void shutdown(0),
+	});
 	let shuttingDown = false;
 	const shutdown = async (exitCode = 0): Promise<never> => {
 		if (shuttingDown) process.exit(exitCode);
@@ -118,6 +182,9 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 		parseClientCapabilities(envValue("RPC_CLIENT_CAPABILITIES")).filter(
 			(capability) => capability !== "rendered_components",
 		),
+		// Supervised hosts idle-exit via the supervisor, but a socket host that
+		// outlives its supervisor (or is started bare) still self-exits when empty.
+		{ onEmptyExit: () => void shutdown(0) },
 	);
 	const connections = new Map<string, Connection>();
 	let nextConnection = 0;

@@ -2,14 +2,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import {
-	type CreateAgentSessionRuntimeFactory,
-	type CreateAgentSessionRuntimeResult,
+import type {
+	CreateAgentSessionRuntimeFactory,
+	CreateAgentSessionRuntimeResult,
 } from "../src/core/agent-session-runtime.ts";
 import { ProjectTrustStore } from "../src/core/trust-manager.ts";
 import type { MultiSessionHostOptions } from "../src/modes/rpc/multi-session-host.ts";
 import * as multiSessionHost from "../src/modes/rpc/multi-session-host.ts";
-import { SessionCommandRouter, type RpcSessionIdlePolicy } from "../src/modes/rpc/session-command-router.ts";
+import { type RpcSessionIdlePolicy, SessionCommandRouter } from "../src/modes/rpc/session-command-router.ts";
 import { SessionEventWriter } from "../src/modes/rpc/session-event-writer.ts";
 import { type RpcSessionLaunchProfile, RpcSessionRegistry } from "../src/modes/rpc/session-registry.ts";
 
@@ -33,7 +33,7 @@ interface FakeRuntimeState {
 	runtimeDisposals: number;
 }
 
-function createRuntimeFactory(agentDir: string): {
+function createRuntimeFactory(): {
 	createRuntime: CreateAgentSessionRuntimeFactory;
 	states: FakeRuntimeState[];
 } {
@@ -184,7 +184,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.1a) evicts sessions idle beyond the window through the normal close path", async () => {
 		const dir = await tempDir();
-		const { createRuntime, states } = createRuntimeFactory(dir);
+		const { createRuntime, states } = createRuntimeFactory();
 		const rig = createRouterRig(dir, createRuntime, {
 			idleEvictionMs: IDLE_WINDOW_MS,
 			emptyExitMs: Number.POSITIVE_INFINITY,
@@ -199,9 +199,7 @@ describe("shared RPC host occupancy", () => {
 		expect(rig.registry.list()).toHaveLength(0);
 		expect(states[0]?.runtimeDisposals).toBe(1);
 		expect(rig.bindingDisposals()).toBe(1);
-		const closed = rig.records.find(
-			(record) => record.command === "close_session" && record.sessionId === sessionId,
-		);
+		const closed = rig.records.find((record) => record.command === "close_session" && record.sessionId === sessionId);
 		expect(closed).toMatchObject({ type: "response", success: true });
 		// The path reservation is released, so a client can immediately resume.
 		await rig.router.handle({ id: "reopen", type: "open_session", cwd: dir, sessionPath });
@@ -211,7 +209,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.1a) never evicts a session with an active turn and evicts one window after it settles", async () => {
 		const dir = await tempDir();
-		const { createRuntime, states } = createRuntimeFactory(dir);
+		const { createRuntime, states } = createRuntimeFactory();
 		const rig = createRouterRig(dir, createRuntime, {
 			idleEvictionMs: IDLE_WINDOW_MS,
 			emptyExitMs: Number.POSITIVE_INFINITY,
@@ -234,7 +232,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.1a) defers eviction while a session-owned bash job is running", async () => {
 		const dir = await tempDir();
-		const { createRuntime, states } = createRuntimeFactory(dir);
+		const { createRuntime, states } = createRuntimeFactory();
 		const rig = createRouterRig(dir, createRuntime, {
 			idleEvictionMs: IDLE_WINDOW_MS,
 			emptyExitMs: Number.POSITIVE_INFINITY,
@@ -252,7 +250,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.1a) routing a command refreshes the idle window", async () => {
 		const dir = await tempDir();
-		const { createRuntime } = createRuntimeFactory(dir);
+		const { createRuntime } = createRuntimeFactory();
 		const rig = createRouterRig(dir, createRuntime, {
 			idleEvictionMs: IDLE_WINDOW_MS,
 			emptyExitMs: Number.POSITIVE_INFINITY,
@@ -271,7 +269,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.1a) evicting a shared session closes every attachment once and tolerates stale client closes", async () => {
 		const dir = await tempDir();
-		const { createRuntime, states } = createRuntimeFactory(dir);
+		const { createRuntime, states } = createRuntimeFactory();
 		const rig = createRouterRig(dir, createRuntime, {
 			idleEvictionMs: IDLE_WINDOW_MS,
 			emptyExitMs: Number.POSITIVE_INFINITY,
@@ -294,7 +292,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.1b) signals host exit once the registry stays empty, resetting on live sessions", async () => {
 		const dir = await tempDir();
-		const { createRuntime } = createRuntimeFactory(dir);
+		const { createRuntime } = createRuntimeFactory();
 		const onEmptyExit = vi.fn();
 		const rig = createRouterRig(dir, createRuntime, {
 			idleEvictionMs: Number.POSITIVE_INFINITY,
@@ -322,7 +320,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.1b) router dispose stops the occupancy sweep", async () => {
 		const dir = await tempDir();
-		const { createRuntime } = createRuntimeFactory(dir);
+		const { createRuntime } = createRuntimeFactory();
 		const onEmptyExit = vi.fn();
 		const rig = createRouterRig(dir, createRuntime, {
 			idleEvictionMs: Number.POSITIVE_INFINITY,
@@ -338,19 +336,18 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.1b) host core arms the empty-host exit from explicit overrides", async () => {
 		const dir = await tempDir();
-		const { createRuntime } = createRuntimeFactory(dir);
+		const { createRuntime } = createRuntimeFactory();
 		const records: Array<Record<string, unknown>> = [];
 		const writer = new SessionEventWriter(
 			(chunk) => records.push(JSON.parse(chunk) as Record<string, unknown>),
 			(flush) => flush(),
 		);
 		const onEmptyExit = vi.fn();
-		const { handle } = requireHostCore()(
-			{ agentDir: dir, createRuntime, cwd: dir },
-			writer,
-			[],
-			{ idleEvictionMs: Number.POSITIVE_INFINITY, emptyExitMs: 2_000, onEmptyExit },
-		);
+		const { handle } = requireHostCore()({ agentDir: dir, createRuntime, cwd: dir }, writer, [], {
+			idleEvictionMs: Number.POSITIVE_INFINITY,
+			emptyExitMs: 2_000,
+			onEmptyExit,
+		});
 		const line = (command: Record<string, unknown>): string => JSON.stringify(command);
 
 		await handle(line({ id: "open", type: "open_session", cwd: dir, sessionPath: join(dir, "core.jsonl") }));
@@ -362,7 +359,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.2) rejects new open_session beyond the concurrent session cap while attach still works", async () => {
 		const dir = await tempDir();
-		const { createRuntime } = createRuntimeFactory(dir);
+		const { createRuntime } = createRuntimeFactory();
 		const registry = new RpcSessionRegistry({ agentDir: dir, createRuntime, maxSessions: 2 });
 		await registry.openSession(profile(dir, join(dir, "one.jsonl")));
 		await registry.openSession(profile(dir, join(dir, "two.jsonl")));
@@ -379,7 +376,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.2) frees capacity when a capped session closes", async () => {
 		const dir = await tempDir();
-		const { createRuntime } = createRuntimeFactory(dir);
+		const { createRuntime } = createRuntimeFactory();
 		const registry = new RpcSessionRegistry({ agentDir: dir, createRuntime, maxSessions: 1 });
 		const first = await registry.openSession(profile(dir, join(dir, "solo.jsonl")));
 		await registry.close(first.sessionId);
@@ -390,7 +387,7 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.2) surfaces the cap as a typed open_session error through the router", async () => {
 		const dir = await tempDir();
-		const { createRuntime } = createRuntimeFactory(dir);
+		const { createRuntime } = createRuntimeFactory();
 		const rig = createRouterRig(
 			dir,
 			createRuntime,
@@ -409,19 +406,17 @@ describe("shared RPC host occupancy", () => {
 
 	test("(4.2) host core resolves the session cap from SENPI_RPC_MAX_SESSIONS", async () => {
 		const dir = await tempDir();
-		const { createRuntime } = createRuntimeFactory(dir);
+		const { createRuntime } = createRuntimeFactory();
 		vi.stubEnv("SENPI_RPC_MAX_SESSIONS", "1");
 		const records: Array<Record<string, unknown>> = [];
 		const writer = new SessionEventWriter(
 			(chunk) => records.push(JSON.parse(chunk) as Record<string, unknown>),
 			(flush) => flush(),
 		);
-		const { handle } = requireHostCore()(
-			{ agentDir: dir, createRuntime, cwd: dir },
-			writer,
-			[],
-			{ idleEvictionMs: Number.POSITIVE_INFINITY, emptyExitMs: Number.POSITIVE_INFINITY },
-		);
+		const { handle } = requireHostCore()({ agentDir: dir, createRuntime, cwd: dir }, writer, [], {
+			idleEvictionMs: Number.POSITIVE_INFINITY,
+			emptyExitMs: Number.POSITIVE_INFINITY,
+		});
 		const line = (command: Record<string, unknown>): string => JSON.stringify(command);
 
 		await handle(line({ id: "first", type: "open_session", cwd: dir, sessionPath: join(dir, "env-one.jsonl") }));

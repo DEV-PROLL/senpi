@@ -8,6 +8,8 @@
 
 - Windows session resume no longer aborts the process when `fs.watch()` receives an event for a watch path containing a non-canonical component; existing paths are canonicalized before watching ([#1229](https://github.com/code-yeongyu/senpi/issues/1229)).
 
+- The shared multi-session RPC host now reclaims occupancy on its own: sessions idle beyond a configurable window are evicted through the normal close path (never one with an active turn or running session-owned bash), `open_session` beyond a configurable concurrent cap fails with `too_many_sessions` (path attach stays exempt), and a host with zero open sessions for a configurable window exits cleanly instead of residing forever. Defaults: 30-minute idle eviction, 8 concurrent sessions, 15-minute empty-host exit, overridable via `SENPI_RPC_SESSION_IDLE_EVICTION_MS`, `SENPI_RPC_MAX_SESSIONS`, and `SENPI_RPC_HOST_EMPTY_EXIT_MS`.
+
 ### New Features
 
 ### Breaking Changes

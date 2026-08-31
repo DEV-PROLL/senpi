@@ -1,5 +1,25 @@
 # changes
 
+## 2026-08-31 - Shared-host occupancy: idle eviction, session cap, empty-host exit
+
+### What changed
+
+- `session-registry.ts`: entries track `lastCommandAt` (refreshed by every routed command and by path attach), the registry exposes its live entry count, and `openSession` enforces an optional `maxSessions` admission cap (attach-on-open exempt) with the new `too_many_sessions` error code.
+- `session-command-router.ts`: an optional `RpcSessionIdlePolicy` constructor argument arms an unref'd sweep that evicts sessions idle past `idleEvictionMs` through the existing `beginClose`→`closeMarked` path (all attachments drained, pending extension UI requests cancelled, `session_closed` broadcast), never evicts a session with an active turn or running session-owned bash (their idle clock restarts at settlement), and fires a once-only `onEmptyExit` hook after `emptyExitMs` of continuous registry emptiness; `dispose()` stops the sweep.
+- `multi-session-host.ts`: `createHostCore` is exported and resolves the policy from `SENPI_RPC_SESSION_IDLE_EVICTION_MS` / `SENPI_RPC_MAX_SESSIONS` / `SENPI_RPC_HOST_EMPTY_EXIT_MS` (defaults 30 min / 8 / 15 min) with explicit overrides for tests; both host flavors pass their shutdown path as `onEmptyExit`, so an empty host exits cleanly instead of residing forever.
+
+### Why
+
+- The shared host reclaimed nothing without client cooperation: an abandoned session kept its full runtime, watchers, and transcript resident forever; `open_session` was unbounded (each open owns hundreds of MB; a measured desktop host reached 1.28 GB in 54 minutes); and an empty host lived until its pipe died. The supervisor only covers supervised socket hosts with zero connections.
+
+### Why an extension could not handle it
+
+- Idle accounting and admission live in the routing layer beneath every extension surface; extensions cannot observe routed-command timing, registry occupancy, or host lifetime.
+
+### Expected merge conflict zones
+
+- LOW: the registry options/entry tail in `session-registry.ts`, the router constructor tail plus the new sweep/eviction methods in `session-command-router.ts`, and `createHostCore` with the policy constants in `multi-session-host.ts`.
+
 ## 2026-08-30 - Shared-host rendered component capability lifecycle
 
 ### What changed
