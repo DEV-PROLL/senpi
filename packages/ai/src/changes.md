@@ -1,3 +1,23 @@
+## Session-scoped provider state hygiene (2026-08-31)
+
+### What changed
+
+- `api/anthropic-messages.ts`: the learned unsigned-thinking text-replay fallback set is cleared for a session when its session resources are cleaned up (registered on the shared session-resource cleanup seam).
+- `api/openai-responses.ts`: the session-websocket idle expiry re-arms itself when it fires while the socket is busy, and drops a busy entry whose socket already died, so a lost release can no longer pin a cached websocket forever.
+
+### Why
+
+- Both collections previously lived for process lifetime once touched: long-lived multi-session hosts accumulated one fallback key per (session, base URL, model) that ever hit the invalid-signature retry, and a cached websocket whose release path never ran stayed pinned forever. Part of the #1024 memory-hygiene pass.
+
+### Why an extension could not handle it
+
+- The fallback set and the websocket session cache are module-local state inside the provider adapters; no extension seam can reach or dispose them.
+
+### Expected merge conflict zones
+
+- LOW: the fallback set declaration and its cleanup registration in `api/anthropic-messages.ts`.
+- LOW: the `scheduleSessionWebSocketExpiry` timer body in `api/openai-responses.ts`.
+
 ## Stop replaying the Anthropic server-side fallback marker (2026-08-30)
 
 ### What changed
