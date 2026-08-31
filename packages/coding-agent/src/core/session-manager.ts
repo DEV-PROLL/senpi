@@ -1514,29 +1514,38 @@ export class SessionManager {
 	}
 
 	private _getCompactEntries(): SessionEntry[] {
-		if (this.compactEntriesCache?.mutation === this.mutationCount) return this.compactEntriesCache.entries;
-		const entries = this.fileEntries.filter((e): e is SessionEntry => e.type !== "session");
+		if (this.compactEntriesCache?.mutation !== this.mutationCount) {
+			this.compactEntriesCache = {
+				mutation: this.mutationCount,
+				entries: this.fileEntries
+					.filter((e): e is SessionEntry => e.type !== "session")
+					.map((entry) => this.residentStore.externalize(this.residentStore.materialize(entry))),
+			};
+		}
+
+		const entries = this.compactEntriesCache.entries;
 		const missingEntryIds = new Set<string>();
-		const materialized: SessionEntry[] = entries.map((entry) =>
+		for (const entry of entries) {
 			this.residentStore.materialize(entry, () => {
 				missingEntryIds.add(entry.id);
 				return undefined;
-			}) as SessionEntry,
-		);
+			});
+		}
 		if (missingEntryIds.size > 0 && this.sessionFile) {
 			const persistedById = new Map(this._loadFullHistoryEntries().map((entry) => [entry.id, entry]));
-			for (const entry of entries) {
+			for (let index = 0; index < entries.length; index++) {
+				const entry = entries[index]!;
 				if (!missingEntryIds.has(entry.id)) continue;
 				const persisted = persistedById.get(entry.id);
-				if (persisted) materialized[entries.indexOf(entry)] = this.residentStore.materialize(persisted) as SessionEntry;
+				if (persisted) entries[index] = this.residentStore.externalize(persisted) as SessionEntry;
 			}
 		}
+		const materialized = entries.map((entry) => this.residentStore.materialize(entry) as SessionEntry);
 		for (const entry of materialized) {
 			if (entry.type !== "message") continue;
 			const order = this.entryOrdersById.get(entry.id);
 			if (order !== undefined) this.messageEntryPositions.set(entry.message, { entryId: entry.id, order });
 		}
-		this.compactEntriesCache = { mutation: this.mutationCount, entries: materialized };
 		return materialized;
 	}
 

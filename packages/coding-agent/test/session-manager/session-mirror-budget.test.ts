@@ -90,6 +90,9 @@ describe("SessionManager resident mirror", () => {
 		try {
 			session.buildContextEntries();
 			expect(loadCount).toBe(1);
+			expect(session.getResidentStoreStats().blobBytes).toBeLessThanOrEqual(64 * 1024 * 1024);
+			const compactCache = (session as unknown as { compactEntriesCache: { entries: unknown[] } }).compactEntriesCache;
+			expect(JSON.stringify(compactCache.entries)).not.toContain(LARGE_TEXT);
 			const firstReadCount = loadCount;
 			session.buildContextEntries();
 			expect(loadCount - firstReadCount).toBe(0);
