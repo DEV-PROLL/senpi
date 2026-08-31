@@ -1,6 +1,6 @@
 # Builtin extensions changes
 
-## Hooks trust-state snapshots publish atomically without weakening permissions (2026-08-31)
+## Hooks trust-state snapshots publish atomically for same-account application state (2026-08-31)
 
 ### What changed
 
@@ -12,11 +12,14 @@
 - `packages/coding-agent/src/core/extensions/builtin/hooks/trust-state-json.ts`: snapshot JSON parsing now reports
   completeness separately from the fail-closed empty state, allowing storage to retry only incomplete reads without
   changing trust parsing behavior.
-- Serialized writers create a same-directory temporary snapshot, apply an existing destination's mode (or `0600` for a
-  new file) exactly with `chmod` after creation so process umask cannot mask it, and atomically publish it with rename.
-- Failed publication removes the temporary snapshot. If publication and cleanup both fail, the storage throws an
-  `AggregateError` containing the publication error first and cleanup error second; successful cleanup preserves the
-  original publication error unchanged.
+- Serialized writers create a same-directory temporary snapshot, apply an ordinary same-account destination's numeric
+  POSIX mode (or `0600` for a new file) with `chmod` after creation so process umask cannot mask it, and atomically
+  publish it with rename. Hooks state is internal application state at `<agentDir>/hooks-state.json` or
+  `<cwd>/.senpi/hooks-state.json`; externally reassigned ownership, supplementary-group ownership, named POSIX/macOS
+  ACLs, and custom Windows DACLs are outside this storage contract.
+- Failed publication removes the temporary snapshot. Operation failures remain unchanged when lock release succeeds,
+  release-only failures propagate unchanged, and simultaneous failures become a flat causal `AggregateError`. Existing
+  publication+cleanup entries precede the release failure.
 
 ### Why
 
@@ -25,10 +28,15 @@
   the destination under the same lock before rewriting it. Sampling lock absence before and after an incomplete read is
   ABA-vulnerable: a legacy writer can acquire, truncate, publish, and unlock between both samples. Acquiring the writer
   lock after an incomplete read establishes a writer-excluding revalidation interval, making that ABA harmless without
-  making complete reads contend. Applying the intended mode after creation keeps both preserved and new-file modes
-  independent of process umask.
-- Cleanup must not mask the publication failure that caused it, but losing the cleanup failure would hide a leaked
-  temporary file and make the storage fault incomplete to diagnose.
+  making complete reads contend. Applying the numeric mode after creation keeps ordinary same-account existing modes
+  and the private new-file mode independent of process umask without claiming preservation of external security
+  metadata.
+- Cleanup and lock-release failures must not mask the operation that caused them. Flattened causal ordering preserves
+  the actionable primary failure while retaining every later cleanup failure.
+- Lock acquisition intentionally inherits proper-lockfile's `stale: 10_000` and `update: stale / 2` defaults. An
+  actively refreshed lease gets ten bounded acquisition attempts and then fails closed on `ELOCKED`; stale recovery is
+  proper-lockfile's inherited crash-recovery behavior. A writer suspended beyond that stale threshold has no stronger
+  guarantee in this contract.
 
 ### Why an extension could not handle it
 
@@ -41,8 +49,9 @@
 - LOW in `packages/coding-agent/src/core/extensions/builtin/hooks/trust-storage.ts` around `FileHookStateStorage.read`
   and `FileHookStateStorage.update`, and in `trust-state-json.ts` around snapshot completeness parsing. Upstream edits to
   hook trust persistence should retain lock-free complete reads, writer-excluding bounded revalidation for incomplete
-  reads, fail-closed `ELOCKED` exhaustion, same-directory atomic publication, umask-independent mode
-  preservation/default `0600`, and ordered aggregate cleanup errors.
+  reads, fail-closed `ELOCKED` exhaustion, same-directory atomic publication, ordinary same-account numeric-mode
+  retention/default `0600`, the explicit exclusion of custom ownership/ACL/DACL preservation, and flat causal
+  operation/cleanup/release errors.
 
 ## service-tier: clear the fast indicator when the session leaves the Codex family (2026-08-28)
 

@@ -23,15 +23,16 @@
 ### What changed
 
 - `.github/workflows/ci.yml` adds a `windows-latest` job that installs dependencies and runs only
-  `hooks-trust.test.ts`, `hooks-trust-storage-errors.test.ts`, and `hooks-trust-storage-aba.test.ts`; the required
-  `Check and test` fan-in includes this job. The existing Ubuntu coding-agent shards continue to run the same tests on
-  POSIX.
+  `hooks-trust.test.ts`, `hooks-trust-storage-errors.test.ts`, `hooks-trust-storage-release-errors.test.ts`, and
+  `hooks-trust-storage-aba.test.ts`; the required `Check and test` fan-in includes this job. The existing Ubuntu
+  coding-agent shards continue to run the same tests on POSIX.
 
 ### Why
 
-- Atomic replacement has Windows-specific behavior, and the writer-excluding malformed-read recovery relies on the
-  same exact lock semantics across platforms, but the general coding-agent shards run only on Ubuntu. A focused Windows
-  job exercises both contracts without duplicating the unrelated coding-agent suite.
+- Same-directory replacement for ordinary same-account application state has Windows-specific behavior, and the
+  writer-excluding malformed-read recovery relies on the same exact lock semantics across platforms, but the general
+  coding-agent shards run only on Ubuntu. A focused Windows job exercises those contracts without claiming custom DACL
+  preservation or duplicating the unrelated coding-agent suite.
 
 ### Why an extension could not handle it
 

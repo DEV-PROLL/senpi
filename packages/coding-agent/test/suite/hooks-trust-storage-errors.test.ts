@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const injectedFailures = vi.hoisted(() => ({
 	chmod: undefined as Error | undefined,
 	cleanup: undefined as Error | undefined,
+	lockOptions: [] as unknown[],
 	publication: undefined as Error | undefined,
 	readCaptured: undefined as (() => void) | undefined,
 }));
@@ -46,6 +47,20 @@ vi.mock("node:fs", async (importOriginal) => {
 	};
 });
 
+vi.mock("proper-lockfile", async (importOriginal) => {
+	const original = await importOriginal<{ default: typeof import("proper-lockfile") }>();
+	const base = original.default;
+	return {
+		default: {
+			...base,
+			lockSync: (...args: Parameters<typeof base.lockSync>) => {
+				injectedFailures.lockOptions.push(args[1]);
+				return base.lockSync(...args);
+			},
+		},
+	};
+});
+
 import { FileHookStateStorage } from "../../src/core/extensions/builtin/hooks/trust-storage.ts";
 
 const createdDirs: string[] = [];
@@ -54,6 +69,7 @@ afterEach(async () => {
 	injectedFailures.chmod = undefined;
 	injectedFailures.publication = undefined;
 	injectedFailures.cleanup = undefined;
+	injectedFailures.lockOptions.length = 0;
 	injectedFailures.readCaptured = undefined;
 	for (const dir of createdDirs.splice(0)) {
 		await rm(dir, { recursive: true, force: true });
@@ -143,6 +159,7 @@ describe("builtin hooks trust storage failures", () => {
 			realpath: false,
 			lockfilePath: `${statePath}.lock`,
 		});
+		injectedFailures.lockOptions.length = 0;
 
 		try {
 			// When
@@ -150,6 +167,10 @@ describe("builtin hooks trust storage failures", () => {
 
 			// Then
 			expect(state).toEqual({ version: 1, hooks: {} });
+			expect(injectedFailures.lockOptions).toHaveLength(10);
+			expect(injectedFailures.lockOptions).toEqual(
+				Array.from({ length: 10 }, () => ({ realpath: false, lockfilePath: `${statePath}.lock` })),
+			);
 		} finally {
 			release();
 		}

@@ -118,7 +118,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Run hooks trust-storage regressions
-        run: npx vitest run test/suite/hooks-trust.test.ts test/suite/hooks-trust-storage-errors.test.ts test/suite/hooks-trust-storage-aba.test.ts
+        run: npx vitest run test/suite/hooks-trust.test.ts test/suite/hooks-trust-storage-errors.test.ts test/suite/hooks-trust-storage-release-errors.test.ts test/suite/hooks-trust-storage-aba.test.ts
         working-directory: packages/coding-agent
 
   test-workspaces:
