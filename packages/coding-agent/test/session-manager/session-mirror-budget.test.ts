@@ -30,9 +30,9 @@ describe("SessionManager resident mirror", () => {
 
 	it("trims pre-compaction mirror entries but reloads them for branching", () => {
 		const session = SessionManager.create(tempDir, tempDir);
-		const prunedEntryId = session.appendCustomEntry("before-compaction", { payload: LARGE_PAYLOAD });
-		const firstKeptEntryId = session.appendCustomEntry("before-compaction", { payload: LARGE_PAYLOAD });
-		session.appendCustomEntry("before-compaction", { payload: LARGE_PAYLOAD });
+		const prunedEntryId = session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 1 });
+		const firstKeptEntryId = session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 2 });
+		session.appendMessage({ role: "user", content: LARGE_PAYLOAD, timestamp: 3 });
 		const beforeBlobBytes = session.getResidentStoreStats().blobBytes;
 
 		session.appendCompaction("summary", firstKeptEntryId, 100);
@@ -41,8 +41,8 @@ describe("SessionManager resident mirror", () => {
 		expect(session.getEntry(prunedEntryId)).toBeUndefined();
 		expect(session.getResidentStoreStats().blobBytes).toBeLessThan(beforeBlobBytes);
 
-		session.branch(firstKeptEntryId);
-		expect(session.getEntry(firstKeptEntryId)?.id).toBe(firstKeptEntryId);
+		session.branch(prunedEntryId);
+		expect(session.getEntry(prunedEntryId)?.id).toBe(prunedEntryId);
 		expect(session.buildSessionContext().messages).toHaveLength(1);
 	});
 
