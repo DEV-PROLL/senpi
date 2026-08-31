@@ -367,7 +367,12 @@ describe("RPC Unix-socket multi-connection host", () => {
 					Array.isArray(value.widgetLines),
 			);
 			await expect(
-				peer.peer.request({ id: "client-info", type: "set_client_info", width: 80, capabilities: ["rendered_components"] }),
+				peer.peer.request({
+					id: "client-info",
+					type: "set_client_info",
+					width: 80,
+					capabilities: ["rendered_components"],
+				}),
 			).resolves.toMatchObject({ type: "response", command: "set_client_info", success: true });
 			const opened = await peer.peer.request({ id: "open", type: "open_session", cwd: qa.cwd });
 			const sessionId = openedSessionId(opened);
@@ -499,7 +504,18 @@ describe("RPC Unix-socket multi-connection host", () => {
 			`export default function (pi) { pi.on("session_start", (_event, ctx) => ctx.ui.setWidget("factory", () => ({ render: (width) => [String(width)] }))); }`,
 		);
 		const child = spawnRpc(
-			["--mode", "rpc", "--listen", `unix://${qa.socketPath}`, "--provider", MOCK_PROVIDER, "--model", MOCK_MODEL, "--extension", join(qa.agentDir, "extensions", "widget-factory.ts")],
+			[
+				"--mode",
+				"rpc",
+				"--listen",
+				`unix://${qa.socketPath}`,
+				"--provider",
+				MOCK_PROVIDER,
+				"--model",
+				MOCK_MODEL,
+				"--extension",
+				join(qa.agentDir, "extensions", "widget-factory.ts"),
+			],
 			qa,
 			"rendered_components",
 		);
@@ -508,13 +524,26 @@ describe("RPC Unix-socket multi-connection host", () => {
 		try {
 			const first = await peer.peer.request({ id: "open-a", type: "open_session", cwd: qa.cwd });
 			const sessionA = openedSessionId(first);
-			await peer.peer.request({ id: "info-a", type: "set_client_info", sessionId: sessionA, width: 80, capabilities: ["rendered_components"] });
+			await peer.peer.request({
+				id: "info-a",
+				type: "set_client_info",
+				sessionId: sessionA,
+				width: 80,
+				capabilities: ["rendered_components"],
+			});
 			await peer.peer.request({ id: "open-b", type: "open_session", cwd: qa.cwd });
 			const factoryAfterSecondOpen = peer.peer.waitFor(
-				(value) => value.type === "extension_ui_request" && value.widgetKey === "factory" && JSON.stringify(value.widgetLines) === JSON.stringify(["81"]),
+				(value) =>
+					value.type === "extension_ui_request" &&
+					value.widgetKey === "factory" &&
+					JSON.stringify(value.widgetLines) === JSON.stringify(["81"]),
 			);
 			await peer.peer.request({ id: "info-a-again", type: "set_client_info", sessionId: sessionA, width: 81 });
-			expect(await factoryAfterSecondOpen).toMatchObject({ sessionId: sessionA, widgetKey: "factory", widgetLines: ["81"] });
+			expect(await factoryAfterSecondOpen).toMatchObject({
+				sessionId: sessionA,
+				widgetKey: "factory",
+				widgetLines: ["81"],
+			});
 		} finally {
 			peer.peer.close();
 			peer.socket.destroy();
