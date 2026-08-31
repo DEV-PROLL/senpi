@@ -2,8 +2,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as properLockfile from "proper-lockfile";
 import { getAgentDir } from "../../config.ts";
+import { acquireOwnershipSafeLock } from "../rpc/ownership-safe-lock.ts";
 import { inspectAppServerListenOccupancy } from "./daemon/occupancy.ts";
 import {
 	cleanupState,
@@ -49,7 +49,7 @@ type DaemonReadiness =
 	| { readonly kind: "timed-out" }
 	| { readonly kind: "exited"; readonly exit: DaemonExit };
 
-const lockOptions = { stale: 60_000, retries: { retries: 100, minTimeout: 20, maxTimeout: 100 } } as const;
+const lockOptions = { retries: { retries: 100, minTimeout: 20, maxTimeout: 100 } } as const;
 
 export function createDaemonPaths(agentDir = getAgentDir()): DaemonPaths {
 	const dir = join(agentDir, "app-server-daemon");
@@ -65,7 +65,7 @@ export function createDaemonPaths(agentDir = getAgentDir()): DaemonPaths {
 
 export async function withDaemonStateLock<T>(paths: DaemonPaths, task: () => Promise<T>): Promise<T> {
 	await mkdir(paths.dir, { recursive: true });
-	const release = await properLockfile.lock(paths.dir, { ...lockOptions, lockfilePath: paths.lockFile });
+	const release = await acquireOwnershipSafeLock(paths.lockFile, lockOptions);
 	try {
 		return await task();
 	} finally {

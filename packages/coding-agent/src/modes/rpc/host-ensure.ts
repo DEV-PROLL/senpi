@@ -5,7 +5,6 @@ import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as properLockfile from "proper-lockfile";
 import { ENV_AGENT_DIR, getAgentDir, isBunBinary, VERSION } from "../../config.ts";
 import {
 	type DaemonPidFile,
@@ -24,6 +23,7 @@ import {
 	type HostLifecyclePolicyInput,
 	INTERNAL_SUPERVISOR_FLAG,
 } from "./host-lifecycle.ts";
+import { acquireOwnershipSafeLock } from "./ownership-safe-lock.ts";
 
 export type { HostColdStart, HostLifecyclePolicyInput };
 
@@ -64,7 +64,7 @@ type ProtocolInfo = {
 	readonly capabilities: readonly string[];
 };
 
-const lockOptions = { stale: 60_000, retries: { retries: 100, minTimeout: 20, maxTimeout: 100 } } as const;
+const lockOptions = { retries: { retries: 100, minTimeout: 20, maxTimeout: 100 } } as const;
 const REQUIRED_CAPABILITIES = ["multi_session", EXTENSION_EVENTS_CAPABILITY] as const;
 /**
  * Every ensured host starts with this installation-wide profile, independent of
@@ -93,7 +93,7 @@ export async function ensureHost(options: EnsureHostOptions): Promise<EnsuredHos
 	const lockTarget = join(tmpdir(), "senpi-rpc-host-locks", createSocketLockName(socket));
 	await mkdir(dirname(lockTarget), { recursive: true });
 	await writeFile(lockTarget, "", { flag: "a", mode: 0o600 });
-	const release = await properLockfile.lock(lockTarget, { ...lockOptions, lockfilePath: `${lockTarget}.lock` });
+	const release = await acquireOwnershipSafeLock(`${lockTarget}.lock`, lockOptions);
 	try {
 		await options._test?.afterLockAcquired?.();
 		return await ensureHostLocked(paths, socket, options.agentDir ?? getAgentDir(), options.policy, options._test);
