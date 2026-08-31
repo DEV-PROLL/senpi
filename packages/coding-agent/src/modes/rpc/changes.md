@@ -1,5 +1,10 @@
 # changes
 
+## 2026-08-31 - Ownership-safe RPC and app-server state locks
+
+- Replaced proper-lockfile for the shared RPC-host and app-server daemon locks with a persistent regular SQLite lock file using `BEGIN EXCLUSIVE`; release commits and closes without unlinking.
+- Legacy proper-lockfile lock directories fail closed as typed `ELEGACY_LOCK_ARTIFACT` errors and are never removed.
+
 ## 2026-08-31 - Shared-host occupancy: idle eviction, session cap, empty-host exit
 
 ### What changed
