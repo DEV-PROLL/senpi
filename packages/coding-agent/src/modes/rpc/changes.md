@@ -3,7 +3,9 @@
 ## 2026-08-31 - Ownership-safe RPC and app-server state locks
 
 - Replaced proper-lockfile for the shared RPC-host and app-server daemon locks with a persistent regular SQLite lock file using `BEGIN EXCLUSIVE`; release commits and closes without unlinking.
-- Legacy proper-lockfile lock directories fail closed as typed `ELEGACY_LOCK_ARTIFACT` errors and are never removed.
+- Legacy proper-lockfile lock directories fail closed as typed `ELEGACY_LOCK_ARTIFACT` errors and are never removed; a directory racing in between the stat guard and the open is also surfaced as the typed error.
+- The lock opens through a runtime adapter: `bun:sqlite` inside the Bun binary, `node:sqlite` for npm-installed Node executions. Both drive the same kernel advisory locks, so cross-runtime contenders exclude each other; a static `bun:sqlite` import would break every Node entrypoint before command dispatch.
+- Waiting uses ONE cumulative budget (`retries.retries * retries.maxTimeout`, ~10s with the default profile) applied through SQLite's `busy_timeout`; attempts never stack JS backoff on top of the SQLite wait, keeping contention latency contract-equivalent to the old proper-lockfile profile.
 
 ## 2026-08-31 - Shared-host occupancy: idle eviction, session cap, empty-host exit
 

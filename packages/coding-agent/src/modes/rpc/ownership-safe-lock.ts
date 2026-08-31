@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite";
 import { stat } from "node:fs/promises";
 
 export interface OwnershipSafeLockOptions {
@@ -22,38 +21,63 @@ export class LegacyLockArtifactError extends Error {
 
 const DEFAULT_RETRIES = { retries: 100, minTimeout: 20, maxTimeout: 100 } as const;
 
+interface LockDatabase {
+	exec(sql: string): void;
+	close(): void;
+}
+
+/** Runs under both supported runtimes: bun:sqlite inside the Bun binary and
+node:sqlite for npm-installed Node executions. Both drive the same kernel
+advisory locks on the same file, so cross-runtime contenders exclude each
+other (verified empirically; see the changes.md entry). */
+async function openLockDatabase(lockPath: string): Promise<LockDatabase> {
+	if (typeof (globalThis as { Bun?: unknown }).Bun !== "undefined") {
+		const { Database } = await import("bun:sqlite");
+		const database = new Database(lockPath, { create: true });
+		return { exec: (sql) => database.exec(sql), close: () => database.close(false) };
+	}
+	const { DatabaseSync } = await import("node:sqlite");
+	const database = new DatabaseSync(lockPath);
+	return { exec: (sql) => database.exec(sql), close: () => database.close() };
+}
+
 export async function acquireOwnershipSafeLock(
 	lockPath: string,
 	options: OwnershipSafeLockOptions = {},
 ): Promise<() => Promise<void>> {
-	await rejectLegacyDirectory(lockPath);
 	const retries = options.retries ?? DEFAULT_RETRIES;
-	const busyTimeout = Math.max(retries.minTimeout, retries.maxTimeout);
-	let attempt = 0;
+	// One cumulative waiting budget (proper-lockfile's profile waited ~10s in
+	// total); SQLite's busy_timeout does the waiting, so attempts never stack
+	// their own backoff on top of it.
+	const deadline = Date.now() + retries.retries * retries.maxTimeout;
 	while (true) {
 		await rejectLegacyDirectory(lockPath);
-		let database: Database | undefined;
+		const remainingMs = Math.max(1, deadline - Date.now());
+		let database: LockDatabase | undefined;
 		try {
-			database = new Database(lockPath, { create: true });
-			database.exec(`PRAGMA busy_timeout = ${busyTimeout}; BEGIN EXCLUSIVE;`);
+			database = await openLockDatabase(lockPath);
+			database.exec(`PRAGMA busy_timeout = ${remainingMs}; BEGIN EXCLUSIVE;`);
 			let released = false;
+			const held = database;
 			return async () => {
 				if (released) return;
 				released = true;
 				try {
-					database!.exec("COMMIT;");
+					held.exec("COMMIT;");
 				} finally {
-					database!.close();
+					held.close();
 				}
 			};
 		} catch (error: unknown) {
-			if (database) database.close(false);
-			if (isBusy(error) && attempt++ < retries.retries) {
-				await new Promise((resolve) =>
-					setTimeout(resolve, Math.min(retries.maxTimeout, retries.minTimeout * 2 ** Math.min(attempt, 6))),
-				);
-				continue;
+			try {
+				database?.close();
+			} catch {
+				// The connection may already be unusable; the throw below carries the cause.
 			}
+			// A directory can appear between the stat guard and the open; surface
+			// it as the typed legacy error instead of a raw SQLITE_CANTOPEN.
+			await rejectLegacyDirectory(lockPath);
+			if (isBusy(error) && Date.now() < deadline) continue;
 			throw error;
 		}
 	}
