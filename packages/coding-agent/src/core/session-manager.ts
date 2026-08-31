@@ -1077,6 +1077,14 @@ export class SessionManager {
 
 	private _materializeEntry(entry: SessionEntry): SessionEntry {
 		const materialized = this.residentStore.materialize(entry);
+		if (JSON.stringify(materialized).includes("\u0000senpi-resident-string:v1:")) {
+			// The resident store is a bounded cache. The JSONL remains authoritative
+			// when an evicted blob is needed by a branch or read operation.
+			if (this.sessionFile) {
+				const persisted = loadEntriesFromFile(this.sessionFile).find((candidate) => candidate.id === entry.id);
+				if (persisted) return persisted as SessionEntry;
+			}
+		}
 		if (materialized.type === "message") {
 			const order = this.entryOrdersById.get(materialized.id);
 			if (order !== undefined) {
@@ -1205,10 +1213,33 @@ export class SessionManager {
 			fromHook,
 		};
 		this._appendEntry(entry);
+		this._trimMirrorAfterCompaction(entry);
 		return entry.id;
 	}
 
-	/** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
+	private _trimMirrorAfterCompaction(compaction: CompactionEntry): void {
+		if (!this.persist) return;
+		const firstKeptIndex = this.fileEntries.findIndex((entry) => entry.id === compaction.firstKeptEntryId);
+		const compactionIndex = this.fileEntries.findIndex((entry) => entry.id === compaction.id);
+		if (firstKeptIndex < 0 || compactionIndex < firstKeptIndex) return;
+
+		const header = this.fileEntries.find((entry) => entry.type === "session");
+		const retained = this.fileEntries.slice(firstKeptIndex, compactionIndex + 1);
+		const firstKept = retained[0];
+		if (firstKept && firstKept.type !== "session") firstKept.parentId = null;
+		const retainedCompaction = retained[retained.length - 1];
+		if (retainedCompaction?.type === "compaction" && retainedCompaction.id === compaction.id) {
+			retainedCompaction.parentId = compaction.firstKeptEntryId;
+		}
+		this.residentStore.clear();
+		this.fileEntries = [header, ...retained].filter((entry): entry is FileEntry => entry !== undefined).map((entry) =>
+			this.residentStore.externalize(entry),
+		);
+		this._buildIndex();
+		this.mutationCount++;
+	}
+
+	/** Append a custom entry (for extensions) as child of current leaf, then advance leaf. */
 	appendCustomEntry(customType: string, data?: unknown): string {
 		const entry: CustomEntry = {
 			type: "custom",
@@ -1500,6 +1531,9 @@ export class SessionManager {
 	 * are not modified or deleted.
 	 */
 	branch(branchFromId: string): void {
+		if (!this.byId.has(branchFromId) && this.sessionFile) {
+			this.reloadFromDisk();
+		}
 		if (!this.byId.has(branchFromId)) {
 			throw new Error(`Entry ${branchFromId} not found`);
 		}

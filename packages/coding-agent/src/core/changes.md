@@ -41,6 +41,24 @@
 - The `tryFallback` state-write hunk in `retry-fallback/controller.ts`.
 - The `_executeCompaction` success tail in `agent-session.ts` (near other compaction-lifecycle work).
 
+## 2026-08-31 - Bound the session manager's in-memory mirror
+
+### What changed
+
+- `session-resident-store.ts` now evicts oldest externalized strings above a conservative 64 MiB per-session budget.
+- `session-manager.ts` trims superseded pre-compaction entries from its live mirror and reloads the JSONL when a pruned branch is selected.
+
+### Why
+
+- The JSONL is the source of truth; retaining every serialized tool result and historical entry in RAM caused active sessions to grow without bound.
+
+### Why an extension could not handle it
+
+- Session persistence, compaction, branching, and the resident mirror are core `SessionManager` responsibilities below the extension API.
+
+### Expected merge conflict zones
+
+- LOW: resident string storage and `appendCompaction()` mirror maintenance.
 ## 2026-08-31 - Shared session host is OFF by default (opt-in)
 
 - Interactive sessions no longer join the shared RPC host implicitly. `main.ts` now gates
