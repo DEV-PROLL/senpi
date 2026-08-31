@@ -19,31 +19,36 @@ describe("SessionManager resident mirror", () => {
 		rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	it("currently retains every large externalized blob appended to a session", () => {
+	it("keeps the resident blob cache within its documented budget", () => {
 		const session = SessionManager.create(tempDir, tempDir);
 		for (let i = 0; i < 70; i++) {
 			session.appendCustomEntry("large-result", { payload: `${i}:${LARGE_PAYLOAD}` });
 		}
 
-		expect(session.getResidentStoreStats().blobBytes).toBeGreaterThan(64 * 1024 * 1024);
+		expect(session.getResidentStoreStats().blobBytes).toBeLessThanOrEqual(64 * 1024 * 1024);
 	});
 
-	it("currently leaves the complete mirror unchanged by compaction", () => {
+	it("trims pre-compaction mirror entries but reloads them for branching", () => {
 		const session = SessionManager.create(tempDir, tempDir);
+		const prunedEntryId = session.appendCustomEntry("before-compaction", { payload: LARGE_PAYLOAD });
 		const firstKeptEntryId = session.appendCustomEntry("before-compaction", { payload: LARGE_PAYLOAD });
 		session.appendCustomEntry("before-compaction", { payload: LARGE_PAYLOAD });
-		const beforeLength = session.getEntries().length;
 		const beforeBlobBytes = session.getResidentStoreStats().blobBytes;
 
 		session.appendCompaction("summary", firstKeptEntryId, 100);
 
-		expect(session.getEntries()).toHaveLength(beforeLength + 1);
-		expect(session.getResidentStoreStats().blobBytes).toBe(beforeBlobBytes);
+		expect(session.getEntries()).toHaveLength(3);
+		expect(session.getEntry(prunedEntryId)).toBeUndefined();
+		expect(session.getResidentStoreStats().blobBytes).toBeLessThan(beforeBlobBytes);
+
+		session.branch(firstKeptEntryId);
+		expect(session.getEntry(firstKeptEntryId)?.id).toBe(firstKeptEntryId);
+		expect(session.buildSessionContext().messages).toHaveLength(1);
 	});
 
-	it("uses the resident store's current unbounded behavior as the regression baseline", () => {
+	it("bounds standalone resident stores too", () => {
 		const store = new ResidentStringStore();
 		for (let i = 0; i < 70; i++) store.externalize(`${i}:${LARGE_PAYLOAD}`);
-		expect(store.stats().blobBytes).toBeGreaterThan(64 * 1024 * 1024);
+		expect(store.stats().blobBytes).toBeLessThanOrEqual(64 * 1024 * 1024);
 	});
 });
