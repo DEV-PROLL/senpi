@@ -51,7 +51,7 @@ describe("SessionManager resident mirror", () => {
 		expect(session.buildSessionContext().messages).toHaveLength(2);
 	});
 
-	it("loads trimmed full history once for consecutive reads", () => {
+	it("keeps full-history reads separate from the compact context mirror", () => {
 		const session = SessionManager.create(tempDir, tempDir);
 		session.appendMessage(assistantMsg("ready"));
 		const firstKeptEntryId = session.appendMessage(userMsg("before"));
@@ -66,10 +66,25 @@ describe("SessionManager resident mirror", () => {
 		try {
 			session.getEntries();
 			session.getEntries();
-			expect(loadCount).toBe(1);
+			expect(loadCount).toBe(2);
+			session.buildSessionContext();
+			expect(loadCount).toBe(2);
 		} finally {
 			restoreLoader();
 		}
+	});
+
+	it("resets trimmed state when replacing the session with a branched file", () => {
+		const session = SessionManager.create(tempDir, tempDir);
+		session.appendMessage(assistantMsg("ready"));
+		const firstKeptEntryId = session.appendMessage(userMsg("before"));
+		session.appendMessage(assistantMsg("after"));
+		session.appendCompaction("summary", firstKeptEntryId, 100);
+		session.getEntries();
+
+		const branchedFile = session.createBranchedSession(firstKeptEntryId);
+		expect(branchedFile).toBeDefined();
+		expect(session.getEntries().map((entry) => entry.id)).toEqual([firstKeptEntryId]);
 	});
 
 	it("bounds standalone resident stores too", () => {
