@@ -1,5 +1,27 @@
 # changes.md — builtin compaction policy
 
+## Recover compaction from a summarizer tool-call hijack (2026-08-31)
+
+### What changed
+
+- `speculative.ts` `runExtensionCompaction` spends exactly one retry when a summarization response ends `stopReason: toolUse` with zero text blocks and the request had offered tools: the same request is resent with `toolChoice: "none"` (`speculative-summary.ts` gains a `forbidToolCalls` option). The tools param stays in the retried request because Anthropic rejects histories containing tool_use blocks when tools are absent, and the unchanged shape keeps the anti-distillation and cache posture of the first attempt.
+- `deterministic-fallback.ts` adds the `summarization-empty-summary` failure kind: `classifyRequiredCompactionFallbackFailure` routes `SummaryGenerationError` kind `empty-summary` (never kind `auth`) into the required-compaction deterministic fallback, so `threshold`/`overflow` routes reduce context without another provider request instead of wedging.
+
+### Why
+
+- Incident 2026-08-31 (openai-codex gpt-5.6-sol, high reasoning): the summarizer hijacked the forwarded agent tools and answered with a bare tool call. The resulting empty-summary error was neither retried (`isRetryableSummaryAttempt` rejects `SummaryGenerationError`) nor classified for the deterministic fallback, so the session wedged on `Compaction rejected: summarization response contained no text (stopReason: toolUse)` followed by `Context remains above the compaction threshold because compaction did not complete` on every subsequent turn.
+- A request that forbids tool calling cannot stop on `toolUse`, so the single forbidden retry deterministically converts a hijack into a summary; the fallback classification guarantees the required route cannot wedge on this class even when the retry also produces no text.
+
+### Why an extension could not handle it
+
+- The retry lives inside this builtin's own summarization loop and shares its overflow shrink/abort budgets, and the fallback classification is this builtin's private recovery contract; an external extension can neither observe the per-attempt stop reason nor participate in required-compaction admission.
+
+### Expected merge conflict zones
+
+- LOW: `speculative.ts` around the summarization while-loop and the empty-summary throw.
+- LOW: `speculative-summary.ts` `generateSummaryMessage` options and stream options.
+- LOW: `deterministic-fallback.ts` failure-kind union and classifier.
+
 ## Deliver retry-safe ephemeral budget reminders (2026-08-30)
 
 ### What changed
