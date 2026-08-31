@@ -71,10 +71,7 @@ const REQUIRED_CAPABILITIES = ["multi_session", EXTENSION_EVENTS_CAPABILITY] as 
  * the first caller. In particular, extension_events must remain available when
  * a terminal client starts the shared host before the desktop connects.
  */
-export const PINNED_HOST_CLIENT_CAPABILITIES = [
-	EXTENSION_EVENTS_CAPABILITY,
-	CUSTOM_UNSUPPORTED_CAPABILITY,
-] as const;
+export const PINNED_HOST_CLIENT_CAPABILITIES = [EXTENSION_EVENTS_CAPABILITY, CUSTOM_UNSUPPORTED_CAPABILITY] as const;
 
 export function createHostDaemonPaths(agentDir = getAgentDir()): HostDaemonPaths {
 	const dir = join(agentDir, "rpc-host-daemon");

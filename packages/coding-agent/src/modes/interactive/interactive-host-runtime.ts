@@ -155,7 +155,7 @@ export async function createInteractiveHostRuntime(
 			client,
 			opened.state,
 			options.onWarning,
-(cause) => {
+			(cause) => {
 				if (remoteRuntime?.isReconnecting) warnReconnect(cause);
 				else warnFallback(cause);
 			},
@@ -460,7 +460,7 @@ export function createRemoteSessionProxy(
 	client: RpcClient,
 	initialState: ReturnType<typeof stateFromRpc>,
 	onWarning?: (warning: InteractiveHostWarning) => void,
-onTransportGone?: (cause: unknown) => void,
+	onTransportGone?: (cause: unknown) => void,
 	startupEvents: readonly import("../rpc/rpc-client.ts").RpcClientEvent[] = [],
 ): RemoteSessionProxy {
 	// Fire-and-forget setters keep the sync AgentSession signature, but their RPC
