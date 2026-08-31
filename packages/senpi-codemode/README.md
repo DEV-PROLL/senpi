@@ -202,10 +202,10 @@ namespace to prevent recursive execution.
 
 ```bash
 cd packages/senpi-codemode
-npm test
+bun run test
 
 cd ../..
-npm run check
+bun run check
 ```
 
 Direct real-surface QA drivers live in `scripts/qa-*.ts`: kernel cells

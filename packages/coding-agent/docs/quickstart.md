@@ -10,7 +10,7 @@ procedure, see the [release and installation guide](release-guide.md).
 Senpi is distributed as an npm package:
 
 ```bash
-npm install -g @code-yeongyu/senpi
+bun add -g @code-yeongyu/senpi
 ```
 
 ### Uninstall
@@ -18,7 +18,7 @@ npm install -g @code-yeongyu/senpi
 Use the package manager that installed senpi:
 
 ```bash
-# npm install -g
+# bun add -g
 npm uninstall -g @code-yeongyu/senpi
 
 # pnpm
@@ -91,7 +91,7 @@ Senpi loads context files at startup. Add an `AGENTS.md` file to tell it how to 
 ```markdown
 # Project Instructions
 
-- Run `npm run check` after code changes.
+- Run `bun run check` after code changes.
 - Do not run production migrations locally.
 - Keep responses concise.
 ```
@@ -123,7 +123,7 @@ Images or text can be pasted with Ctrl+V (Alt+V on Windows); images can also be 
 In interactive mode:
 
 ```text
-!npm run lint
+!bun run lint
 ```
 
 The command output is sent to the model. Use `!!command` to run a command without adding its output to the model context.
