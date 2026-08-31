@@ -20,6 +20,27 @@
 
 - LOW: the new `session-activity.ts` module, the activity getters and `_bindExtensionCore` subscription in `agent-session.ts`, and the `onBusEvent` helper in `extensions/runner.ts`.
 
+## 2026-08-31 - Release refusal fallback pins on compaction
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/controller.ts` records pin provenance and exposes `notifyCompactionApplied` to release refusal-caused pin contributions.
+- `packages/coding-agent/src/core/agent-session.ts` calls `_onCompactionContextChanged` at the `_executeCompaction` success seam and eagerly restores the original model; billing pins and `fallbackRevertPolicy "never"` are unaffected, and there is no new settings key.
+
+### Why
+
+- Refusal pins encode "same context refuses again"; compaction rewrites the context, so one fresh primary attempt per successful apply is correct. This is always-on by user decision, with no config key.
+
+### Why an extension could not handle it
+
+- The pin state and restore gate live inside core retry-fallback controller state and the agent-session compaction apply seam. Extensions observe compaction events but cannot mutate `ActiveFallbackState` or re-enter the internal restore gate.
+
+### Expected merge conflict zones
+
+- The prepend zone at the top of `packages/coding-agent/src/core/changes.md`.
+- The `tryFallback` state-write hunk in `retry-fallback/controller.ts`.
+- The `_executeCompaction` success tail in `agent-session.ts` (near other compaction-lifecycle work).
+
 ## 2026-08-31 - Shared session host is OFF by default (opt-in)
 
 - Interactive sessions no longer join the shared RPC host implicitly. `main.ts` now gates
