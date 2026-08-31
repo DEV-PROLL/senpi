@@ -78,6 +78,28 @@ function createFrameReader(onFrame: (payload: Buffer) => void): (chunk: Buffer) 
 	};
 }
 
+const EVICTION_ENV_KEYS = [
+	"PI_CURSOR_CONVERSATION_CACHE_LIMIT",
+	"PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES",
+	"PI_CURSOR_CONVERSATION_TOTAL_BLOB_LIMIT_BYTES",
+] as const;
+
+function captureEvictionEnv(): Record<string, string | undefined> {
+	const captured: Record<string, string | undefined> = {};
+	for (const key of EVICTION_ENV_KEYS) {
+		captured[key] = process.env[key];
+		delete process.env[key];
+	}
+	return captured;
+}
+
+function restoreEvictionEnv(captured: Record<string, string | undefined>): void {
+	for (const [key, value] of Object.entries(captured)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
+}
+
 /** Awaits a predicate driven by other in-flight work, bounded by the test timeout. */
 async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
@@ -89,6 +111,16 @@ async function waitFor(predicate: () => boolean, timeoutMs = 10_000): Promise<vo
 
 let server: http2.Http2Server | undefined;
 let sessions: http2.ServerHttp2Session[] = [];
+
+async function closeServer(): Promise<void> {
+	if (!server) return;
+	const closing = server;
+	server = undefined;
+	for (const session of sessions.splice(0)) {
+		session.destroy();
+	}
+	await new Promise<void>((resolve) => closing.close(() => resolve()));
+}
 
 async function startServer(handler: (stream: http2.ServerHttp2Stream) => void): Promise<string> {
 	server = http2.createServer();
@@ -166,28 +198,14 @@ describe("cursor-agent blob pinning for the in-flight request (#1024)", () => {
 
 	beforeEach(() => {
 		process.env.CURSOR_CONVERSATION_ID_STORE = join(mkdtempSync(join(tmpdir(), "cursor-pin-")), "ids.json");
-		originalEnv = {
-			PI_CURSOR_CONVERSATION_CACHE_LIMIT: process.env.PI_CURSOR_CONVERSATION_CACHE_LIMIT,
-			PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES: process.env.PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES,
-		};
-		delete process.env.PI_CURSOR_CONVERSATION_CACHE_LIMIT;
-		delete process.env.PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES;
+		originalEnv = captureEvictionEnv();
 		cleanupSessionResources();
 	});
 
 	afterEach(async () => {
-		for (const [key, value] of Object.entries(originalEnv)) {
-			if (value === undefined) delete process.env[key];
-			else process.env[key] = value;
-		}
+		restoreEvictionEnv(originalEnv);
 		cleanupSessionResources();
-		if (!server) return;
-		const closing = server;
-		server = undefined;
-		for (const session of sessions.splice(0)) {
-			session.destroy();
-		}
-		await new Promise<void>((resolve) => closing.close(() => resolve()));
+		await closeServer();
 	});
 
 	it("resolves every blob the in-flight request references even past the byte budget", async () => {
@@ -247,6 +265,27 @@ describe("cursor-agent blob pinning for the in-flight request (#1024)", () => {
 		// are released and the cold end is trimmed back to the cap.
 		expect(getCursorConversationCacheStats().blobBytes).toBeLessThanOrEqual(4096);
 	});
+
+	it("holds every cached conversation under the process-global blob ceiling", async () => {
+		// Per-conversation cap generous, process ceiling tight: the ceiling is what
+		// bounds the process once many settled conversations are cached.
+		process.env.PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES = String(4 * 1024 * 1024);
+		process.env.PI_CURSOR_CONVERSATION_TOTAL_BLOB_LIMIT_BYTES = String(64 * 1024);
+		const baseUrl = await startServer((stream) => {
+			stream.write(turnEndedFrame());
+			stream.end();
+		});
+
+		for (const conversationId of ["ceiling-1", "ceiling-2", "ceiling-3", "ceiling-4"]) {
+			await runStream(baseUrl, {
+				sessionId: "sess-ceiling",
+				conversationId,
+				messages: buildLongHistory(4, 8_000),
+			});
+		}
+
+		expect(getCursorConversationCacheStats().blobBytes).toBeLessThanOrEqual(64 * 1024);
+	});
 });
 
 describe("cursor-agent per-session conversation cache cap (#1024)", () => {
@@ -254,28 +293,14 @@ describe("cursor-agent per-session conversation cache cap (#1024)", () => {
 
 	beforeEach(() => {
 		process.env.CURSOR_CONVERSATION_ID_STORE = join(mkdtempSync(join(tmpdir(), "cursor-pin-")), "ids.json");
-		originalEnv = {
-			PI_CURSOR_CONVERSATION_CACHE_LIMIT: process.env.PI_CURSOR_CONVERSATION_CACHE_LIMIT,
-			PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES: process.env.PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES,
-		};
-		delete process.env.PI_CURSOR_CONVERSATION_CACHE_LIMIT;
-		delete process.env.PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES;
+		originalEnv = captureEvictionEnv();
 		cleanupSessionResources();
 	});
 
 	afterEach(async () => {
-		for (const [key, value] of Object.entries(originalEnv)) {
-			if (value === undefined) delete process.env[key];
-			else process.env[key] = value;
-		}
+		restoreEvictionEnv(originalEnv);
 		cleanupSessionResources();
-		if (!server) return;
-		const closing = server;
-		server = undefined;
-		for (const session of sessions.splice(0)) {
-			session.destroy();
-		}
-		await new Promise<void>((resolve) => closing.close(() => resolve()));
+		await closeServer();
 	});
 
 	it("never evicts another session's conversations when one session overflows", async () => {
