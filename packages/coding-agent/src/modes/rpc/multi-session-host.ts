@@ -17,7 +17,7 @@ import { armHostWatchdog, readHostWatchdogConfigFromBrandEnv } from "./host-watc
 import { attachJsonlLineReader, MAX_RPC_LINE_CHARACTERS } from "./jsonl.ts";
 import { rpcCommandShapeError } from "./rpc-input-validation.ts";
 import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
-import { SessionCommandRouter } from "./session-command-router.ts";
+import { type RpcBindingFactory, SessionCommandRouter } from "./session-command-router.ts";
 import { SessionEventWriter } from "./session-event-writer.ts";
 import { RpcSessionRegistry } from "./session-registry.ts";
 
@@ -29,6 +29,8 @@ export interface MultiSessionHostOptions {
 	creationModel?: { provider: string; modelId: string };
 	initialThinkingLevel?: string;
 	listen?: string;
+	/** Test seam: defaults to the real shared-session binding. */
+	createBinding?: RpcBindingFactory;
 }
 
 /** Environment override for the idle-session eviction window, in milliseconds. */
@@ -111,7 +113,7 @@ export function createHostCore(
 		}),
 		writer,
 		options,
-		undefined,
+		options.createBinding,
 		{ capabilities },
 		{
 			now: policy.now,

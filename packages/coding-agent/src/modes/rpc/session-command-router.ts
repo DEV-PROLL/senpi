@@ -19,6 +19,9 @@ import { RpcSessionRegistryError } from "./session-registry.ts";
 
 const controls = new Set(["get_protocol_info", "open_session", "close_session", "list_sessions"]);
 
+/** Binding factory seam, injectable so host wiring is testable without a full runtime stack. */
+export type RpcBindingFactory = typeof createRpcSessionBinding;
+
 /**
  * Occupancy policy for the shared multi-session host. All fields are opt-in:
  * a router constructed without a policy keeps today's behavior (sessions live

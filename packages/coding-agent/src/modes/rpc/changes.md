@@ -6,7 +6,7 @@
 
 - `session-registry.ts`: entries track `lastCommandAt` (refreshed by every routed command and by path attach), the registry exposes its live entry count, and `openSession` enforces an optional `maxSessions` admission cap (attach-on-open exempt) with the new `too_many_sessions` error code.
 - `session-command-router.ts`: an optional `RpcSessionIdlePolicy` constructor argument arms an unref'd sweep that evicts sessions idle past `idleEvictionMs` through the existing `beginClose`→`closeMarked` path (all attachments drained, pending extension UI requests cancelled, `session_closed` broadcast), never evicts a session with an active turn or running session-owned bash (their idle clock restarts at settlement), and fires a once-only `onEmptyExit` hook after `emptyExitMs` of continuous registry emptiness; `dispose()` stops the sweep.
-- `multi-session-host.ts`: `createHostCore` is exported and resolves the policy from `SENPI_RPC_SESSION_IDLE_EVICTION_MS` / `SENPI_RPC_MAX_SESSIONS` / `SENPI_RPC_HOST_EMPTY_EXIT_MS` (defaults 30 min / 8 / 15 min) with explicit overrides for tests; both host flavors pass their shutdown path as `onEmptyExit`, so an empty host exits cleanly instead of residing forever.
+- `multi-session-host.ts`: `createHostCore` is exported and resolves the policy from `SENPI_RPC_SESSION_IDLE_EVICTION_MS` / `SENPI_RPC_MAX_SESSIONS` / `SENPI_RPC_HOST_EMPTY_EXIT_MS` (defaults 30 min / 8 / 15 min) with explicit overrides for tests; both host flavors pass their shutdown path as `onEmptyExit`, so an empty host exits cleanly instead of residing forever. `MultiSessionHostOptions` gains an optional `createBinding` test seam (defaults to the real binding), mirroring the router's existing injection point.
 
 ### Why
 

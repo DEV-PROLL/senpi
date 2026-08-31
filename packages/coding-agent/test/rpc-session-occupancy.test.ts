@@ -9,7 +9,11 @@ import type {
 import { ProjectTrustStore } from "../src/core/trust-manager.ts";
 import type { MultiSessionHostOptions } from "../src/modes/rpc/multi-session-host.ts";
 import * as multiSessionHost from "../src/modes/rpc/multi-session-host.ts";
-import { type RpcSessionIdlePolicy, SessionCommandRouter } from "../src/modes/rpc/session-command-router.ts";
+import {
+	type RpcBindingFactory,
+	type RpcSessionIdlePolicy,
+	SessionCommandRouter,
+} from "../src/modes/rpc/session-command-router.ts";
 import { SessionEventWriter } from "../src/modes/rpc/session-event-writer.ts";
 import { type RpcSessionLaunchProfile, RpcSessionRegistry } from "../src/modes/rpc/session-registry.ts";
 
@@ -81,6 +85,19 @@ interface RouterRig {
 	uiRequestsCancelled: () => number;
 }
 
+/** Minimal binding stand-in: routing goes nowhere, disposal stays observable. */
+function fakeBindingFactory(onDispose?: () => void, onCancelUiRequests?: () => void): RpcBindingFactory {
+	return async () => ({
+		handle: async () => {},
+		dispose: async () => {
+			onDispose?.();
+		},
+		cancelPendingExtensionUiRequests: () => {
+			onCancelUiRequests?.();
+		},
+	});
+}
+
 function createRouterRig(
 	dir: string,
 	createRuntime: CreateAgentSessionRuntimeFactory,
@@ -98,15 +115,14 @@ function createRouterRig(
 			(flush) => flush(),
 		),
 		{ cwd: dir },
-		async () => ({
-			handle: async () => {},
-			dispose: async () => {
+		fakeBindingFactory(
+			() => {
 				bindingDisposals += 1;
 			},
-			cancelPendingExtensionUiRequests: () => {
+			() => {
 				uiRequestsCancelled += 1;
 			},
-		}),
+		),
 		{},
 		idle,
 	);
@@ -343,11 +359,16 @@ describe("shared RPC host occupancy", () => {
 			(flush) => flush(),
 		);
 		const onEmptyExit = vi.fn();
-		const { handle } = requireHostCore()({ agentDir: dir, createRuntime, cwd: dir }, writer, [], {
-			idleEvictionMs: Number.POSITIVE_INFINITY,
-			emptyExitMs: 2_000,
-			onEmptyExit,
-		});
+		const { handle } = requireHostCore()(
+			{ agentDir: dir, createRuntime, cwd: dir, createBinding: fakeBindingFactory() },
+			writer,
+			[],
+			{
+				idleEvictionMs: Number.POSITIVE_INFINITY,
+				emptyExitMs: 2_000,
+				onEmptyExit,
+			},
+		);
 		const line = (command: Record<string, unknown>): string => JSON.stringify(command);
 
 		await handle(line({ id: "open", type: "open_session", cwd: dir, sessionPath: join(dir, "core.jsonl") }));
@@ -413,10 +434,15 @@ describe("shared RPC host occupancy", () => {
 			(chunk) => records.push(JSON.parse(chunk) as Record<string, unknown>),
 			(flush) => flush(),
 		);
-		const { handle } = requireHostCore()({ agentDir: dir, createRuntime, cwd: dir }, writer, [], {
-			idleEvictionMs: Number.POSITIVE_INFINITY,
-			emptyExitMs: Number.POSITIVE_INFINITY,
-		});
+		const { handle } = requireHostCore()(
+			{ agentDir: dir, createRuntime, cwd: dir, createBinding: fakeBindingFactory() },
+			writer,
+			[],
+			{
+				idleEvictionMs: Number.POSITIVE_INFINITY,
+				emptyExitMs: Number.POSITIVE_INFINITY,
+			},
+		);
 		const line = (command: Record<string, unknown>): string => JSON.stringify(command);
 
 		await handle(line({ id: "first", type: "open_session", cwd: dir, sessionPath: join(dir, "env-one.jsonl") }));
