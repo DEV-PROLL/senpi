@@ -1,13 +1,6 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
-
-/** How long `bun --version` may run before the PATH probe gives up. */
-const PATH_BUN_PROBE_TIMEOUT_MS = 1500;
 
 const BUN_SKILL_BASE_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -15,10 +8,10 @@ let loggedMissingBunSkill = false;
 
 export const BUN_SKILL_MIN_VERSION = "1.4.0";
 
-export interface BunSkillProbe {
-	probePathBunVersion(): Promise<string | undefined>;
-	runtimeBunVersion(): string | undefined;
-}
+/** Reads the js eval kernel's bun version; undefined on a node kernel. */
+export type BunKernelVersionSource = () => string | undefined;
+
+const kernelBunVersion: BunKernelVersionSource = () => process.versions.bun;
 
 /**
  * True when the version is at least `BUN_SKILL_MIN_VERSION`: parses the leading
@@ -45,39 +38,19 @@ export function bundledBunSkillPath(baseDir: string = BUN_SKILL_BASE_DIR): strin
 	return undefined;
 }
 
-async function probePathBunVersion(): Promise<string | undefined> {
-	try {
-		const { stdout } = await execFileAsync("bun", ["--version"], { timeout: PATH_BUN_PROBE_TIMEOUT_MS });
-		return stdout.trim();
-	} catch {
-		return undefined;
-	}
-}
-
-const defaultBunSkillProbe: BunSkillProbe = {
-	probePathBunVersion,
-	runtimeBunVersion: () => process.versions.bun,
-};
-
 /**
  * Builds the `resources_discover` handler that contributes the bundled bun-1-4 skill
- * when bun >= 1.4 is detected (PATH probe first, `process.versions.bun` as fallback).
- * The gate decision is cached in a single shared promise, so the PATH probe
- * subprocess runs at most once per handler.
+ * only when the in-process js eval kernel itself runs bun >= 1.4 (`process.versions.bun`).
+ * A node kernel never receives the skill, regardless of any bun binary on PATH.
  */
 export function createBunSkillDiscoverHandler(
-	probe: BunSkillProbe = defaultBunSkillProbe,
+	getKernelBunVersion: BunKernelVersionSource = kernelBunVersion,
 	baseDir?: string,
-): () => Promise<{ skillPaths: string[] } | undefined> {
-	let decision: Promise<{ skillPaths: string[] } | undefined> | undefined;
-	return async () => {
-		decision ??= (async () => {
-			const version = (await probe.probePathBunVersion()) ?? probe.runtimeBunVersion();
-			if (!bunVersionSupportsSkill(version)) return undefined;
-			const skillPath = bundledBunSkillPath(baseDir);
-			return skillPath === undefined ? undefined : { skillPaths: [skillPath] };
-		})();
-		return decision;
+): () => { skillPaths: string[] } | undefined {
+	return () => {
+		if (!bunVersionSupportsSkill(getKernelBunVersion())) return undefined;
+		const skillPath = bundledBunSkillPath(baseDir);
+		return skillPath === undefined ? undefined : { skillPaths: [skillPath] };
 	};
 }
 
@@ -91,8 +64,8 @@ export function registerBunSkillContribution(
 			) => Promise<{ skillPaths?: string[] } | undefined> | { skillPaths?: string[] } | undefined,
 		): void;
 	},
-	probe?: BunSkillProbe,
+	getKernelBunVersion?: BunKernelVersionSource,
 	baseDir?: string,
 ): void {
-	pi.on("resources_discover", createBunSkillDiscoverHandler(probe, baseDir));
+	pi.on("resources_discover", createBunSkillDiscoverHandler(getKernelBunVersion, baseDir));
 }

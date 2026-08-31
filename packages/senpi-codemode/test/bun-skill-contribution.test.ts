@@ -2,7 +2,6 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-	type BunSkillProbe,
 	bundledBunSkillPath,
 	bunVersionSupportsSkill,
 	createBunSkillDiscoverHandler,
@@ -11,13 +10,6 @@ import {
 
 const bunSkillMd = join(import.meta.dirname, "..", "src", "skill", "bun-1-4", "SKILL.md");
 const bunSkillRefs = join(import.meta.dirname, "..", "src", "skill", "bun-1-4", "references");
-
-function probe(pathVersion: string | undefined, runtimeVersion?: string): BunSkillProbe {
-	return {
-		probePathBunVersion: async () => pathVersion,
-		runtimeBunVersion: () => runtimeVersion,
-	};
-}
 
 describe("bunVersionSupportsSkill", () => {
 	it.each([
@@ -42,43 +34,29 @@ describe("bundledBunSkillPath", () => {
 });
 
 describe("createBunSkillDiscoverHandler", () => {
-	it("contributes the bundled skill when path bun is 1.4.2", async () => {
-		const handler = createBunSkillDiscoverHandler(probe("1.4.2"));
-		await expect(handler()).resolves.toEqual({ skillPaths: [bunSkillMd] });
+	it("contributes the bundled skill when the eval kernel runs bun 1.4.2", async () => {
+		const handler = createBunSkillDiscoverHandler(() => "1.4.2");
+		await expect(Promise.resolve(handler())).resolves.toEqual({ skillPaths: [bunSkillMd] });
 	});
 
-	it("contributes nothing when path bun is 1.3.0", async () => {
-		const handler = createBunSkillDiscoverHandler(probe("1.3.0"));
-		await expect(handler()).resolves.toBeUndefined();
+	it("contributes nothing when the eval kernel runs bun 1.3.0", async () => {
+		const handler = createBunSkillDiscoverHandler(() => "1.3.0");
+		await expect(Promise.resolve(handler())).resolves.toBeUndefined();
 	});
 
-	it("falls back to runtime bun 1.4.0 when the path probe is missing", async () => {
-		const handler = createBunSkillDiscoverHandler(probe(undefined, "1.4.0"));
-		await expect(handler()).resolves.toEqual({ skillPaths: [bunSkillMd] });
+	it("contributes nothing on a node kernel, regardless of any bun binary on PATH", async () => {
+		const handler = createBunSkillDiscoverHandler(() => undefined);
+		await expect(Promise.resolve(handler())).resolves.toBeUndefined();
 	});
 
-	it("contributes nothing when both path and runtime bun are missing", async () => {
-		const handler = createBunSkillDiscoverHandler(probe(undefined));
-		await expect(handler()).resolves.toBeUndefined();
-	});
-
-	it("probes path bun version only once for the same handler", async () => {
-		let counter = 0;
-		const handler = createBunSkillDiscoverHandler({
-			probePathBunVersion: async () => {
-				counter += 1;
-				return "1.4.2";
-			},
-			runtimeBunVersion: () => undefined,
-		});
-		await handler();
-		await handler();
-		expect(counter).toBe(1);
+	it("contributes nothing when the kernel version is unparseable", async () => {
+		const handler = createBunSkillDiscoverHandler(() => "not-a-version");
+		await expect(Promise.resolve(handler())).resolves.toBeUndefined();
 	});
 });
 
 describe("registerBunSkillContribution", () => {
-	it("registers one resources_discover handler that contributes the gated-in skill", async () => {
+	it("registers one resources_discover handler that contributes on a bun >= 1.4 kernel", async () => {
 		const registrations: Array<{
 			event: "resources_discover";
 			handler: (
@@ -98,7 +76,7 @@ describe("registerBunSkillContribution", () => {
 			},
 		};
 
-		registerBunSkillContribution(pi, probe("1.4.2"));
+		registerBunSkillContribution(pi, () => "1.4.5");
 
 		expect(registrations).toHaveLength(1);
 		expect(registrations[0]?.event).toBe("resources_discover");
@@ -111,5 +89,12 @@ describe("bun-1-4 skill assets", () => {
 		expect(readFileSync(bunSkillMd, "utf8")).toContain("name: bun-1-4");
 		const references = readdirSync(bunSkillRefs).filter((name) => name.endsWith(".md"));
 		expect(references).toHaveLength(10);
+	});
+
+	it("ships a single document: one frontmatter block and one H1", () => {
+		const text = readFileSync(bunSkillMd, "utf8");
+		expect(text.match(/^---$/gm)).toHaveLength(2);
+		expect(text.match(/^# Bun 1\.4/gm)).toHaveLength(1);
+		expect(text.match(/^## Operating rules$/gm)).toHaveLength(1);
 	});
 });
