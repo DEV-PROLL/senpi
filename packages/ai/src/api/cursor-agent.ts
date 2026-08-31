@@ -22,6 +22,7 @@ import { create, fromBinary, fromJson, type JsonValue as PbJsonValue, toBinary, 
 import { ValueSchema } from "@bufbuild/protobuf/wkt";
 import { CURSOR_COMPOSER_PROMPT, isCursorComposerModel } from "../cursor/composer-prompt.ts";
 import { calculateCost } from "../models.ts";
+import { registerSessionResourceCleanup } from "../session-resources.ts";
 import type {
 	Api,
 	AssistantMessage,
@@ -320,7 +321,158 @@ const NOT_IMPLEMENTED_SUFFIX = "not implemented by this client";
 const NOT_IMPLEMENTED = "Not implemented by this client";
 /** Bare gRPC `resource_exhausted` end-streams (also inside a Connect error message). */
 const conversationStateCache = new Map<string, ConversationStateStructure>();
-const conversationBlobStores = new Map<string, Map<string, Uint8Array>>();
+const conversationBlobStores = new Map<string, ConversationBlobStore>();
+/** Cache key -> the senpi session that owns it, so session teardown can evict. */
+const conversationCacheKeySessions = new Map<string, string>();
+
+/**
+ * Defensive ceiling on how many conversations stay cached (#1024). Sessions
+ * that never dispose (raw SDK use without `sessionId`) would otherwise pin one
+ * full-history entry each for process lifetime. Eviction is FIFO by first use.
+ */
+const DEFAULT_CONVERSATION_CACHE_LIMIT = 64;
+/**
+ * Defensive ceiling on the bytes one conversation's blob store may retain.
+ * Blobs are content-addressed and every live turn's history is re-stored each
+ * request, so evicting from the cold end only drops blobs no longer referenced
+ * by the rebuilt conversation state (a server `getBlobArgs` for an evicted id
+ * degrades to the same empty reply as any missing blob).
+ */
+const DEFAULT_CONVERSATION_BLOB_LIMIT_BYTES = 256 * 1024 * 1024;
+
+function readPositiveIntEnv(raw: string | undefined, fallback: number): number {
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function conversationCacheLimit(): number {
+	return readPositiveIntEnv(process.env.PI_CURSOR_CONVERSATION_CACHE_LIMIT, DEFAULT_CONVERSATION_CACHE_LIMIT);
+}
+
+function conversationBlobLimitBytes(): number {
+	return readPositiveIntEnv(
+		process.env.PI_CURSOR_CONVERSATION_BLOB_LIMIT_BYTES,
+		DEFAULT_CONVERSATION_BLOB_LIMIT_BYTES,
+	);
+}
+
+/**
+ * A conversation's blob store with byte accounting and recency-ordered
+ * eviction. `set` re-inserts existing keys so iteration order tracks "last
+ * stored" - every turn re-stores the blobs its rebuilt state still references,
+ * so the cold end of the map is exactly the dead weight (pre-compaction turns,
+ * superseded server pushes).
+ */
+class ConversationBlobStore extends Map<string, Uint8Array> {
+	private blobBytes = 0;
+
+	override set(key: string, value: Uint8Array): this {
+		const previous = super.get(key);
+		if (previous !== undefined) {
+			this.blobBytes -= previous.byteLength;
+			super.delete(key);
+		}
+		this.blobBytes += value.byteLength;
+		super.set(key, value);
+		this.trimToBudget();
+		return this;
+	}
+
+	override delete(key: string): boolean {
+		const existing = super.get(key);
+		if (existing === undefined) return super.delete(key);
+		this.blobBytes -= existing.byteLength;
+		return super.delete(key);
+	}
+
+	override clear(): void {
+		this.blobBytes = 0;
+		super.clear();
+	}
+
+	get totalBytes(): number {
+		return this.blobBytes;
+	}
+
+	private trimToBudget(): void {
+		const limit = conversationBlobLimitBytes();
+		if (this.blobBytes <= limit) return;
+		for (const [key, value] of this) {
+			if (this.blobBytes <= limit) break;
+			this.blobBytes -= value.byteLength;
+			super.delete(key);
+		}
+	}
+}
+
+function registerConversationCacheKey(sessionId: string | undefined, conversationId: string): void {
+	if (!sessionId) return;
+	conversationCacheKeySessions.set(conversationId, sessionId);
+}
+
+function forgetConversationCacheKey(conversationId: string): void {
+	conversationStateCache.delete(conversationId);
+	conversationBlobStores.delete(conversationId);
+	conversationCacheKeySessions.delete(conversationId);
+}
+
+function enforceConversationCacheLimit(newestKey: string): void {
+	const limit = conversationCacheLimit();
+	for (const key of conversationBlobStores.keys()) {
+		if (conversationBlobStores.size <= limit) return;
+		if (key === newestKey) continue;
+		forgetConversationCacheKey(key);
+	}
+}
+
+function getOrCreateConversationBlobStore(conversationId: string): ConversationBlobStore {
+	const existing = conversationBlobStores.get(conversationId);
+	if (existing) return existing;
+	const store = new ConversationBlobStore();
+	conversationBlobStores.set(conversationId, store);
+	enforceConversationCacheLimit(conversationId);
+	return store;
+}
+
+/**
+ * Drops every cache entry owned by `sessionId`. With no session id this is a
+ * global teardown and clears everything (mirrors the codex WS cleanup).
+ */
+function releaseConversationCacheForSession(sessionId?: string): void {
+	if (sessionId === undefined) {
+		conversationStateCache.clear();
+		conversationBlobStores.clear();
+		conversationCacheKeySessions.clear();
+		return;
+	}
+	for (const [key, owner] of conversationCacheKeySessions) {
+		if (owner !== sessionId) continue;
+		conversationStateCache.delete(key);
+		conversationBlobStores.delete(key);
+		conversationCacheKeySessions.delete(key);
+	}
+}
+
+registerSessionResourceCleanup((sessionId?: string) => {
+	releaseConversationCacheForSession(sessionId);
+});
+
+/** Size telemetry for the conversation caches (#1024 verification seam). */
+export function getCursorConversationCacheStats(): {
+	conversations: number;
+	states: number;
+	blobBytes: number;
+	keys: string[];
+} {
+	let blobBytes = 0;
+	for (const store of conversationBlobStores.values()) blobBytes += store.totalBytes;
+	return {
+		conversations: conversationBlobStores.size,
+		states: conversationStateCache.size,
+		blobBytes,
+		keys: [...conversationBlobStores.keys()],
+	};
+}
 /**
  * Base conversation id → rotated wire id. Cursor's backend can pin a
  * per-conversation rejection (bare `resource_exhausted`, zero tokens) to one
@@ -522,8 +674,8 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 
 				baseConversationId = options?.conversationId ?? options?.sessionId ?? randomUUID();
 				conversationId = rotationStore().getWireId(baseConversationId);
-				const blobStore = conversationBlobStores.get(conversationId) ?? new Map<string, Uint8Array>();
-				conversationBlobStores.set(conversationId, blobStore);
+				registerConversationCacheKey(options?.sessionId, conversationId);
+				const blobStore = getOrCreateConversationBlobStore(conversationId);
 				const cachedState = conversationStateCache.get(conversationId);
 				const { requestBytes, conversationState, requestedModel, modelDetails } = await buildGrpcRequest(
 					model,
@@ -905,6 +1057,12 @@ export const stream: StreamFunction<"cursor-agent", CursorAgentOptions> = (
 							if (cached) conversationStateCache.set(decision.wireId, cached);
 							const blobs = conversationBlobStores.get(conversationId);
 							if (blobs) conversationBlobStores.set(decision.wireId, blobs);
+							registerConversationCacheKey(options?.sessionId, decision.wireId);
+							enforceConversationCacheLimit(decision.wireId);
+							// The rotated key fully replaces the old one: later attempts
+							// resolve through rotationStore().getWireId, so keeping the
+							// pre-rotation entries is a pure leak (#1024).
+							if (decision.wireId !== conversationId) forgetConversationCacheKey(conversationId);
 							retryAttempt = true;
 						} else {
 							message = CURSOR_CONVERSATION_POISONED_MESSAGE;

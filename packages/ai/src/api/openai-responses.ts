@@ -47,7 +47,7 @@ interface WebSocketLike {
 	removeEventListener(type: WebSocketEventType, listener: WebSocketListener): void;
 }
 
-interface CachedWebSocketConnection {
+export interface CachedWebSocketConnection {
 	socket: WebSocketLike;
 	busy: boolean;
 	idleTimer?: ReturnType<typeof setTimeout>;
@@ -529,17 +529,37 @@ function closeWebSocketSilently(socket: WebSocketLike, code = 1000, reason = "do
 	} catch {}
 }
 
-function scheduleSessionWebSocketExpiry(sessionId: string, entry: CachedWebSocketConnection): void {
+/**
+ * Arms the idle-expiry for a cached session socket. A fire while the entry is
+ * busy must not strand the entry: the holder may never run the release path
+ * that schedules a fresh timer, and a cached-but-forgotten entry would pin its
+ * socket for process lifetime. A live busy socket is re-checked on the next
+ * tick; a dead one is dropped immediately because nothing can release it.
+ */
+export function scheduleSessionWebSocketExpiry(sessionId: string, entry: CachedWebSocketConnection): void {
 	if (entry.idleTimer) {
 		clearTimeout(entry.idleTimer);
 	}
 	entry.idleTimer = setTimeout(() => {
-		if (entry.busy) return;
+		if (entry.busy) {
+			if (!isWebSocketReusable(entry.socket)) {
+				closeWebSocketSilently(entry.socket, 1000, "idle_timeout_dead");
+				websocketSessionCache.delete(sessionId);
+				return;
+			}
+			scheduleSessionWebSocketExpiry(sessionId, entry);
+			return;
+		}
 		closeWebSocketSilently(entry.socket, 1000, "idle_timeout");
 		websocketSessionCache.delete(sessionId);
 	}, SESSION_WEBSOCKET_CACHE_TTL_MS);
 	const unref = (entry.idleTimer as { unref?: () => void }).unref;
 	if (unref) unref.call(entry.idleTimer);
+}
+
+/** Number of sessions holding a cached websocket (diagnostics). */
+export function getOpenAIResponsesWebSocketCacheSize(): number {
+	return websocketSessionCache.size;
 }
 
 async function connectWebSocket(url: string, headers: Headers, signal?: AbortSignal): Promise<WebSocketLike> {
