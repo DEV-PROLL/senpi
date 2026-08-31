@@ -50,7 +50,7 @@ server. Nothing outlives the watch, so no cleanup.
 
 ```js
 monitor({ description: "full test suite",
-  command: "if npx vitest run; then printf 'OK\n'; else code=$?; printf 'FAILED_%s\n' \"$code\"; exit \"$code\"; fi",
+  command: "if bunx vitest run; then printf 'OK\n'; else code=$?; printf 'FAILED_%s\n' \"$code\"; exit \"$code\"; fi",
   filter: "^(OK|FAILED_)" })
 ```
 
