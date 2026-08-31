@@ -1531,6 +1531,11 @@ export class SessionManager {
 				if (persisted) materialized[entries.indexOf(entry)] = this.residentStore.materialize(persisted) as SessionEntry;
 			}
 		}
+		for (const entry of materialized) {
+			if (entry.type !== "message") continue;
+			const order = this.entryOrdersById.get(entry.id);
+			if (order !== undefined) this.messageEntryPositions.set(entry.message, { entryId: entry.id, order });
+		}
 		this.compactEntriesCache = { mutation: this.mutationCount, entries: materialized };
 		return materialized;
 	}
