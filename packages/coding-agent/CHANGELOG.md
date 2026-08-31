@@ -10,6 +10,9 @@
 
 - The shared multi-session RPC host now reclaims occupancy on its own: sessions idle beyond a configurable window are evicted through the normal close path (never one with an active turn or running session-owned bash), `open_session` beyond a configurable concurrent cap fails with `too_many_sessions` (path attach stays exempt), and a host with zero open sessions for a configurable window exits cleanly instead of residing forever. Defaults: 30-minute idle eviction, 8 concurrent sessions, 15-minute empty-host exit, overridable via `SENPI_RPC_SESSION_IDLE_EVICTION_MS`, `SENPI_RPC_MAX_SESSIONS`, and `SENPI_RPC_HOST_EMPTY_EXIT_MS` ([#1226](https://github.com/code-yeongyu/senpi/pull/1226)).
 
+- TTSR stream buffers keep only a tail window sized above the longest rule pattern instead of the whole turn's stream, and are cleared when a message completes, so long agent turns no longer retain (and re-concatenate) their full streamed text.
+
+- The claude-sdk-oauth session registry derives entry generations from a monotonic counter instead of a per-session-id map, so close/reopen cycles keep stale async work gated while dropping the unbounded id-keyed bookkeeping.
 ### New Features
 
 ### Breaking Changes
