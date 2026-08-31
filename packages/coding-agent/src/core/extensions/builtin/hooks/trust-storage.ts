@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../../../../config.ts";
@@ -33,15 +33,24 @@ export class FileHookStateStorage implements HookStateStorage {
 
 	update(scope: HookTrustStorageScope, updater: (current: HookTrustState) => HookTrustState): HookTrustState {
 		return withHookStateFileLock(statePathForScope(scope, this.globalStatePath, this.projectStatePath), (path) => {
-			const current = readHookTrustStateJson(existsSync(path) ? readFileSync(path, "utf-8") : undefined);
+			const stateExists = existsSync(path);
+			const current = readHookTrustStateJson(stateExists ? readFileSync(path, "utf-8") : undefined);
+			const mode = stateExists ? statSync(path).mode & 0o777 : 0o600;
 			const next = updater(current);
 			const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
 			try {
-				writeFileSync(tempPath, serializeHookTrustState(next), "utf-8");
+				writeFileSync(tempPath, serializeHookTrustState(next), { encoding: "utf-8", mode });
 				renameSync(tempPath, path);
-			} catch (error) {
-				rmSync(tempPath, { force: true });
-				throw error;
+			} catch (publicationError) {
+				try {
+					rmSync(tempPath, { force: true });
+				} catch (cleanupError) {
+					throw new AggregateError(
+						[publicationError, cleanupError],
+						"Failed to publish and clean up hook trust state snapshot",
+					);
+				}
+				throw publicationError;
 			}
 			return next;
 		});
