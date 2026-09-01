@@ -187,6 +187,7 @@ async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise
 			],
 			{
 				detached: true,
+				windowsHide: true,
 				env: { ...process.env, SENPI_RUNTIME: "node" },
 				stdio: ["ignore", "ignore", stderr.fd],
 			},
@@ -195,7 +196,15 @@ async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise
 		child.unref();
 		const pid = child.pid;
 		if (pid === undefined) throw new Error("failed to spawn daemon process");
-		const startTime = await waitForStartTime(pid, 2_000);
+		let startTime: string;
+		try {
+			startTime = await waitForStartTime(pid, 10_000);
+		} catch (error: unknown) {
+			try {
+				process.kill(pid, "SIGTERM");
+			} catch {}
+			throw error;
+		}
 		await writeFile(paths.pidFile, `${JSON.stringify({ pid, processStartTime: startTime })}\n`, { mode: 0o600 });
 		await writeFile(paths.settingsFile, `${JSON.stringify({ listen })}\n`, { mode: 0o600 });
 		return { pid, exited };

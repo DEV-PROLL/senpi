@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -9,7 +9,6 @@ import { ENV_AGENT_DIR, getAgentDir, isBunBinary, VERSION } from "../../config.t
 import {
 	type DaemonPidFile,
 	parseDaemonPidFile,
-	processIsLive,
 	processMatchesPidFile,
 	waitForStartTime,
 } from "../app-server/daemon/process.ts";
@@ -90,6 +89,7 @@ export async function ensureHost(options: EnsureHostOptions): Promise<EnsuredHos
 	const socket = normalizeSocketPath(options.socket);
 	const paths = createHostDaemonPaths(options.agentDir);
 	await mkdir(paths.dir, { recursive: true });
+	await reapOrphanedInternalHostDirs();
 	// The public socket is the shared resource; agent directories are not a
 	// sufficient lock scope when two installations target the same endpoint.
 	const lockTarget = join(tmpdir(), "senpi-rpc-host-locks", createSocketLockName(socket));
@@ -157,6 +157,7 @@ async function startHost(
 		const launch = testOptions?.spawn ?? defaultHostLaunch(socket, testOptions?.hostArgs ?? []);
 		child = spawn(launch.command, [...launch.args], {
 			detached: true,
+			windowsHide: true,
 			env: {
 				...process.env,
 				...(testOptions?.env ?? {}),
@@ -182,6 +183,11 @@ async function startHost(
 		pidFile = { pid: child.pid, processStartTime };
 		await writeFile(paths.pidFile, `${JSON.stringify(pidFile)}\n`, { mode: 0o600 });
 	} catch (error: unknown) {
+		if (!exitedEarly && child?.pid !== undefined) {
+			try {
+				process.kill(child.pid, "SIGTERM");
+			} catch {}
+		}
 		if (!exitedEarly) throw error;
 		const diagnostic = await appendStderr(
 			paths,
@@ -230,10 +236,10 @@ async function signalValidated(pidFile: DaemonPidFile, signal: NodeJS.Signals): 
 async function waitForGone(pidFile: DaemonPidFile, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
-		if (!processIsLive(pidFile.pid)) return true;
+		if (!(await processMatchesPidFile(pidFile))) return true;
 		await delay(50);
 	}
-	return false;
+	return !(await processMatchesPidFile(pidFile));
 }
 
 type ChildExit = { readonly code: number | null; readonly signal: NodeJS.Signals | null };
@@ -321,6 +327,22 @@ async function readPidFile(paths: HostDaemonPaths): Promise<DaemonPidFile | unde
 		if (isNodeErrorCode(error, "ENOENT")) return undefined;
 		throw error;
 	}
+}
+
+async function reapOrphanedInternalHostDirs(): Promise<void> {
+	try {
+		const entries = await readdir(tmpdir(), { withFileTypes: true });
+		await Promise.all(
+			entries
+				.filter((entry) => entry.isDirectory() && entry.name.startsWith("senpi-rpc-host-internal-"))
+				.map(async (entry) => {
+					const dir = join(tmpdir(), entry.name);
+					try {
+						if ((await readdir(dir)).length === 0) await rm(dir, { recursive: true, force: true });
+					} catch {}
+				}),
+		);
+	} catch {}
 }
 
 async function cleanupState(paths: HostDaemonPaths): Promise<void> {

@@ -44,10 +44,10 @@ export async function stopValidatedPid(pidFile: DaemonPidFile, signal: NodeJS.Si
 export async function waitForGone(pidFile: DaemonPidFile, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
-		if (!processIsLive(pidFile.pid)) return true;
+		if (!(await processMatchesPidFile(pidFile))) return true;
 		await delay(100);
 	}
-	return false;
+	return !(await processMatchesPidFile(pidFile));
 }
 
 export async function readProcessStartTime(
@@ -86,6 +86,7 @@ export function processIsLive(pid: number): boolean {
 		return true;
 	} catch (error: unknown) {
 		if (isNodeErrorCode(error, "ESRCH")) return false;
+		if (isNodeErrorCode(error, "EPERM")) return true;
 		throw error;
 	}
 }

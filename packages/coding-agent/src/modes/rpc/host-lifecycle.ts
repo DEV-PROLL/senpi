@@ -302,16 +302,18 @@ const WINDOWS_SHELL_META_CHARS = /([()%!^"<>&|;, ])/g;
 
 /** Mirrors cross-spawn: survives cmd.exe parsing and `CommandLineToArgvW`. */
 function quoteWindowsShellArg(value: string): string {
-	const escaped = value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1");
-	return `"${escaped}"`.replace(WINDOWS_SHELL_META_CHARS, "^$1");
+	const escaped = value
+		.replace(/(\\*)"/g, '$1$1\\"')
+		.replace(/(\\*)$/, "$1$1")
+		.replace(WINDOWS_SHELL_META_CHARS, "^$1");
+	return `"${escaped}"`;
 }
 
 /**
  * Windows refuses to spawn a `.cmd`/`.bat` without a shell, and Node's
- * `shell: true` concatenates argv without escaping it. Quoting here means an
- * embedder passes its launcher script and arguments VERBATIM through
- * `--child-command`/`--child-args`; pre-escaping them on the caller's side
- * would be escaped a second time by this spawn and arrive as garbage.
+ * `shell: true` concatenates argv without escaping it. Escape each original
+ * value before adding the surrounding quotes so `.cmd`/`.bat` launchers survive
+ * cmd.exe parsing without double-escaping.
  * Exported for tests.
  */
 export function spawnableChildLaunch(
@@ -350,7 +352,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 			[HOST_WATCH_FD_ENV]: String(CHILD_WATCH_FD),
 			[HOST_WATCH_PPID_ENV]: String(process.pid),
 			[HOST_SCRATCH_DIR_ENV]: internal.dir,
-			[HOST_CLEANUP_PATHS_ENV]: [publicSocket, paths.pidFile, paths.settingsFile].join("\n"),
+			[HOST_CLEANUP_PATHS_ENV]: [paths.pidFile, paths.settingsFile, ...(process.platform === "win32" ? [] : [publicSocket])].join("\n"),
 		},
 		// Slot 3 is the lifetime pipe: "pipe" gives the child a read end it can
 		// wait on and keeps the write end owned by this process alone.
@@ -453,7 +455,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		await rm(internal.dir, { recursive: true, force: true });
 		await stopChild(child);
 		observer?.destroy();
-		if (publicSocketOwned) await rm(publicSocket, { force: true });
+		if (publicSocketOwned && process.platform !== "win32") await rm(publicSocket, { force: true });
 		// Mirror ensureHost's cleanupState: the pidfile and settings describe a
 		// live host only; the stderr log stays for diagnostics.
 		await rm(paths.pidFile, { force: true });
@@ -601,8 +603,8 @@ function waitForConnect(socket: Socket, timeoutMs: number): Promise<void> {
 }
 
 async function prepareSocketPath(socketPath: string): Promise<void> {
-	await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
 	if (process.platform === "win32") return;
+	await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
 	try {
 		await access(socketPath);
 	} catch (cause) {
@@ -616,11 +618,18 @@ async function prepareSocketPath(socketPath: string): Promise<void> {
 function listen(server: Server, socketPath: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(resolveSocketTransportAddress(socketPath, process.platform), async () => {
-			server.off("error", reject);
-			if (process.platform !== "win32" && !socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
-			resolve();
-		});
+		server.listen(
+			{
+				path: resolveSocketTransportAddress(socketPath, process.platform),
+				readableAll: false,
+				writableAll: false,
+			},
+			async () => {
+				server.off("error", reject);
+				if (process.platform !== "win32" && !socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
+				resolve();
+			},
+		);
 	});
 }
 

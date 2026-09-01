@@ -15,6 +15,16 @@ describe("resolveSocketTransportAddress", () => {
 		expect(address).toBe(`\\\\.\\pipe\\senpi-rpc-${expectedHash}`);
 	});
 
+	it("canonicalizes Windows path aliases to the same pipe", () => {
+		expect(resolveSocketTransportAddress("C:/Users/demo/rpc.sock", "win32")).toBe(
+			resolveSocketTransportAddress("c:\\users\\demo\\rpc.sock", "win32"),
+		);
+	});
+
+	it("preserves explicit named-pipe addresses", () => {
+		expect(resolveSocketTransportAddress("\\\\.\\pipe\\existing", "win32")).toBe("\\\\.\\pipe\\existing");
+	});
+
 	it("maps the same logical socket to the same pipe for every caller", () => {
 		// Given
 		const logicalSocket = "C:\\Users\\demo\\.omo\\rpc\\rpc.sock";

@@ -28,6 +28,7 @@ import {
 	INTERNAL_SUPERVISOR_FLAG,
 	resolveHostChildLaunch,
 	resolveHostPolicy,
+	spawnableChildLaunch,
 } from "../src/modes/rpc/host-lifecycle.ts";
 import {
 	armHostWatchdog,
@@ -416,6 +417,13 @@ describe("resolveHostChildLaunch", () => {
 			command: "/opt/branded/omo",
 			args: ["--mode", "rpc", "--listen", "unix:///tmp/internal.sock"],
 		});
+	});
+
+	it("quotes cmd launchers before adding shell metacharacter escaping", () => {
+		const launch = spawnableChildLaunch({ command: "C:\\Program Files\\launcher.cmd", args: ["hello world", "x&y"] }, "win32");
+		expect(launch.shell).toBe(true);
+		expect(launch.command).toBe('"C:\\Program Files\\launcher.cmd"');
+		expect(launch.args).toEqual(['"hello world"', '"x^&y"']);
 	});
 
 	it("passes the mode flags directly to the executable in compiled binaries", () => {

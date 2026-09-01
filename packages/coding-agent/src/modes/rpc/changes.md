@@ -6,7 +6,7 @@
 
 - `packages/coding-agent/src/modes/rpc/socket-transport.ts` maps every logical Windows socket path to `\\.\pipe\senpi-rpc-<sha256[:32]>`; POSIX filesystem and abstract socket addresses remain unchanged.
 - `host-lifecycle.ts`, `multi-session-host.ts`, `host-ensure.ts`, and `rpc-client.ts` resolve that transport address at every listen/connect boundary while locks, settings, diagnostics, and CLI arguments keep the original logical socket path.
-- Windows skips filesystem-only socket chmod/unlink cleanup; the pipe is kernel-owned and disappears when its listener closes.
+- Windows skips filesystem-only socket chmod/unlink cleanup; the pipe is kernel-owned and disappears when its listener closes. Node's IPC listener is explicitly created with `readableAll: false` and `writableAll: false` so the endpoint is not opened with public read/write permissions.
 - `spawnableChildLaunch` in `host-lifecycle.ts` runs a `.cmd`/`.bat` `--child-command` through a shell and quotes its argv, so an embedder passes its launcher script VERBATIM. Windows refuses to spawn a `.cmd` without a shell, and Node's `shell: true` concatenates argv without escaping it, so the only alternative was for callers to pre-escape - which this spawn then escaped a second time, and the child arrived unrunnable.
 - The supervisor's child and `RpcClient`'s child are spawned with `windowsHide`, so a console-less caller (GUI host, detached daemon) does not pop an empty terminal window.
 
@@ -15,9 +15,9 @@
 - Node treats a Windows filesystem path passed to `net.Server.listen()` as an invalid pipe address and fails with `EACCES`. Both the private supervisor-to-host hop and the public shared endpoint used `.sock` paths, so no Windows shared host could start.
 - A path hash gives independently launched clients and listeners the same bounded pipe name without publishing user paths into the global pipe namespace.
 
-### Known Windows gap (not addressed here)
+### Cleanup ownership
 
-- When the lifecycle supervisor is hard-terminated, Windows tears the internal host down without running any JS, so the watchdog's cleanup never executes and the supervisor's empty `senpi-rpc-host-internal-*` directory survives. That is process-lifetime behavior, not transport: the directories leak empty, no host or pipe outlives them, and `rpc-host-lifecycle.test.ts` still pins the POSIX contract. Fixing it needs an ownership janitor at ensure time, which is deliberately out of this change's scope.
+- The supervisor omits the logical Windows socket from watchdog cleanup because it is only an endpoint name, never a filesystem object owned by this process. `ensureHost()` removes abandoned internal scratch directories before acquiring a new host lock, covering hard-termination paths where no JavaScript cleanup can run.
 
 ### Why an extension could not handle it
 
