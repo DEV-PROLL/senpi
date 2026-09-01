@@ -6,7 +6,9 @@ export function resolveSocketTransportAddress(socketPath: string, platform: Node
 	if (platform !== "win32" || socketPath.toLowerCase().startsWith("\\\\.\\pipe\\")) return socketPath;
 	// Endpoint identity must not depend on the caller's current working directory.
 	// The built-in default is absolute; custom Windows endpoints must be absolute.
-	if (!win32.isAbsolute(socketPath)) throw new Error(`Windows RPC socket path must be absolute: ${socketPath}`);
+	if (!/^[a-zA-Z]:[\\/]/.test(socketPath) && !/^\\\\[^\\/]/.test(socketPath)) {
+		throw new Error(`Windows RPC socket path must be drive-qualified or UNC: ${socketPath}`);
+	}
 	// Windows paths are case-insensitive and accept both slash styles. Resolve
 	// them with win32 semantics even when this helper is unit-tested on POSIX.
 	const canonical = win32.normalize(socketPath).toLowerCase();

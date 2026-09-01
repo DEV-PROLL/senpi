@@ -25,8 +25,15 @@ describe("resolveSocketTransportAddress", () => {
 		);
 	});
 
-	it("rejects relative Windows logical paths", () => {
-		expect(() => resolveSocketTransportAddress("rpc.sock", "win32")).toThrow("must be absolute");
+	it("rejects relative and root-relative Windows logical paths", () => {
+		expect(() => resolveSocketTransportAddress("rpc.sock", "win32")).toThrow("drive-qualified or UNC");
+		expect(() => resolveSocketTransportAddress("\\foo", "win32")).toThrow("drive-qualified or UNC");
+		expect(() => resolveSocketTransportAddress("/foo", "win32")).toThrow("drive-qualified or UNC");
+	});
+
+	it("accepts drive-qualified and UNC Windows logical paths", () => {
+		expect(resolveSocketTransportAddress("C:\\foo", "win32")).toMatch(/^\\\\\.\\pipe\\senpi-rpc-/);
+		expect(resolveSocketTransportAddress("\\\\server\\share\\foo", "win32")).toMatch(/^\\\\\.\\pipe\\senpi-rpc-/);
 	});
 
 	it("preserves explicit named-pipe addresses", () => {
