@@ -21,7 +21,11 @@ describe("Windows RPC socket security", () => {
 			const secret = await createSocketSecret(path);
 			expect(secret).toHaveLength(32);
 			expect(await readSocketSecret(path)).toEqual(secret);
-			expect((await stat(path)).mode & 0o777).toBe(0o600);
+			if (process.platform !== "win32") {
+				// win32 does not enforce POSIX mode bits (stat reports 0o666); the
+				// Windows boundary is the authenticated handshake + profile-dir ACL.
+				expect((await stat(path)).mode & 0o777).toBe(0o600);
+			}
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
