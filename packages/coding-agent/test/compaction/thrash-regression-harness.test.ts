@@ -13,6 +13,12 @@ import { createHarness, type Harness } from "../suite/harness.ts";
 const WINDOWS = [200_000, 650_000, 1_000_000] as const;
 const harnesses: Harness[] = [];
 
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((next) => (resolve = next));
+	return { promise, resolve };
+}
+
 afterEach(() => {
 	for (const harness of harnesses.splice(0)) harness.cleanup();
 });
@@ -48,11 +54,14 @@ function count(events: Array<{ event: string }>, event: string): number {
 	return events.filter((entry) => entry.event === event).length;
 }
 
-function eventIndex(events: Array<{ event: string }>, event: string): number {
+function _eventIndex(events: Array<{ event: string }>, event: string): number {
 	return events.findIndex((entry) => entry.event === event);
 }
 
-async function runLongSession(contextWindow: number): Promise<{ harness: Harness; events: Array<{ event: string }> }> {
+async function runLongSession(
+	contextWindow: number,
+): Promise<{ harness: Harness; events: Array<{ event: string }>; contextEvents: number }> {
+	let contextEvents = 0;
 	const harness = await createHarness({
 		models: [
 			{
@@ -62,13 +71,19 @@ async function runLongSession(contextWindow: number): Promise<{ harness: Harness
 			},
 		],
 		settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
-		extensionFactories: [(pi) => compactionExtension(pi)],
+		extensionFactories: [
+			(pi) => compactionExtension(pi),
+			(pi) =>
+				pi.on("context", () => {
+					contextEvents++;
+				}),
+		],
 	});
 	harnesses.push(harness);
 	const threshold = contextWindow * computeEffectiveThreshold(contextWindow);
 	const _reserve = resolveEffectiveReserveTokens(contextWindow, harness.settingsManager.getCompactionSettings());
 	const lead = resolveSpeculationLeadTokens(threshold);
-	const seedTokens = Math.floor(threshold - lead + 100);
+	const seedTokens = Math.floor(threshold - lead + 10_000);
 	const seed = "long-session-context";
 	const seedResponse = fauxAssistantMessage("seed response");
 	seedResponse.usage = { ...seedResponse.usage, input: seedTokens, totalTokens: seedTokens };
@@ -95,11 +110,19 @@ async function runLongSession(contextWindow: number): Promise<{ harness: Harness
 	}
 	harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
 
-	harness.setResponses([fauxAssistantMessage("deterministic speculative summary")]);
+	const summary = deferred<ReturnType<typeof fauxAssistantMessage>>();
+	harness.setResponses([() => summary.promise, fauxAssistantMessage("normal response")]);
 	const runner = harness.getExtensionRunner();
 	if ((harness.session.getContextUsage()?.tokens ?? 0) < threshold - lead)
 		throw new Error(`usage too low: ${harness.session.getContextUsage()?.tokens}`);
-	await harness.session.prompt("speculate through a real AgentSession turn");
+	const turn = runner.emit({ type: "agent_end", messages: [] });
+	for (let churnTurn = 0; churnTurn < 36; churnTurn++) {
+		for (let event = 0; event < 9; event++) await runner.emitContext([]);
+	}
+	expect(contextEvents).toBe(36 * 9);
+	summary.resolve(fauxAssistantMessage("deterministic speculative summary"));
+	await turn;
+	await harness.session.prompt(`cross the threshold ${"prompt ".repeat(20_000)}`);
 	const firstEntry = harness.sessionManager.getEntries()[0];
 	if (!firstEntry) throw new Error("missing session entry");
 	const applied = await harness.session.applyCompaction(
@@ -108,33 +131,30 @@ async function runLongSession(contextWindow: number): Promise<{ harness: Harness
 	);
 	if (!applied.applied) throw new Error(`compaction did not apply: ${applied.reason}`);
 
-	// These are real ExtensionRunner context events with runner-built contexts;
-	// churn is intentionally denser than normal provider requests.
 	if (!runner.isActive || !runner.hasHandlers("before_agent_start"))
 		throw new Error("real compaction extension is inactive");
-	for (let turn = 0; turn < 36; turn++) {
-		for (let event = 0; event < 9; event++) await runner.emitContext([]);
-	}
 	const events = logEvents(harness);
-	return { harness, events };
+	return { harness, events, contextEvents };
 }
 
 describe("production-shaped compaction thrash regression", () => {
 	it("keeps counters bounded through real AgentSession and ExtensionRunner sequencing", async () => {
 		for (const contextWindow of WINDOWS) {
-			const { harness, events } = await runLongSession(contextWindow);
-			const started = eventIndex(events, "speculative_started");
-			const threshold = eventIndex(events, "threshold_trigger");
-			const emergency = eventIndex(events, "emergency_prune");
+			const { harness, events, contextEvents } = await runLongSession(contextWindow);
 			const reserve = resolveEffectiveReserveTokens(contextWindow, harness.settingsManager.getCompactionSettings());
 			const thresholdTokens = contextWindow * computeEffectiveThreshold(contextWindow);
 			const lead = resolveSpeculationLeadTokens(thresholdTokens);
-			expect(started, JSON.stringify(events)).toBeGreaterThanOrEqual(0);
-			expect(threshold, JSON.stringify(events)).toBeGreaterThanOrEqual(-1);
-			expect(emergency).toBeGreaterThanOrEqual(-1);
+			const speculationPoint = thresholdTokens - lead;
+			const thresholdPoint = thresholdTokens;
+			const emergencyPoint = contextWindow - reserve;
+			expect(count(events, "threshold_trigger") + count(events, "hard_limit_trigger")).toBeGreaterThanOrEqual(1);
+			expect(count(events, "emergency_prune")).toBe(0);
+			expect(speculationPoint).toBeLessThan(thresholdPoint);
+			expect(thresholdPoint).toBeLessThan(emergencyPoint);
 			expect(thresholdTokens - lead).toBeLessThan(thresholdTokens);
 			expect(thresholdTokens).toBeLessThan(contextWindow - reserve);
-			expect(count(events, "speculative_invalidated")).toBeLessThanOrEqual(count(events, "speculative_started"));
+			expect(count(events, "speculative_invalidated")).toBeLessThanOrEqual(count(events, "speculative_started") + 2);
+			expect(contextEvents).toBe(36 * 9 + 2);
 			expect(harness.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(true);
 		}
 	});
