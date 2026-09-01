@@ -95,12 +95,16 @@ export function armHostWatchdog(
 	const fire = (reason: string): void => {
 		writeWin32Diagnostic(`watchdog fired reason=${reason} fd=${String(config.fd)} ppid=${String(config.ppid)}`);
 		disarm();
-		// Shutdown must not wait for Windows metadata cleanup: a transiently held
-		// pid/settings handle can otherwise keep the host alive indefinitely. The
-		// normal shutdown path removes the endpoint and exits; cleanup remains
-		// best-effort and runs concurrently.
-		void cleanupWatchdogPaths(config);
-		onSupervisorGone(reason);
+		if (process.platform === "win32") {
+			// Shutdown must not wait for Windows metadata cleanup: a transiently held
+			// pid/settings handle can otherwise keep the host alive indefinitely. The
+			// normal shutdown path removes the endpoint and exits; cleanup remains
+			// best-effort and runs concurrently.
+			void cleanupWatchdogPaths(config);
+			onSupervisorGone(reason);
+		} else {
+			void cleanupWatchdogPaths(config).finally(() => onSupervisorGone(reason));
+		}
 	};
 	const disarmers: Array<() => void> = [];
 	const disarm = (): void => {
@@ -146,6 +150,9 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
  */
 function watchPpid(supervisorPid: number, fire: (reason: string) => void): () => void {
 	let checking = false;
+	// Tests and embedders may bind the watchdog to this process itself; that
+	// is a valid live binding rather than evidence of supervisor loss.
+	if (supervisorPid === process.pid) return () => {};
 	const timer = setInterval(() => {
 		if (checking) return;
 		checking = true;
