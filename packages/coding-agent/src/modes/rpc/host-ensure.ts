@@ -172,7 +172,6 @@ async function startHost(
 				resolveExit(exitedEarly);
 			});
 		});
-		child.unref();
 		if (child.pid === undefined) throw new Error("failed to spawn RPC socket host");
 		const processStartTime = await Promise.race([
 			waitForStartTime(child.pid, 10_000),
@@ -182,10 +181,26 @@ async function startHost(
 		]);
 		pidFile = { pid: child.pid, processStartTime };
 		await writeFile(paths.pidFile, `${JSON.stringify(pidFile)}\n`, { mode: 0o600 });
+		child.unref();
 	} catch (error: unknown) {
-		// A failed start-time read is not ownership proof. The exit observer is
-		// the only safe authority for an unregistered child; never signal its raw PID.
-		if (!exitedEarly) throw error;
+		// Keep the ChildProcess handle owned until registration succeeds. If startup
+		// fails before the pidfile is written, terminate this exact child through
+		// its still-attached handle rather than leaving an unmanaged daemon behind.
+		if (!exitedEarly && child && child.exitCode === null && child.signalCode === null) {
+			try {
+				child.kill("SIGTERM");
+			} catch {}
+			if (childExit) await Promise.race([childExit, delay(2_000)]);
+			if (child.exitCode === null && child.signalCode === null) {
+				try {
+					child.kill("SIGKILL");
+				} catch {}
+			}
+		}
+		if (!exitedEarly) {
+			await cleanupState(paths);
+			throw error;
+		}
 		const diagnostic = await appendStderr(
 			paths,
 			`RPC socket host exited with code ${exitedEarly.code ?? "null"}${exitedEarly.signal ? ` (${exitedEarly.signal})` : ""} before answering get_protocol_info`,

@@ -193,11 +193,6 @@ async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise
 			},
 		);
 		const exited = observeDaemonExit(child);
-		let childExited = false;
-		void exited.then(() => {
-			childExited = true;
-		});
-		child.unref();
 		const pid = child.pid;
 		if (pid === undefined) throw new Error("failed to spawn daemon process");
 		let startTime: string;
@@ -209,12 +204,25 @@ async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise
 				}),
 			]);
 		} catch (error: unknown) {
-			// A failed start-time read is not ownership proof. Do not signal a raw
-			// PID after the child may already have exited and the PID been reused.
+			// Keep the handle owned until registration succeeds. This terminates the
+			// exact child even when start-time acquisition fails, without a raw PID.
+			if (child.exitCode === null && child.signalCode === null) {
+				try {
+					child.kill("SIGTERM");
+				} catch {}
+				await Promise.race([exited, delay(2_000)]);
+				if (child.exitCode === null && child.signalCode === null) {
+					try {
+						child.kill("SIGKILL");
+					} catch {}
+				}
+			}
+			await cleanupState(paths, listen);
 			throw error;
 		}
 		await writeFile(paths.pidFile, `${JSON.stringify({ pid, processStartTime: startTime })}\n`, { mode: 0o600 });
 		await writeFile(paths.settingsFile, `${JSON.stringify({ listen })}\n`, { mode: 0o600 });
+		child.unref();
 		return { pid, exited };
 	} finally {
 		await stderr.close();
@@ -236,6 +244,10 @@ async function waitForDaemonReady(
 	} finally {
 		controller.abort();
 	}
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
 function observeDaemonExit(child: ChildProcess): Promise<DaemonExit> {
