@@ -8,6 +8,8 @@
 
 ### Changed
 
+- OpenGateway `moonshotai/kimi-k3-ultrafast` now registers a 256k (262144) default context window instead of inheriting the base model's full 1M window, so sessions compact at the serving default; the strict model-data regeneration also carries current upstream catalog drift (opengateway, openrouter, google, groq, vercel-ai-gateway).
+
 ### Fixed
 
 ### Removed
