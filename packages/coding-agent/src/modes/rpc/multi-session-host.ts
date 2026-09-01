@@ -265,7 +265,7 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	server.on("error", (cause) => {
 		if (!shuttingDown) process.stderr.write(`senpi rpc socket listener failed: ${errorMessage(cause)}\n`);
 	});
-	const shutdown = async (exitCode = 0): Promise<never> => {
+	const shutdown = async (exitCode = 0, watchdogCleanup?: Promise<void>): Promise<never> => {
 		if (shuttingDown) process.exit(exitCode);
 		shuttingDown = true;
 		// On Windows, destroying named-pipe sockets does not always make libuv's
@@ -276,30 +276,37 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 			process.platform === "win32"
 				? setTimeout(() => process.exit(exitCode), WINDOWS_SHUTDOWN_HARD_EXIT_MS)
 				: undefined;
-		writeWin32Diagnostic(`socket host shutdown entered exitCode=${exitCode} connections=${connections.size}`);
-		for (const connection of connections.values()) {
-			connection.detach();
-			connection.close();
+		try {
+			writeWin32Diagnostic(`socket host shutdown entered exitCode=${exitCode} connections=${connections.size}`);
+			for (const connection of connections.values()) {
+				connection.detach();
+				connection.close();
+			}
+			await closeServer(server);
+			writeWin32Diagnostic("socket host server closed");
+			await router.dispose();
+			writeWin32Diagnostic("socket host router disposed");
+			await writer.flush();
+			await removeSocketPath(socketPath);
+			if (watchdogCleanup) await watchdogCleanup;
+			writeWin32Diagnostic(`socket host metadata removed activeResources=${JSON.stringify(summarizeActiveResources())}`);
+		} finally {
+			if (hardExit) clearTimeout(hardExit);
+			// Explicitly terminate after every shutdown trigger. Windows named-pipe
+			// handles are not fully controllable from JS, and an unresolved cleanup
+			// must not leave this daemon or its public endpoint alive.
+			process.exit(exitCode);
 		}
-		await closeServer(server);
-		writeWin32Diagnostic("socket host server closed");
-		await router.dispose();
-		writeWin32Diagnostic("socket host router disposed");
-		await writer.flush();
-		await removeSocketPath(socketPath);
-		writeWin32Diagnostic(`socket host metadata removed activeResources=${JSON.stringify(summarizeActiveResources())}`);
-		if (hardExit) clearTimeout(hardExit);
-		process.exit(exitCode);
 	};
 	registerShutdownSignals(shutdown);
 	// Arm before listen: a supervisor death during the listen transition must
 	// still close the child and clean its private endpoint.
-	armHostWatchdog(readHostWatchdogConfig(process.env), (reason) => {
+	armHostWatchdog(readHostWatchdogConfig(process.env), (reason, cleanup) => {
 		process.stderr.write(`senpi rpc host: ${reason}; shutting down\n`);
 		// Enter shutdown before killing session-owned child processes. The Windows
 		// tree killer is synchronous, while the shutdown fallback must be armed
 		// before any such cleanup can delay the event loop.
-		void shutdown(0);
+		void shutdown(0, cleanup);
 		setImmediate(killTrackedDetachedChildren);
 	});
 	await listen(server, socketPath, secret);
