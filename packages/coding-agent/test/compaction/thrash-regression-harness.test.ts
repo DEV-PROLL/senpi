@@ -164,4 +164,59 @@ describe("production-shaped compaction thrash regression", () => {
 		expect(getPromptContextWindow(650_000, 128_000)).toBe(522_000);
 		expect(getPromptContextWindow(1_000_000, 384_000)).toBe(616_000);
 	});
+
+	it("pins the output-adjusted emergency basis at the production context callsite", async () => {
+		// Band scenario: 200K window with 100K maxTokens gives promptWindow = 100K.
+		// A context payload estimating ~120K tokens sits ABOVE the shipped engage point
+		// (0.95 * 100K = 95K) but BELOW the full-window engage point (0.95 * 200K = 190K).
+		// Shipped code (index.ts context handler passing getPromptContextWindow(...)) MUST
+		// emergency-prune here; mutating that callsite back to the full window makes this
+		// payload look safe and flips this assertion RED.
+		const contextWindow = 200_000;
+		const harness = await createHarness({
+			models: [{ id: `emergency-band-${contextWindow}`, contextWindow, maxTokens: 100_000 }],
+			settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
+			extensionFactories: [(pi) => compactionExtension(pi)],
+		});
+		harnesses.push(harness);
+		const seedResponse = fauxAssistantMessage("band seed");
+		seedResponse.usage = { ...seedResponse.usage, input: 10_000, totalTokens: 10_000 };
+		harness.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "band seed" }],
+			timestamp: 1,
+		});
+		harness.sessionManager.appendMessage({
+			...seedResponse,
+			api: harness.getModel().api,
+			provider: harness.getModel().provider,
+			model: harness.getModel().id,
+		});
+		harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
+		expect(harness.session.getContextUsage()?.contextWindow).toBe(contextWindow);
+		// estimateTotalTokens scales with content length here, so size the payload
+		// directly in the (95K, 190K) band and make it PRUNABLE (tool results are what
+		// hardLimitEmergencyPrune can drop).
+		// Non-text image blocks bypass the text-part admission cap and estimate at
+		// ESTIMATED_IMAGE_CHARS (4800 chars -> 1200 tokens) each, so 100 images put the
+		// payload at ~120K tokens - inside the (95K, 190K) band for 200K/100K geometry.
+		const imageCount = 100;
+		const bandMessages = [
+			{
+				role: "user" as const,
+				content: [
+					{ type: "text" as const, text: "band question" },
+					...Array.from({ length: imageCount }, (_, i) => ({
+						type: "image" as const,
+						data: `data:image/png;base64,band-${i}`,
+						mimeType: "image/png",
+					})),
+				],
+				timestamp: 1,
+			},
+		];
+		await harness.getExtensionRunner().emitContext(bandMessages);
+		const events = logEvents(harness);
+		expect(count(events, "emergency_prune")).toBeGreaterThanOrEqual(1);
+	});
 });
