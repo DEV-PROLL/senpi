@@ -274,11 +274,23 @@ async function pollProtocolInfo(
 	let lastProtocol: ProtocolInfo | undefined;
 	while (Date.now() <= deadline) {
 		const probe = probeProtocolInfo(socket, Math.min(500, Math.max(1, deadline - Date.now())));
-		const info = childExit ? await Promise.race([probe, childExit]) : await probe;
-		if (isChildExit(info)) return { protocol: lastProtocol, exited: info };
-		if (info) {
-			lastProtocol = info;
-			if (isCompatible(info)) return { protocol: info };
+		const raced = childExit ? await Promise.race([probe, childExit]) : await probe;
+		if (isChildExit(raced)) {
+			// A supervisor exit can be triggered by the Windows identity watchdog
+			// while a named-pipe client is still composing its protocol reply. Do
+			// not terminate the host based solely on that exit until this probe has
+			// had a chance to deliver an answer. A host that never answers still
+			// resolves through probeProtocolInfo's bounded timeout/close handling.
+			const info = await probe;
+			if (info) {
+				lastProtocol = info;
+				if (isCompatible(info)) return { protocol: info };
+			} else {
+				return { protocol: lastProtocol, exited: raced };
+			}
+		} else if (raced) {
+			lastProtocol = raced;
+			if (isCompatible(raced)) return { protocol: raced };
 		}
 		await delay(50);
 	}
