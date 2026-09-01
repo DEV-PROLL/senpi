@@ -13,7 +13,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import type { RpcConnectionSink } from "./connection-handler.ts";
 import { parseClientCapabilities } from "./custom-capability.ts";
 import { parseIdleExitMs } from "./host-lifecycle.ts";
-import { armHostWatchdog, readHostWatchdogConfigFromBrandEnv } from "./host-watchdog.ts";
+import { armHostWatchdog, readHostWatchdogConfig } from "./host-watchdog.ts";
 import { attachJsonlLineReader, MAX_RPC_LINE_CHARACTERS } from "./jsonl.ts";
 import { rpcCommandShapeError } from "./rpc-input-validation.ts";
 import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
@@ -283,7 +283,7 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	registerShutdownSignals(shutdown);
 	// Arm before listen: a supervisor death during the listen transition must
 	// still close the child and clean its private endpoint.
-	armHostWatchdog(readHostWatchdogConfigFromBrandEnv(), (reason) => {
+	armHostWatchdog(readHostWatchdogConfig(process.env), (reason) => {
 		process.stderr.write(`senpi rpc host: ${reason}; shutting down\n`);
 		killTrackedDetachedChildren();
 		void shutdown(0);
