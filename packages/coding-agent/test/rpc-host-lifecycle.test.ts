@@ -53,6 +53,9 @@ const models: HeldAnthropicModel[] = [];
 const managed: Array<{ pidFile: { pid: number; processStartTime: string }; pidFilePath: string }> = [];
 const collisionChildFixture = join(import.meta.dirname, "fixtures", "rpc-collision-child.ts");
 const WIN32_DIAGNOSTIC_ENV = "SENPI_RPC_WIN32_DIAGNOSTIC";
+// Windows supervisor-exit observation is load-dependent; teardown is eventually
+// consistent within the watchdog fallback bound, so the affected waits allow 30s.
+const WINDOWS_SUPERVISOR_EXIT_TIMEOUT_MS = 30_000;
 
 afterEach(async () => {
 	for (const peer of peers.splice(0)) peer.destroy();
@@ -223,7 +226,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 		await delay(2_500);
 		expect(await hostAlive(entry.pidFile)).toBe(true);
 		terminateSupervisor(entry.pidFile.pid, "SIGTERM");
-		await waitForHostExit(entry);
+		await waitForHostExit(entry, WINDOWS_SUPERVISOR_EXIT_TIMEOUT_MS);
 	}, 45_000);
 
 	it("preserves a live public socket when supervisor startup cannot bind it", async () => {
@@ -277,7 +280,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 		expect(await endpointLive(qa.socket)).toBe(false);
 		// Win32 endpoint close and metadata unlink are separate operations; poll the
 		// identity-aware lifecycle helper instead of asserting the pidfile atomically.
-		await waitForHostExit(entry, 12_000);
+		await waitForHostExit(entry, WINDOWS_SUPERVISOR_EXIT_TIMEOUT_MS);
 		expect(existsSync(createHostDaemonPaths(qa.agentDir).settingsFile)).toBe(false);
 	}, 60_000);
 });
@@ -668,14 +671,24 @@ async function waitForHostExit(
 async function stopHostProcess(pidFile: { pid: number; processStartTime: string }, pidFilePath: string): Promise<void> {
 	try {
 		if (await hostAlive(pidFile)) {
-			signalIfAlive(pidFile.pid, "SIGTERM");
-			await waitForHostExit({ pidFile, pidFilePath }, 5_000).catch(async () => {
-				// A host that idle-exits on its own between the SIGTERM and this
-				// escalation is a normal teardown, not a failure: signal only if the
-				// pid is still ours, so teardown can never fail with ESRCH.
-				signalIfAlive(pidFile.pid, "SIGKILL");
-				await waitForHostExit({ pidFile, pidFilePath }, 2_000).catch(() => undefined);
-			});
+			if (process.platform === "win32") {
+				// Detached Win32 supervisors require Stop-Process; process.kill does not
+				// reliably terminate them and can leak handles into the next test.
+				terminateSupervisor(pidFile.pid, "SIGTERM");
+				await waitForHostExit({ pidFile, pidFilePath }, WINDOWS_SUPERVISOR_EXIT_TIMEOUT_MS).catch(async () => {
+					terminateSupervisor(pidFile.pid, "SIGKILL");
+					await waitForHostExit({ pidFile, pidFilePath }, 2_000).catch(() => undefined);
+				});
+			} else {
+				signalIfAlive(pidFile.pid, "SIGTERM");
+				await waitForHostExit({ pidFile, pidFilePath }, 5_000).catch(async () => {
+					// A host that idle-exits on its own between the SIGTERM and this
+					// escalation is a normal teardown, not a failure: signal only if the
+					// pid is still ours, so teardown can never fail with ESRCH.
+					signalIfAlive(pidFile.pid, "SIGKILL");
+					await waitForHostExit({ pidFile, pidFilePath }, 2_000).catch(() => undefined);
+				});
+			}
 		}
 	} catch (error: unknown) {
 		if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
