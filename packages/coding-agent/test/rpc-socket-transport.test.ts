@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveSocketTransportAddress } from "../src/modes/rpc/socket-transport.ts";
 
@@ -6,7 +7,10 @@ describe("resolveSocketTransportAddress", () => {
 	it("maps a logical Windows socket path to one deterministic named pipe", () => {
 		// Given
 		const logicalSocket = "C:\\Users\\demo\\.omo\\rpc\\rpc.sock";
-		const expectedHash = createHash("sha256").update(logicalSocket, "utf8").digest("hex").slice(0, 32);
+		const expectedHash = createHash("sha256")
+			.update(win32.normalize(win32.resolve(logicalSocket)).toLowerCase(), "utf8")
+			.digest("hex")
+			.slice(0, 32);
 
 		// When
 		const address = resolveSocketTransportAddress(logicalSocket, "win32");
