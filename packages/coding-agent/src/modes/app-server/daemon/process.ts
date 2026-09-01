@@ -66,7 +66,7 @@ export async function readProcessIdentity(
 				}
 				const output = stdout.trim();
 				if (output === "__SENPI_ABSENT__") return resolve({ kind: "absent" });
-				if (!output || (platform === "win32" && !/^\\d+$/.test(output)))
+				if (!output || (platform === "win32" && !/^\d+$/.test(output)))
 					return resolve({ kind: "error", error: new Error("invalid process identity output") });
 				resolve({ kind: "present", identity: output });
 			},
