@@ -5,12 +5,12 @@
 ### What changed
 
 - `packages/coding-agent/src/modes/app-server/daemon/process.ts` reads process start time with PowerShell `Get-Process` on Windows and preserves `ps -o lstart=` on POSIX.
-- Exit waits use `process.kill(pid, 0)` for liveness after ownership was validated, instead of spawning a start-time reader every 100ms.
+- Process identity is validated with a platform-specific start-time reader before signaling managed children; exit waits repeat that identity check while waiting for termination.
 
 ### Why
 
 - Git for Windows exposes an MSYS `ps` that rejects `-o`; Windows daemons and shared RPC supervisors therefore received a pid but failed ownership registration with “had no process start time.”
-- Start time is the PID-reuse ownership proof and is still checked before signaling. Repeating that expensive proof while waiting for the already-validated child to exit added up to 100 subprocess launches per normal stop and made a PowerShell implementation unusably slow.
+- Start time is the PID-reuse ownership proof and is still checked before signaling. The same identity check is repeated while waiting so a reused PID cannot be mistaken for the managed child.
 
 ### Why an extension could not handle it
 
