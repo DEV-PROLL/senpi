@@ -135,6 +135,11 @@ jobs:
           node-version: "24"
           cache: npm
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@735343b667d3e2a3f2a8f4f1b8b8e4c5f3e0a7f2 # v2.0.2
+        with:
+          bun-version: "1.4.0"
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
