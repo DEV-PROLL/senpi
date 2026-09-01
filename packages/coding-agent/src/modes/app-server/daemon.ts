@@ -193,16 +193,27 @@ async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise
 			},
 		);
 		const exited = observeDaemonExit(child);
+		let childExited = false;
+		void exited.then(() => {
+			childExited = true;
+		});
 		child.unref();
 		const pid = child.pid;
 		if (pid === undefined) throw new Error("failed to spawn daemon process");
 		let startTime: string;
 		try {
-			startTime = await waitForStartTime(pid, 10_000);
+			startTime = await Promise.race([
+				waitForStartTime(pid, 10_000),
+				exited.then(() => {
+					throw new Error(`spawned daemon ${pid} exited before its start time could be read`);
+				}),
+			]);
 		} catch (error: unknown) {
-			try {
-				process.kill(pid, "SIGTERM");
-			} catch {}
+			if (!childExited) {
+				try {
+					process.kill(pid, "SIGTERM");
+				} catch {}
+			}
 			throw error;
 		}
 		await writeFile(paths.pidFile, `${JSON.stringify({ pid, processStartTime: startTime })}\n`, { mode: 0o600 });

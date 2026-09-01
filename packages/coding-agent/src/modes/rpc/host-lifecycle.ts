@@ -37,10 +37,11 @@
  * impossible. `SENPI_RPC_HOST_WATCH_PPID` is passed alongside as a belt-and-
  * braces fallback for platforms where the extra fd is not inherited.
  */
+import { execFile } from "node:child_process";
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync, writeSync } from "node:fs";
-import { access, chmod, mkdir, readFile, rm, unlink } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
@@ -94,6 +95,7 @@ const CHILD_WATCH_FD = 3;
 async function createInternalSocketPath(): Promise<{ socket: string; dir: string }> {
 	const dir = join(tmpdir(), `senpi-rpc-host-internal-${randomUUID().slice(0, 8)}`);
 	await mkdir(dir, { recursive: false, mode: 0o700 });
+	await writeFile(join(dir, ".owner"), String(Date.now()), { mode: 0o600 });
 	return { socket: join(dir, "host.sock"), dir };
 }
 
@@ -624,9 +626,23 @@ function listen(server: Server, socketPath: string): Promise<void> {
 			},
 			async () => {
 				server.off("error", reject);
-				if (process.platform !== "win32" && !socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
-				resolve();
+				try {
+					if (process.platform === "win32") await restrictWindowsPipe(resolveSocketTransportAddress(socketPath, process.platform));
+					else if (!socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
+					resolve();
+				} catch (cause) {
+					reject(cause);
+				}
 			},
+		);
+	});
+}
+
+function restrictWindowsPipe(pipePath: string): Promise<void> {
+	const script = "$p=$args[0]; $a=Get-Acl -LiteralPath $p; $a.SetAccessRuleProtection($true,$false); $s=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $r=New-Object System.Security.AccessControl.FileSystemAccessRule($s,'FullControl','Allow'); $a.SetAccessRule($r); Set-Acl -LiteralPath $p -AclObject $a";
+	return new Promise((resolve, reject) => {
+		execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script, pipePath], { windowsHide: true }, (error) =>
+			error ? reject(error) : resolve(),
 		);
 	});
 }

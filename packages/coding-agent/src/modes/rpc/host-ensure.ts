@@ -89,7 +89,6 @@ export async function ensureHost(options: EnsureHostOptions): Promise<EnsuredHos
 	const socket = normalizeSocketPath(options.socket);
 	const paths = createHostDaemonPaths(options.agentDir);
 	await mkdir(paths.dir, { recursive: true });
-	await reapOrphanedInternalHostDirs();
 	// The public socket is the shared resource; agent directories are not a
 	// sufficient lock scope when two installations target the same endpoint.
 	const lockTarget = join(tmpdir(), "senpi-rpc-host-locks", createSocketLockName(socket));
@@ -97,6 +96,7 @@ export async function ensureHost(options: EnsureHostOptions): Promise<EnsuredHos
 	await writeFile(lockTarget, "", { flag: "a", mode: 0o600 });
 	const release = await acquireOwnershipSafeLock(`${lockTarget}.lock`, lockOptions);
 	try {
+		await reapOrphanedInternalHostDirs();
 		await options._test?.afterLockAcquired?.();
 		return await ensureHostLocked(paths, socket, options.agentDir ?? getAgentDir(), options.policy, options._test);
 	} finally {
@@ -175,7 +175,7 @@ async function startHost(
 		child.unref();
 		if (child.pid === undefined) throw new Error("failed to spawn RPC socket host");
 		const processStartTime = await Promise.race([
-			waitForStartTime(child.pid, 2_000),
+			waitForStartTime(child.pid, 10_000),
 			childExit.then(() => {
 				throw new Error("RPC socket host exited before its start time could be read");
 			}),
@@ -338,7 +338,9 @@ async function reapOrphanedInternalHostDirs(): Promise<void> {
 				.map(async (entry) => {
 					const dir = join(tmpdir(), entry.name);
 					try {
-						if ((await readdir(dir)).length === 0) await rm(dir, { recursive: true, force: true });
+						const marker = await readFile(join(dir, ".owner"), "utf8");
+						if (Number(marker) < Date.now() - 60_000 && (await readdir(dir)).length === 1)
+							await rm(dir, { recursive: true, force: true });
 					} catch {}
 				}),
 		);
@@ -361,7 +363,10 @@ async function appendStderr(paths: HostDaemonPaths, message: string): Promise<st
 }
 
 function createSocketLockName(socket: string): string {
-	return createHash("sha256").update(socket).digest("hex").slice(0, 32);
+	return createHash("sha256")
+		.update(resolveSocketTransportAddress(socket, process.platform), "utf8")
+		.digest("hex")
+		.slice(0, 32);
 }
 
 function normalizeSocketPath(value: string): string {
