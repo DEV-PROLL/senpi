@@ -82,6 +82,7 @@ import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { createInteractiveHostRuntime } from "./modes/interactive/interactive-host-runtime.ts";
 import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts";
 import { runPrintMode } from "./modes/print-mode.ts";
+import { AUTO_TITLE_SESSIONS_CAPABILITY, parseClientCapabilities } from "./modes/rpc/custom-capability.ts";
 import { findInternalSupervisorArgs, parseSupervisorArgs, runHostSupervisor } from "./modes/rpc/host-lifecycle.ts";
 import { runMultiSessionHost } from "./modes/rpc/multi-session-host.ts";
 import { runRpcMode } from "./modes/rpc/rpc-mode.ts";
@@ -178,13 +179,23 @@ function toProjectTrustMode(appMode: AppMode): AppMode {
 }
 
 /**
- * Interactive launches auto-title by default; every other app mode (RPC with or
- * without `--multi-session`, print, json, app-server) opts in with
+ * Interactive launches auto-title by default. RPC clients can opt in through
+ * `auto_title_sessions`; every other non-interactive app mode opts in with
  * `--auto-title-sessions`. Sessions resumed with existing context messages are
- * never retitled, whatever the mode or flag.
+ * never retitled, whatever the mode, capability, or flag.
  */
-export function resolveAutoTitleSessions(appMode: AppMode, parsed: Args, hasContextMessages: boolean): boolean {
-	return (appMode === "interactive" || parsed.autoTitleSessions === true) && !hasContextMessages;
+export function resolveAutoTitleSessions(
+	appMode: AppMode,
+	parsed: Args,
+	hasContextMessages: boolean,
+	clientCapabilities: readonly string[] = parseClientCapabilities(envValue("RPC_CLIENT_CAPABILITIES")),
+): boolean {
+	return (
+		(appMode === "interactive" ||
+			parsed.autoTitleSessions === true ||
+			(appMode === "rpc" && clientCapabilities.includes(AUTO_TITLE_SESSIONS_CAPABILITY))) &&
+		!hasContextMessages
+	);
 }
 
 function isPlainRuntimeMetadataCommand(parsed: Args): boolean {
@@ -1065,7 +1076,12 @@ export async function main(args: string[], options?: MainOptions) {
 			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
-			autoTitleSessions: resolveAutoTitleSessions(appMode, parsed, sessionManager.hasContextMessages()),
+			autoTitleSessions: resolveAutoTitleSessions(
+				appMode,
+				parsed,
+				sessionManager.hasContextMessages(),
+				parseClientCapabilities(envValue("RPC_CLIENT_CAPABILITIES")),
+			),
 		});
 		const cliThinkingOverride = runtimeParsed.thinking !== undefined || cliThinkingFromModel;
 		if (created.session.model && cliThinkingOverride) {

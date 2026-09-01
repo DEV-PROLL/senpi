@@ -27,6 +27,23 @@
 
 - LOW: the net transport calls and filesystem cleanup guards in `host-lifecycle.ts` and `multi-session-host.ts`; one import and one `createConnection` expression each in `host-ensure.ts` and `rpc-client.ts`.
 
+## [Unreleased] - Preserve launch capabilities for undeclared multi-session clients
+
+- `session-command-router.ts`: connection-owned session bindings now fall back to the host launch capabilities when the client has not sent `set_client_info`; an explicit empty capability declaration still wins.
+
+### Why
+
+- Multi-session hosts launched with `extension_events` advertised the capability but did not forward extension events to clients that never declared capabilities, breaking omo-desktop-app subagent/monitor liveness since 2026-08-28.
+
+### Why an extension could not handle it
+
+- Capability negotiation and session binding creation are transport routing behavior beneath the extension API.
+
+## 2026-09-01 - Negotiate RPC session auto-titling
+
+- Added the `auto_title_sessions` client capability. RPC sessions auto-generate a title only when the client advertises support, while interactive defaults and resumed-session context guards remain unchanged.
+- Advertised the capability from both classic and multi-session `get_protocol_info` responses.
+
 ## 2026-09-01 - Acknowledge RPC abort before quiesce
 
 ### What changed
