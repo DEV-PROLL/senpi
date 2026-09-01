@@ -1,5 +1,12 @@
 # Local fork changes
 
+## 2026-09-01 - Acknowledge RPC abort before quiesce
+
+- The RPC `abort` command now acknowledges immediately after dispatching the abort signal, while observing quiesce failures through the existing `rpc_error` event path.
+
+- `abort_bash` and `abort_retry` remain unchanged because they synchronously dispatch their abort actions and do not await session quiescence.
+
+
 ## 2026-08-30 - Make interactive-host entry-parity tests rules-hermetic
 
 - The spawned RPC host in `test/interactive-host-runtime.test.ts` now sets `PI_RULES_DISABLED=1`, so the rules extension's asynchronous `pi-rules.scan` custom entry can no longer race the host-vs-local entry parity assertions (flaky `transports setup mutations to the authoritative host before rebind` on CI shard 1/3).

@@ -1080,7 +1080,10 @@ export function createRpcConnectionHandler(
 			}
 
 			case "abort": {
-				await session.abort();
+				void session.abort().catch((cause: unknown) => {
+					// Abort is acknowledged once dispatched; report quiesce failures out of band.
+					outputEvent({ type: "rpc_error", error: String(cause) });
+				});
 				return success(id, "abort");
 			}
 
