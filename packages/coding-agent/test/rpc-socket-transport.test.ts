@@ -8,7 +8,7 @@ describe("resolveSocketTransportAddress", () => {
 		// Given
 		const logicalSocket = "C:\\Users\\demo\\.omo\\rpc\\rpc.sock";
 		const expectedHash = createHash("sha256")
-			.update(win32.normalize(win32.resolve(logicalSocket)).toLowerCase(), "utf8")
+			.update(win32.normalize(logicalSocket).toLowerCase(), "utf8")
 			.digest("hex")
 			.slice(0, 32);
 
@@ -23,6 +23,10 @@ describe("resolveSocketTransportAddress", () => {
 		expect(resolveSocketTransportAddress("C:/Users/demo/rpc.sock", "win32")).toBe(
 			resolveSocketTransportAddress("c:\\users\\demo\\rpc.sock", "win32"),
 		);
+	});
+
+	it("rejects relative Windows logical paths", () => {
+		expect(() => resolveSocketTransportAddress("rpc.sock", "win32")).toThrow("must be absolute");
 	});
 
 	it("preserves explicit named-pipe addresses", () => {

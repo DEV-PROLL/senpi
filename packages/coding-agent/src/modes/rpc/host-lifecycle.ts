@@ -37,7 +37,6 @@
  * impossible. `SENPI_RPC_HOST_WATCH_PPID` is passed alongside as a belt-and-
  * braces fallback for platforms where the extra fd is not inherited.
  */
-import { execFile } from "node:child_process";
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync, writeSync } from "node:fs";
@@ -47,6 +46,7 @@ import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir, isBunBinary } from "../../config.ts";
+import { readProcessStartTime } from "../app-server/daemon/process.ts";
 import { createHostDaemonPaths } from "./host-ensure.ts";
 import {
 	HOST_CLEANUP_PATHS_ENV,
@@ -92,10 +92,17 @@ const CHILD_WATCH_FD = 3;
  * regardless of where the public socket lives, and private against other local
  * users, so it gets its own 0700 directory under the OS temp directory.
  */
-async function createInternalSocketPath(): Promise<{ socket: string; dir: string }> {
+async function createInternalSocketPath(): Promise<{ socket: string; dir?: string }> {
+	if (process.platform === "win32") {
+		return { socket: `\\\\.\\pipe\\senpi-rpc-internal-${randomUUID()}` };
+	}
 	const dir = join(tmpdir(), `senpi-rpc-host-internal-${randomUUID().slice(0, 8)}`);
 	await mkdir(dir, { recursive: false, mode: 0o700 });
-	await writeFile(join(dir, ".owner"), String(Date.now()), { mode: 0o600 });
+	await writeFile(
+		join(dir, ".owner"),
+		JSON.stringify({ pid: process.pid, processStartTime: await readProcessStartTime(process.pid), createdAt: Date.now() }),
+		{ mode: 0o600 },
+	);
 	return { socket: join(dir, "host.sock"), dir };
 }
 
@@ -351,7 +358,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 			...(launch.agentDir ? { SENPI_CODING_AGENT_DIR: launch.agentDir } : {}),
 			[HOST_WATCH_FD_ENV]: String(CHILD_WATCH_FD),
 			[HOST_WATCH_PPID_ENV]: String(process.pid),
-			[HOST_SCRATCH_DIR_ENV]: internal.dir,
+			...(internal.dir ? { [HOST_SCRATCH_DIR_ENV]: internal.dir } : {}),
 			[HOST_CLEANUP_PATHS_ENV]: [paths.pidFile, paths.settingsFile, ...(process.platform === "win32" ? [] : [publicSocket])].join("\n"),
 		},
 		// Slot 3 is the lifetime pipe: "pipe" gives the child a read end it can
@@ -452,7 +459,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		// replacing a host) would otherwise leave the directory behind. The child
 		// keeps serving through its already-open socket fd until it exits, and its
 		// own watchdog cleanup makes the removal idempotent.
-		await rm(internal.dir, { recursive: true, force: true });
+		if (internal.dir) await rm(internal.dir, { recursive: true, force: true });
 		await stopChild(child);
 		observer?.destroy();
 		if (publicSocketOwned && process.platform !== "win32") await rm(publicSocket, { force: true });
@@ -627,22 +634,12 @@ function listen(server: Server, socketPath: string): Promise<void> {
 			async () => {
 				server.off("error", reject);
 				try {
-					if (process.platform === "win32") await restrictWindowsPipe(resolveSocketTransportAddress(socketPath, process.platform));
-					else if (!socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
+					if (process.platform !== "win32" && !socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
 					resolve();
 				} catch (cause) {
 					reject(cause);
 				}
 			},
-		);
-	});
-}
-
-function restrictWindowsPipe(pipePath: string): Promise<void> {
-	const script = "$p=$args[0]; $a=Get-Acl -LiteralPath $p; $a.SetAccessRuleProtection($true,$false); $s=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $r=New-Object System.Security.AccessControl.FileSystemAccessRule($s,'FullControl','Allow'); $a.SetAccessRule($r); Set-Acl -LiteralPath $p -AclObject $a";
-	return new Promise((resolve, reject) => {
-		execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script, pipePath], { windowsHide: true }, (error) =>
-			error ? reject(error) : resolve(),
 		);
 	});
 }

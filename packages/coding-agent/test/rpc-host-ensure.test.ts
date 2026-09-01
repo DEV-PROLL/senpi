@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { VERSION } from "../src/config.ts";
 import {
-	processIsLive,
 	processMatchesPidFile,
 	readProcessStartTime,
 	waitForStartTime,
@@ -277,7 +276,7 @@ async function waitForProtocol(socketPath: string): Promise<void> {
 async function expectGone(pidFile: { pid: number; processStartTime: string }): Promise<void> {
 	const deadline = Date.now() + 3_000;
 	while (Date.now() <= deadline) {
-		if (!processIsLive(pidFile.pid)) return;
+		if (!(await processMatchesPidFile(pidFile, readProcessStartTime))) return;
 		await new Promise((resolve) => setTimeout(resolve, 20));
 	}
 	throw new Error(`pid ${pidFile.pid} remained alive`);

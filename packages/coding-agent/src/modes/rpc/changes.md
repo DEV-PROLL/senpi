@@ -17,7 +17,7 @@
 
 ### Cleanup ownership
 
-- The supervisor omits the logical Windows socket from watchdog cleanup because it is only an endpoint name, never a filesystem object owned by this process. `ensureHost()` removes abandoned internal scratch directories before acquiring a new host lock, covering hard-termination paths where no JavaScript cleanup can run.
+- The supervisor omits the logical Windows socket from watchdog cleanup because it is only an endpoint name, never a filesystem object owned by this process. Windows named pipes use Node's restrictive `readableAll: false` and `writableAll: false` creation options; no post-bind ACL mutation is attempted because it cannot secure later libuv pipe instances. `ensureHost()` removes abandoned POSIX internal scratch directories only after a recorded owner start-time check proves the owner is stale.
 
 ### Why an extension could not handle it
 

@@ -8,7 +8,7 @@
 
 - Windows: the shared RPC host can start. Listeners and clients now map the logical socket path to a deterministic named pipe (`\\.\pipe\senpi-rpc-<hash>`) instead of passing a `.sock` filesystem path to `listen()`, which Windows rejected with `EACCES`.
 - Windows: daemon and shared-host ownership registration works. Process start time is read with PowerShell instead of `ps -o lstart=`, which Git for Windows' MSYS `ps` rejects, so a spawned host no longer fails with "had no process start time".
-- Waiting for a validated process to exit no longer re-runs the start-time ownership probe on every poll; liveness uses a signal-0 check, removing up to ~100 subprocess launches per stop.
+- Startup failures no longer signal an unvalidated child PID, avoiding a PID-reuse race when a detached process exits before ownership can be recorded.
 - Multi-session RPC hosts launched with `SENPI_RPC_CLIENT_CAPABILITIES` (for example `extension_events`) now apply those capabilities to connection-owned session bindings when the client never sends `set_client_info`. Previously the launch capabilities were advertised through `get_protocol_info` but dropped at binding creation, so undeclared clients received no `extension_event` frames (breaking downstream task/DAG/monitor liveness in omo-desktop-app). An explicit `set_client_info` declaration, including an empty capability list, still overrides the launch default.
 - RPC `abort` acknowledgements are now sent immediately after the abort signal is dispatched instead of waiting for full session quiescence, preventing desktop stop requests from hitting their 10-second bounded-ack timeout under host load.
 

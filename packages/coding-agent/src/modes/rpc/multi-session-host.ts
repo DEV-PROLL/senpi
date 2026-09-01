@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { access, chmod, mkdir, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
@@ -325,7 +324,7 @@ function socketSink(socket: Socket): RpcConnectionSink {
 }
 
 async function prepareSocketPath(socketPath: string): Promise<void> {
-	if (socketPath.startsWith("\0")) return;
+	if (process.platform === "win32" || socketPath.startsWith("\0")) return;
 	await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
 	try {
 		await access(socketPath);
@@ -356,20 +355,12 @@ function listen(server: Server, socketPath: string): Promise<void> {
 		server.listen(resolveSocketTransportAddress(socketPath, process.platform), async () => {
 			server.off("error", reject);
 			try {
-				if (process.platform === "win32") await restrictWindowsPipe(resolveSocketTransportAddress(socketPath, process.platform));
-				else if (!socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
+				if (process.platform !== "win32" && !socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
 				resolve();
 			} catch (cause) {
 				reject(cause);
 			}
 		});
-	});
-}
-
-function restrictWindowsPipe(pipePath: string): Promise<void> {
-	const script = "$p=$args[0]; $a=Get-Acl -LiteralPath $p; $a.SetAccessRuleProtection($true,$false); $s=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $r=New-Object System.Security.AccessControl.FileSystemAccessRule($s,'FullControl','Allow'); $a.SetAccessRule($r); Set-Acl -LiteralPath $p -AclObject $a";
-	return new Promise((resolve, reject) => {
-		execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script, pipePath], { windowsHide: true }, (error) => error ? reject(error) : resolve());
 	});
 }
 

@@ -209,11 +209,8 @@ async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise
 				}),
 			]);
 		} catch (error: unknown) {
-			if (!childExited) {
-				try {
-					process.kill(pid, "SIGTERM");
-				} catch {}
-			}
+			// A failed start-time read is not ownership proof. Do not signal a raw
+			// PID after the child may already have exited and the PID been reused.
 			throw error;
 		}
 		await writeFile(paths.pidFile, `${JSON.stringify({ pid, processStartTime: startTime })}\n`, { mode: 0o600 });

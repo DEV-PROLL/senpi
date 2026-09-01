@@ -204,11 +204,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 		expect(info.data).toMatchObject({ serverVersion: VERSION, mode: "multi" });
 	}, 60_000);
 
-	// POSIX-only: the assertion is that the supervisor RUNS its SIGTERM shutdown.
-	// Windows has no graceful termination signal - `process.kill(pid, "SIGTERM")`
-	// is `TerminateProcess`, so no handler executes and the host is orphaned
-	// rather than reaped. See the Windows gap note in `src/modes/rpc/changes.md`.
-	it.skipIf(process.platform === "win32")(
+	it(
 		"persistent cold start never idle-exits (env override beats settings)",
 		async () => {
 			const qa = scratch("persist");
@@ -256,11 +252,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 		live.close();
 	}, 45_000);
 
-	// POSIX-only: the supervisor-lifetime binding reaps the host and removes the
-	// supervisor's private directory from inside the host process. Windows tears
-	// that host down without running any JS, so the empty scratch directory
-	// survives. See the Windows gap note in `src/modes/rpc/changes.md`.
-	it.skipIf(process.platform === "win32")(
+	it(
 		"reaps the internal host when the supervisor is SIGKILLed (no catchable-signal path)",
 		async () => {
 			const qa = scratch("kill9");

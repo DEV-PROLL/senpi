@@ -183,11 +183,8 @@ async function startHost(
 		pidFile = { pid: child.pid, processStartTime };
 		await writeFile(paths.pidFile, `${JSON.stringify(pidFile)}\n`, { mode: 0o600 });
 	} catch (error: unknown) {
-		if (!exitedEarly && child?.pid !== undefined) {
-			try {
-				process.kill(child.pid, "SIGTERM");
-			} catch {}
-		}
+		// A failed start-time read is not ownership proof. The exit observer is
+		// the only safe authority for an unregistered child; never signal its raw PID.
 		if (!exitedEarly) throw error;
 		const diagnostic = await appendStderr(
 			paths,
@@ -336,11 +333,22 @@ async function reapOrphanedInternalHostDirs(): Promise<void> {
 			entries
 				.filter((entry) => entry.isDirectory() && entry.name.startsWith("senpi-rpc-host-internal-"))
 				.map(async (entry) => {
-					const dir = join(tmpdir(), entry.name);
 					try {
-						const marker = await readFile(join(dir, ".owner"), "utf8");
-						if (Number(marker) < Date.now() - 60_000 && (await readdir(dir)).length === 1)
-							await rm(dir, { recursive: true, force: true });
+						const owner = JSON.parse(await readFile(join(tmpdir(), entry.name, ".owner"), "utf8")) as {
+							pid?: unknown;
+							processStartTime?: unknown;
+							createdAt?: unknown;
+						};
+						if (
+							typeof owner.pid === "number" &&
+							typeof owner.processStartTime === "string" &&
+							typeof owner.createdAt === "number" &&
+							owner.processStartTime.length > 0 &&
+							owner.createdAt < Date.now() - 60_000 &&
+							(await readdir(join(tmpdir(), entry.name))).length === 1 &&
+							!(await processMatchesPidFile({ pid: owner.pid, processStartTime: owner.processStartTime }))
+						)
+							await rm(join(tmpdir(), entry.name), { recursive: true, force: true });
 					} catch {}
 				}),
 		);
