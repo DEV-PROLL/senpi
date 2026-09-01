@@ -127,6 +127,7 @@ export function armHostWatchdog(
  */
 function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 	let stream: ReturnType<typeof createReadStream>;
+	let streamFailed = false;
 	let fired = false;
 	const fireOnce = (reason: string): void => {
 		if (fired) return;
@@ -143,22 +144,23 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 	}
 	stream.resume();
 	const onEnd = (): void => fireOnce(`supervisor pipe fd ${fd} closed`);
-	stream.once("end", onEnd);
-	// Win32 pipe teardown may report close without an end event; both are kernel
-	// signals and must outrank the slower process-identity fallback.
-	stream.once("close", onEnd);
-	// A read error means the pipe is unusable, which is indistinguishable from a
-	// dead supervisor from this side; treating it as EOF keeps the binding safe.
-	// An unavailable inherited fd is a configuration/setup failure, not proof
-	// that the supervisor died. The PPID binding, when supplied, remains active.
-	stream.once("error", (cause) => {
+	const onClose = (): void => {
+		if (!streamFailed) onEnd();
+	};
+	const onError = (cause: unknown): void => {
+		streamFailed = true;
 		const message = cause instanceof Error ? cause.message : String(cause);
 		writeWin32Diagnostic(`watchdog fd error fd=${String(fd)} error=${message}`);
-	});
+	};
+	stream.once("end", onEnd);
+	// Win32 pipe teardown may report close without end; POSIX invalid-fd close is
+	// not supervisor death and remains inert.
+	if (process.platform === "win32") stream.once("close", onClose);
+	stream.once("error", onError);
 	return () => {
 		stream.off("end", onEnd);
-		stream.off("close", onEnd);
-		stream.off("error", onEnd);
+		stream.off("close", onClose);
+		stream.off("error", onError);
 		stream.destroy();
 	};
 }
