@@ -265,6 +265,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 		// A long idle window leaves the supervisor-lifetime binding as the only thing
 		// that can reap the internal host during this test.
 		const ensured = await ensureLifecycleHost(qa, { policy: { idleExitMs: 600_000 } });
+		const entry = currentManaged();
 		const internalHosts = await waitForChildPids(ensured.pid);
 		expect(internalHosts.length).toBeGreaterThan(0);
 		const leakedDirs = listInternalSocketDirs().filter((dir) => !internalBefore.includes(dir));
@@ -274,7 +275,9 @@ describe("ensureHost-spawned host lifecycle", () => {
 		expect(internalHosts.filter(processAlive)).toEqual([]);
 		expect(leakedDirs.filter((dir) => existsSync(join(tmpdir(), dir)))).toEqual([]);
 		expect(await endpointLive(qa.socket)).toBe(false);
-		expect(existsSync(qa.pidFilePath)).toBe(false);
+		// Win32 endpoint close and metadata unlink are separate operations; poll the
+		// identity-aware lifecycle helper instead of asserting the pidfile atomically.
+		await waitForHostExit(entry, 2_000);
 		expect(existsSync(createHostDaemonPaths(qa.agentDir).settingsFile)).toBe(false);
 	}, 60_000);
 });
