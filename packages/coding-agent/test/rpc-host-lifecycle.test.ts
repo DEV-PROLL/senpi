@@ -688,8 +688,9 @@ async function waitForHostExit(
 			// is already gone (the CIM dump showed TARGET=empty and the endpoint was
 			// ENOENT). A nonmatching identity is the test's live-CIM stale-state proof,
 			// not a raw PID-liveness guess. File deletion and process death are not
-			// atomic; remove that stale state before the next lifecycle scenario.
+			// atomic; remove the stale state before the next lifecycle scenario.
 			rmSync(entry.pidFilePath, { force: true });
+			rmSync(join(dirname(entry.pidFilePath), "settings.json"), { force: true });
 			return;
 		}
 		await delay(1_000);
