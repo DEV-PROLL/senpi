@@ -235,11 +235,17 @@ async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise
 				if (child.exitCode === null && child.signalCode === null) {
 					try {
 						child.kill("SIGKILL");
-					} catch {}
-					await exited;
+					} catch (killError: unknown) {
+						throw new Error(
+							`failed to terminate daemon after registration failure: ${killError instanceof Error ? killError.message : String(killError)}`,
+						);
+					}
+					if (!(await Promise.race([exited.then(() => true), delay(2_000).then(() => false)]))) {
+						throw new Error(`daemon ${pid} remained alive after SIGKILL during registration failure`);
+					}
 				}
 			}
-			await cleanupState(paths, listen);
+			await cleanupState(paths, { ...listen, ...(listen.kind === "unix" ? { path: undefined } : {}) });
 			throw error;
 		}
 		child.unref();

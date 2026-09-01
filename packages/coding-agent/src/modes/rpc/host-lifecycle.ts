@@ -523,8 +523,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		await shutdown(`startup failed: ${errorMessage(cause)}`, 1);
 	}
 	async function connectObserver(): Promise<void> {
-		const secret =
-			process.platform === "win32" ? await readSocketSecret(socketSecretPath(internalSocket)) : undefined;
+		const secret = internalSecret;
 		const next = createConnection(resolveSocketTransportAddress(internalSocket, process.platform, secret));
 		if (secret) sendSocketHandshake(next, secret);
 		await waitForConnect(next, 5_000);

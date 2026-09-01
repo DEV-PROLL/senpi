@@ -10,6 +10,11 @@ export const SOCKET_SECRET_FILE_ENV = "SENPI_RPC_SOCKET_SECRET_FILE";
 export const SOCKET_HANDSHAKE_TIMEOUT_MS = 2_000;
 
 export function socketSecretPath(logicalPath: string): string {
+	if (logicalPath.toLowerCase().startsWith("\\\\.\\pipe\\")) {
+		throw new Error(
+			`Windows RPC named-pipe addresses need a logical filesystem path for their secret: ${logicalPath}`,
+		);
+	}
 	return `${logicalPath}${SOCKET_SECRET_SUFFIX}`;
 }
 
@@ -55,12 +60,23 @@ export function resolveSocketTransportAddress(
 
 export function authenticateSocket(socket: Socket, secret: Uint8Array, onAuthenticated: () => void): void {
 	let received = Buffer.alloc(0);
-	const timer = setTimeout(() => socket.destroy(), SOCKET_HANDSHAKE_TIMEOUT_MS);
+	const finish = (): void => {
+		clearTimeout(timer);
+		socket.off("data", onData);
+		socket.off("error", onError);
+	};
+	const onError = (): void => {
+		finish();
+		socket.destroy();
+	};
+	const timer = setTimeout(() => {
+		finish();
+		socket.destroy();
+	}, SOCKET_HANDSHAKE_TIMEOUT_MS);
 	const onData = (chunk: Buffer): void => {
 		received = Buffer.concat([received, chunk]);
 		if (received.length < secret.length) return;
-		socket.off("data", onData);
-		clearTimeout(timer);
+		finish();
 		if (!timingSafeEqual(received.subarray(0, secret.length), Buffer.from(secret))) {
 			socket.destroy();
 			return;
@@ -70,7 +86,8 @@ export function authenticateSocket(socket: Socket, secret: Uint8Array, onAuthent
 		onAuthenticated();
 	};
 	socket.on("data", onData);
-	socket.once("close", () => clearTimeout(timer));
+	socket.once("error", onError);
+	socket.once("close", finish);
 }
 
 export function sendSocketHandshake(socket: Socket, secret: Uint8Array): void {

@@ -11,7 +11,12 @@ import {
 	waitForStartTime,
 } from "../src/modes/app-server/daemon/process.ts";
 import { createHostDaemonPaths, defaultHostLaunch, ensureHost } from "../src/modes/rpc/host-ensure.ts";
-import { resolveSocketTransportAddress } from "../src/modes/rpc/socket-transport.ts";
+import {
+	readSocketSecret,
+	resolveSocketTransportAddress,
+	sendSocketHandshake,
+	socketSecretPath,
+} from "../src/modes/rpc/socket-transport.ts";
 
 const roots: string[] = [];
 const children: ChildProcess[] = [];
@@ -241,8 +246,9 @@ async function startManagedFixture(
 }
 
 async function protocolInfo(socketPath: string): Promise<Record<string, unknown>> {
+	const secret = process.platform === "win32" ? await readSocketSecret(socketSecretPath(socketPath)) : undefined;
 	return new Promise((resolve, reject) => {
-		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
 		let buffer = "";
 		const timer = setTimeout(() => finish(new Error("protocol timeout")), 1_000);
 		const finish = (error?: Error, value?: Record<string, unknown>) => {
@@ -250,7 +256,10 @@ async function protocolInfo(socketPath: string): Promise<Record<string, unknown>
 			socket.destroy();
 			error ? reject(error) : resolve(value!);
 		};
-		socket.once("connect", () => socket.write('{"id":"probe","type":"get_protocol_info"}\n'));
+		socket.once("connect", () => {
+			if (secret) sendSocketHandshake(socket, secret);
+			socket.write('{"id":"probe","type":"get_protocol_info"}\n');
+		});
 		socket.on("data", (chunk) => {
 			buffer += chunk.toString("utf8");
 			const newline = buffer.indexOf("\n");

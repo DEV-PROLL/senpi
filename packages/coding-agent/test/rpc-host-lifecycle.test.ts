@@ -37,7 +37,12 @@ import {
 	HOST_WATCH_PPID_ENV,
 	readHostWatchdogConfig,
 } from "../src/modes/rpc/host-watchdog.ts";
-import { resolveSocketTransportAddress } from "../src/modes/rpc/socket-transport.ts";
+import {
+	readSocketSecret,
+	resolveSocketTransportAddress,
+	sendSocketHandshake,
+	socketSecretPath,
+} from "../src/modes/rpc/socket-transport.ts";
 import { hermeticProviderEnv, MOCK_MODEL, MOCK_PROVIDER, writeRpcModelsJson } from "./helpers/rpc-hermetic.ts";
 
 const roots: string[] = [];
@@ -204,22 +209,18 @@ describe("ensureHost-spawned host lifecycle", () => {
 		expect(info.data).toMatchObject({ serverVersion: VERSION, mode: "multi" });
 	}, 60_000);
 
-	it(
-		"persistent cold start never idle-exits (env override beats settings)",
-		async () => {
-			const qa = scratch("persist");
-			await ensureLifecycleHost(qa, {
-				policy: { idleExitMs: 600 },
-				env: { [HOST_COLD_START_ENV]: "persistent" },
-			});
-			const entry = currentManaged();
-			await delay(2_500);
-			expect(await hostAlive(entry.pidFile)).toBe(true);
-			process.kill(entry.pidFile.pid, "SIGTERM");
-			await waitForHostExit(entry);
-		},
-		45_000,
-	);
+	it("persistent cold start never idle-exits (env override beats settings)", async () => {
+		const qa = scratch("persist");
+		await ensureLifecycleHost(qa, {
+			policy: { idleExitMs: 600 },
+			env: { [HOST_COLD_START_ENV]: "persistent" },
+		});
+		const entry = currentManaged();
+		await delay(2_500);
+		expect(await hostAlive(entry.pidFile)).toBe(true);
+		process.kill(entry.pidFile.pid, "SIGTERM");
+		await waitForHostExit(entry);
+	}, 45_000);
 
 	it("preserves a live public socket when supervisor startup cannot bind it", async () => {
 		const qa = scratch("collision");
@@ -252,28 +253,24 @@ describe("ensureHost-spawned host lifecycle", () => {
 		live.close();
 	}, 45_000);
 
-	it(
-		"reaps the internal host when the supervisor is SIGKILLed (no catchable-signal path)",
-		async () => {
-			const qa = scratch("kill9");
-			const internalBefore = listInternalSocketDirs();
-			// A long idle window leaves the supervisor-lifetime binding as the only thing
-			// that can reap the internal host during this test.
-			const ensured = await ensureLifecycleHost(qa, { policy: { idleExitMs: 600_000 } });
-			const internalHosts = await waitForChildPids(ensured.pid);
-			expect(internalHosts.length).toBeGreaterThan(0);
-			const leakedDirs = listInternalSocketDirs().filter((dir) => !internalBefore.includes(dir));
+	it("reaps the internal host when the supervisor is SIGKILLed (no catchable-signal path)", async () => {
+		const qa = scratch("kill9");
+		const internalBefore = listInternalSocketDirs();
+		// A long idle window leaves the supervisor-lifetime binding as the only thing
+		// that can reap the internal host during this test.
+		const ensured = await ensureLifecycleHost(qa, { policy: { idleExitMs: 600_000 } });
+		const internalHosts = await waitForChildPids(ensured.pid);
+		expect(internalHosts.length).toBeGreaterThan(0);
+		const leakedDirs = listInternalSocketDirs().filter((dir) => !internalBefore.includes(dir));
 
-			process.kill(ensured.pid, "SIGKILL");
-			await waitForPidsGone(internalHosts, 10_000);
-			expect(internalHosts.filter(processAlive)).toEqual([]);
-			expect(leakedDirs.filter((dir) => existsSync(join(tmpdir(), dir)))).toEqual([]);
-			expect(await endpointLive(qa.socket)).toBe(false);
-			expect(existsSync(qa.pidFilePath)).toBe(false);
-			expect(existsSync(createHostDaemonPaths(qa.agentDir).settingsFile)).toBe(false);
-		},
-		60_000,
-	);
+		process.kill(ensured.pid, "SIGKILL");
+		await waitForPidsGone(internalHosts, 10_000);
+		expect(internalHosts.filter(processAlive)).toEqual([]);
+		expect(leakedDirs.filter((dir) => existsSync(join(tmpdir(), dir)))).toEqual([]);
+		expect(await endpointLive(qa.socket)).toBe(false);
+		expect(existsSync(qa.pidFilePath)).toBe(false);
+		expect(existsSync(createHostDaemonPaths(qa.agentDir).settingsFile)).toBe(false);
+	}, 60_000);
 });
 
 describe("host watchdog configuration", () => {
@@ -412,7 +409,10 @@ describe("resolveHostChildLaunch", () => {
 	});
 
 	it("quotes cmd launchers before adding shell metacharacter escaping", () => {
-		const launch = spawnableChildLaunch({ command: "C:\\Program Files\\launcher.cmd", args: ["hello world", "x&y"] }, "win32");
+		const launch = spawnableChildLaunch(
+			{ command: "C:\\Program Files\\launcher.cmd", args: ["hello world", "x&y"] },
+			"win32",
+		);
 		expect(launch.shell).toBe(true);
 		expect(launch.command).toBe('"C:\\Program Files\\launcher.cmd"');
 		expect(launch.args).toEqual(['"hello world"', '"x^&y"']);
@@ -517,9 +517,11 @@ async function waitForChildPids(pid: number, timeoutMs = 10_000): Promise<number
  * is not a filesystem entry, so `existsSync` on the logical socket path can
  * never observe it; connectability is the contract on both platforms.
  */
-function endpointLive(socketPath: string): Promise<boolean> {
+async function endpointLive(socketPath: string): Promise<boolean> {
+	const secret = process.platform === "win32" ? await readSocketSecret(socketSecretPath(socketPath)) : undefined;
 	return new Promise((resolve) => {
-		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
+		if (secret) sendSocketHandshake(socket, secret);
 		const settle = (live: boolean): void => {
 			socket.destroy();
 			resolve(live);
@@ -660,8 +662,9 @@ function openedSessionId(response: RecordValue): string {
 }
 
 async function protocolInfo(socketPath: string): Promise<RecordValue> {
+	const secret = process.platform === "win32" ? await readSocketSecret(socketSecretPath(socketPath)) : undefined;
 	return new Promise((resolve, reject) => {
-		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
 		let buffer = "";
 		const timer = setTimeout(() => finish(new Error("protocol info timeout")), 5_000);
 		const finish = (error?: Error, value?: RecordValue) => {
@@ -670,7 +673,10 @@ async function protocolInfo(socketPath: string): Promise<RecordValue> {
 			if (error || value === undefined) reject(error ?? new Error("no protocol info"));
 			else resolve(value);
 		};
-		socket.once("connect", () => socket.write('{"id":"probe","type":"get_protocol_info"}\n'));
+		socket.once("connect", () => {
+			if (secret) sendSocketHandshake(socket, secret);
+			socket.write('{"id":"probe","type":"get_protocol_info"}\n');
+		});
 		socket.on("data", (chunk) => {
 			buffer += chunk.toString("utf8");
 			const newline = buffer.indexOf("\n");
@@ -696,11 +702,13 @@ class JsonlPeer {
 	}
 
 	static async connect(socketPath: string): Promise<JsonlPeer> {
-		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
+		const secret = process.platform === "win32" ? await readSocketSecret(socketSecretPath(socketPath)) : undefined;
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
 		await new Promise<void>((resolve, reject) => {
 			socket.once("connect", resolve);
 			socket.once("error", reject);
 		});
+		if (secret) sendSocketHandshake(socket, secret);
 		const peer = new JsonlPeer(socket);
 		peers.push(peer);
 		return peer;

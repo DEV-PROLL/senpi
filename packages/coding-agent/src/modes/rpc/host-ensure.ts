@@ -290,10 +290,14 @@ function isChildExit(value: ProtocolInfo | ChildExit | undefined): value is Chil
 }
 
 async function probeProtocolInfo(socketPath: string, timeoutMs: number): Promise<ProtocolInfo | undefined> {
-	const secret =
-		process.platform === "win32"
-			? await readSocketSecret(socketSecretPath(socketPath)).catch(() => undefined)
-			: undefined;
+	let secret: Buffer | undefined;
+	if (process.platform === "win32") {
+		try {
+			secret = await readSocketSecret(socketSecretPath(socketPath));
+		} catch {
+			return undefined;
+		}
+	}
 	return new Promise((resolveProbe) => {
 		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
 		if (secret) sendSocketHandshake(socket, secret);
