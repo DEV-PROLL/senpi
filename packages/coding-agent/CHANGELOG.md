@@ -10,6 +10,8 @@
 
 ### New Features
 
+- RPC clients can opt into native session auto-titles with the `auto_title_sessions` capability; supported RPC sessions generate and emit their title through `session_info_changed`.
+
 ### Breaking Changes
 
 ### Added
