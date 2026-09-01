@@ -1,5 +1,23 @@
 # changes
 
+## Workflow summary step for the model catalog publisher (2026-09-01)
+
+### What changed
+
+- `.github/workflows/publish-model-catalog.yml` gains the mandatory `$GITHUB_STEP_SUMMARY` step reporting job status, ref, and commit at the end of its final job.
+
+### Why
+
+- Every workflow must render an at-a-glance result on the run page; this workflow was modernized earlier today but still lacked the summary step the repository standard requires.
+
+### Why an extension could not handle it
+
+- GitHub workflow files execute on GitHub's runners; no senpi extension surface can inject a job summary step into a workflow definition.
+
+### Expected merge conflict zones
+
+- `.github/workflows/publish-model-catalog.yml` tail of the final job (upstream has no such workflow; conflict risk is fork-local only).
+
 ## Shared GitHub Action pins move to current majors (2026-09-01)
 
 ### What changed

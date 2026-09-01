@@ -144,3 +144,17 @@ jobs:
             --bucket pi-artifacts \
             --endpoint "$R2_ENDPOINT" \
             --source-commit "$(git rev-parse HEAD)"
+
+      - name: Workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Model catalog publish"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Job status | ${{ job.status }} |"
+            echo "| Ref | ${{ github.ref_name }} |"
+            echo "| Commit | ${{ github.sha }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
