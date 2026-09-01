@@ -27,6 +27,24 @@
 
 - LOW: the net transport calls and filesystem cleanup guards in `host-lifecycle.ts` and `multi-session-host.ts`; one import and one `createConnection` expression each in `host-ensure.ts` and `rpc-client.ts`.
 
+## 2026-09-01 - Acknowledge RPC abort before quiesce
+
+### What changed
+
+- `packages/coding-agent/src/modes/rpc/connection-handler.ts` now dispatches the RPC `abort` signal without awaiting full session quiescence, acknowledges the command immediately, and observes later failures through the `rpc_error` event path. `abort_bash` and `abort_retry` remain unchanged because their dispatch methods are synchronous.
+
+### Why
+
+- Under host load, desktop stop clicks could appear delayed until the previous quiesce completed; the desktop adapter bounds abort acknowledgement at 10 seconds, so waiting for quiescence could surface `abort timed out` even after the abort signal had been delivered.
+
+### Why an extension could not handle it
+
+- RPC command acknowledgement ordering is owned by the transport connection handler, below the extension API.
+
+### Expected merge conflict zones
+
+- LOW: the `abort` command case in `connection-handler.ts`.
+
 ## 2026-08-31 - Ownership-safe RPC and app-server state locks
 
 - Replaced proper-lockfile for the shared RPC-host and app-server daemon locks with a persistent regular SQLite lock file using `BEGIN EXCLUSIVE`; release commits and closes without unlinking.
