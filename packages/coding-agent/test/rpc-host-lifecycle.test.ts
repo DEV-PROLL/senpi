@@ -221,7 +221,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 		const entry = currentManaged();
 		await delay(2_500);
 		expect(await hostAlive(entry.pidFile)).toBe(true);
-		process.kill(entry.pidFile.pid, "SIGTERM");
+		terminateSupervisor(entry.pidFile.pid, "SIGTERM");
 		await waitForHostExit(entry);
 	}, 45_000);
 
@@ -268,7 +268,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 		expect(internalHosts.length).toBeGreaterThan(0);
 		const leakedDirs = listInternalSocketDirs().filter((dir) => !internalBefore.includes(dir));
 
-		process.kill(ensured.pid, "SIGKILL");
+		terminateSupervisor(ensured.pid, "SIGKILL");
 		await waitForPidsGone(internalHosts, 10_000);
 		expect(internalHosts.filter(processAlive)).toEqual([]);
 		expect(leakedDirs.filter((dir) => existsSync(join(tmpdir(), dir)))).toEqual([]);
@@ -649,6 +649,17 @@ async function stopHostProcess(pidFile: { pid: number; processStartTime: string 
 	} catch (error: unknown) {
 		if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
 	}
+}
+
+function terminateSupervisor(pid: number, signal: NodeJS.Signals): void {
+	if (process.platform === "win32") {
+		// Bun cannot deliver catchable POSIX signals to detached Windows processes.
+		// taskkill is the real Windows termination primitive; the child watchdog must
+		// still perform the cleanup assertions below when this bypasses JS handlers.
+		execFileSync("taskkill.exe", ["/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+		return;
+	}
+	process.kill(pid, signal);
 }
 
 function signalIfAlive(pid: number, signal: NodeJS.Signals): void {
