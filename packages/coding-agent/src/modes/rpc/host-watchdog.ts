@@ -137,6 +137,9 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 function watchPpid(supervisorPid: number, fire: (reason: string) => void): () => void {
 	let checking = false;
 	const checkSupervisor = async (): Promise<void> => {
+		// Tests and embedders may bind the watchdog to this process itself; that
+		// is a valid live binding rather than evidence of supervisor loss.
+		if (supervisorPid === process.pid) return;
 		if (checking) return;
 		checking = true;
 		try {
@@ -149,7 +152,6 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 		}
 	};
 	const timer = setInterval(() => void checkSupervisor(), HOST_WATCH_PPID_INTERVAL_MS);
-	void checkSupervisor();
 	timer.unref?.();
 	return () => clearInterval(timer);
 }
