@@ -842,10 +842,9 @@ export default function compactionExtension(
 				leadTokens,
 			)
 		) {
-			getLogger(ctx).debug("emergency_prune", {
-				route: "context-event",
-				tokens: usageWithPendingPrompt.tokens ?? 0,
-			});
+			// The speculative start below logs "speculative_started" itself; logging
+			// "emergency_prune" here mislabeled proactive speculation as pruning and
+			// corrupted the counter the incident analysis relies on.
 			startSpeculativeCompaction(ctx, PROACTIVE_COMPACTION_INSTRUCTIONS);
 		}
 
@@ -898,6 +897,7 @@ export default function compactionExtension(
 				breakerFallback,
 				laneOwnsCompaction,
 				emergencyPruneLatch,
+				logEmergencyPrune: (fields) => getLogger(ctx).debug("emergency_prune", fields),
 			}),
 		};
 	});
