@@ -22,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
 
       - name: Install system dependencies
@@ -70,7 +70,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
 
       - name: Install system dependencies
@@ -111,7 +111,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
@@ -132,7 +132,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
@@ -141,22 +141,21 @@ jobs:
       - name: Build workspace package entries
         run: npm run build
 
-      # Windows process-lifecycle timing is nondeterministic on shared runners; bounded retries
-      # use fresh Vitest processes without weakening any assertions.
+      # Each suite runs in its own process; lifecycle failures are not retried in-process.
       - name: Run RPC host ensure tests
-        run: npx vitest run --retry=2 test/rpc-host-ensure.test.ts
+        run: bunx vitest run test/rpc-host-ensure.test.ts
         working-directory: packages/coding-agent
 
       - name: Run RPC host lifecycle tests
-        run: npx vitest run --retry=2 test/rpc-host-lifecycle.test.ts
+        run: bunx vitest run test/rpc-host-lifecycle.test.ts
         working-directory: packages/coding-agent
 
       - name: Run RPC socket transport tests
-        run: npx vitest run --retry=2 test/rpc-socket-transport.test.ts
+        run: bunx vitest run test/rpc-socket-transport.test.ts
         working-directory: packages/coding-agent
 
       - name: Run app-server daemon tests
-        run: npx vitest run --retry=2 test/suite/app-server-daemon.test.ts
+        run: bunx vitest run test/suite/app-server-daemon.test.ts
         working-directory: packages/coding-agent
 
   test-workspaces:
@@ -170,7 +169,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
 
       - name: Install system dependencies
@@ -215,7 +214,14 @@ jobs:
   # so the required-status contract is unchanged while the work runs in parallel.
   check-and-test:
     name: Check and test
-    needs: [check, test-coding-agent, hooks-trust-storage-windows, rpc-windows, test-workspaces]
+    needs:
+      [
+        check,
+        test-coding-agent,
+        hooks-trust-storage-windows,
+        rpc-windows,
+        test-workspaces,
+      ]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -260,7 +266,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
@@ -293,7 +299,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies

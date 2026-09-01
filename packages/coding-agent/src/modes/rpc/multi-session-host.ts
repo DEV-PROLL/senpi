@@ -13,7 +13,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import type { RpcConnectionSink } from "./connection-handler.ts";
 import { parseClientCapabilities } from "./custom-capability.ts";
 import { parseIdleExitMs } from "./host-lifecycle.ts";
-import { armHostWatchdog, readHostWatchdogConfig } from "./host-watchdog.ts";
+import { armHostWatchdog, readHostWatchdogConfigFromBrandEnv } from "./host-watchdog.ts";
 import { attachJsonlLineReader, MAX_RPC_LINE_CHARACTERS } from "./jsonl.ts";
 import { rpcCommandShapeError } from "./rpc-input-validation.ts";
 import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
@@ -22,7 +22,7 @@ import { SessionEventWriter } from "./session-event-writer.ts";
 import { RpcSessionRegistry } from "./session-registry.ts";
 import {
 	authenticateSocket,
-	readSocketSecret,
+	ensureSocketSecret,
 	resolveSocketTransportAddress,
 	SOCKET_SECRET_FILE_ENV,
 	socketSecretPath,
@@ -207,7 +207,7 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	let shuttingDown = false;
 	const secret =
 		process.platform === "win32"
-			? await readSocketSecret(process.env[SOCKET_SECRET_FILE_ENV] ?? socketSecretPath(socketPath))
+			? await ensureSocketSecret(process.env[SOCKET_SECRET_FILE_ENV] ?? socketSecretPath(socketPath))
 			: undefined;
 	const server = createServer((socket) => {
 		const accept = (): void => {
@@ -268,22 +268,19 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 		// server.close callback fire: connected pipe instances can remain in the
 		// kernel after the JavaScript handles are destroyed. Keep the normal drain
 		// path, but never let that platform-specific close stall orphan the host.
-		const hardExit =
-			process.platform === "win32"
-				? setTimeout(() => process.exit(exitCode), WINDOWS_SHUTDOWN_HARD_EXIT_MS)
-				: undefined;
 		try {
 			for (const connection of connections.values()) {
 				connection.detach();
 				connection.close();
 			}
-			await closeServer(server);
+			await (process.platform === "win32"
+				? Promise.race([closeServer(server), delay(WINDOWS_SHUTDOWN_HARD_EXIT_MS)])
+				: closeServer(server));
 			await router.dispose();
 			await writer.flush();
 			await removeSocketPath(socketPath);
 			if (watchdogCleanup) await watchdogCleanup;
 		} finally {
-			if (hardExit) clearTimeout(hardExit);
 			// Explicitly terminate after every shutdown trigger. Windows named-pipe
 			// handles are not fully controllable from JS, and an unresolved cleanup
 			// must not leave this daemon or its public endpoint alive.
@@ -293,7 +290,7 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	registerShutdownSignals(shutdown);
 	// Arm before listen: a supervisor death during the listen transition must
 	// still close the child and clean its private endpoint.
-	armHostWatchdog(readHostWatchdogConfig(process.env), (reason, cleanup) => {
+	armHostWatchdog(readHostWatchdogConfigFromBrandEnv(), (reason, cleanup) => {
 		process.stderr.write(`senpi rpc host: ${reason}; shutting down\n`);
 		// Enter shutdown before killing session-owned child processes. The Windows
 		// tree killer is synchronous, while the shutdown fallback must be armed
@@ -307,6 +304,10 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	// Opt-in only: set by the lifecycle supervisor so this host can never outlive
 	// it, including when the supervisor is SIGKILLed and runs no handler at all.
 	return new Promise(() => {});
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseError(error: string): RpcResponse {

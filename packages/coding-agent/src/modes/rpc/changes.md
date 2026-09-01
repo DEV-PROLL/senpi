@@ -17,7 +17,7 @@
 
 ### Cleanup ownership
 
-- The supervisor omits the logical Windows socket from watchdog cleanup because it is only an endpoint name, never a filesystem object owned by this process. Windows named pipes use Node's restrictive `readableAll: false` and `writableAll: false` creation options; no post-bind ACL mutation is attempted because it cannot secure later libuv pipe instances. `ensureHost()` removes abandoned POSIX internal scratch directories only after a recorded owner start-time check proves the owner is stale.
+- The supervisor omits the logical Windows socket from watchdog cleanup because it is only an endpoint name, never a filesystem object owned by this process. The Windows boundary is the secret-derived pipe name plus the authenticated handshake; the profile directory's native ACL protects the secret file. Node's `readableAll`/`writableAll` options are not treated as a Windows DACL, and POSIX mode handling remains separate. `ensureHost()` removes abandoned POSIX internal scratch directories only after a recorded owner start-time check proves the owner is stale.
 - A supervised Windows socket host keeps its normal close, runtime-dispose, and metadata-cleanup sequence, but applies a short hard-exit fallback. Win32 named-pipe instances can remain live after JavaScript sockets are destroyed and leave `server.close()` unresolved; the bounded fallback prevents a watchdog-triggered orphan from retaining the public endpoint indefinitely. POSIX watchdog cleanup remains awaited before the callback so filesystem-state assertions and ownership cleanup stay deterministic.
 - The lifecycle supervisor uses the same bounded finalizer: after its child-stop, internal-directory, pidfile, and settings cleanup, it explicitly exits for every shutdown trigger, with a Win32 hard-exit fallback if any named-pipe handle prevents that sequence from completing. On Win32 it also polls the child process's recorded creation-time identity, so a child idle exit cannot be lost when the ChildProcess exit event is not delivered.
 - The inherited supervisor pipe is the primary watchdog signal on Win32: its owned read stream uses automatic close and both `end` and `close` trigger teardown, while the slower identity fallback requires three consecutive missing probes so a timed-out PowerShell query cannot delay or spuriously trigger lifecycle cleanup.
@@ -136,7 +136,6 @@
 
 - LOW: the tail of `rebindSession()` and the `installSessionSubscriptions` declaration.
 
-
 ## 2026-08-30 - Classify RPC transport disconnects and recover shared interactive hosts
 
 ### What changed
@@ -175,7 +174,6 @@
 
 - LOW: the `RpcClientEvent` union members and the `collectEvents()` filter.
 
-
 ## 2026-08-30 - Require agentDir for the RPC project-trust gate
 
 ## 2026-08-30 - Carry the replacement identity as durableSessionId
@@ -195,7 +193,6 @@
 ### Expected merge conflict zones
 
 - LOW: the `session_replaced` payload in `rebindSession()` and its interface in `rpc-types.ts`.
-
 
 ## 2026-08-30 - Reschedule the retained-queue drain when an enqueue races its settling
 
@@ -807,7 +804,6 @@ Expected merge conflict zones: MEDIUM in `main.ts` and `host-lifecycle.ts`; LOW 
 - MEDIUM: `connection-handler.ts` command dispatch and event subscriptions.
 - LOW: app-server account handlers and protocol facade additions.
 
-
 ## Removed legacy `--neo` daemon support while preserving RPC contracts (2026-07-26)
 
 ### What changed
@@ -988,6 +984,7 @@ Capability-gated extension RPC listeners now attach before `bindExtensions()` di
 `session_start`. This preserves initial atomic extension snapshots such as native task state while
 keeping rebind cleanup generation-safe; subscribing after binding deterministically dropped those
 events.
+
 ## Public RPC client exposes extension events (2026-08-11)
 
 `RpcClientEvent`, `RpcEventListener`, the modes barrel, and the package root now include

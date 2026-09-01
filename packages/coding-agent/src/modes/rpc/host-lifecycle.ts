@@ -87,7 +87,6 @@ export interface HostLifecyclePolicy {
 
 const CHILD_STOP_TIMEOUT_MS = 5_000;
 /** Win32 named-pipe shutdown can leave supervisor handles live after close starts. */
-const WINDOWS_SUPERVISOR_SHUTDOWN_HARD_EXIT_MS = 2_000;
 
 /**
  * Child stdio slot carrying the supervisor-lifetime pipe. The supervisor holds
@@ -491,10 +490,6 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		shuttingDown = true;
 		clearInterval(ticker);
 		if (childExitWatchTimer) clearInterval(childExitWatchTimer);
-		const hardExit =
-			process.platform === "win32"
-				? setTimeout(() => process.exit(exitCode), WINDOWS_SUPERVISOR_SHUTDOWN_HARD_EXIT_MS)
-				: undefined;
 		try {
 			writeStderrLine(`senpi rpc host supervisor: ${reason} shutdown`);
 			for (const client of clientSockets) client.destroy();
@@ -513,7 +508,6 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 			await rm(paths.pidFile, { force: true });
 			await rm(paths.settingsFile, { force: true });
 		} finally {
-			if (hardExit) clearTimeout(hardExit);
 			// Explicitly terminate after every supervisor shutdown trigger. Windows
 			// named-pipe handles can outlive their JavaScript wrappers, so cleanup
 			// failure must never leave the supervisor resident or the host orphaned.
@@ -562,7 +556,11 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	}
 
 	if (process.platform === "win32" && child.pid !== undefined) {
-		const childStartTime = await readProcessStartTime(child.pid, process.platform, 1_000);
+		const childStartTime = await readProcessStartTime(child.pid, process.platform, 10_000);
+		if (childStartTime === undefined) {
+			await shutdown("rpc host child identity probe failed", 1);
+			return;
+		}
 		let missingIdentityChecks = 0;
 		let checkingChildIdentity = false;
 		const checkChildIdentity = (): void => {
@@ -572,8 +570,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 				.then((currentStartTime) => {
 					if (currentStartTime === undefined) missingIdentityChecks++;
 					else missingIdentityChecks = 0;
-					const identityChanged =
-						childStartTime !== undefined && currentStartTime !== undefined && currentStartTime !== childStartTime;
+					const identityChanged = currentStartTime !== undefined && currentStartTime !== childStartTime;
 					if (identityChanged || missingIdentityChecks >= 2) {
 						void shutdown("rpc host child exit observed by identity watchdog", 0);
 					}

@@ -4,7 +4,7 @@
 
 ### What changed
 
-- `packages/coding-agent/src/modes/app-server/daemon/process.ts` reads process start time with PowerShell `Get-Process` on Windows and preserves `ps -o lstart=` on POSIX.
+- `packages/coding-agent/src/modes/app-server/daemon/process.ts` reads process start time from the live `Win32_Process` CIM table through PowerShell on Windows and preserves `ps -o lstart=` on POSIX.
 - Process identity is validated with a platform-specific start-time reader before signaling managed children; exit waits repeat that identity check while waiting for termination. On Windows the bounded probe queries the live `Win32_Process` CIM table, so a terminated process retained by an open handle cannot appear live indefinitely.
 
 ### Why

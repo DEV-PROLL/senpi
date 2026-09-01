@@ -318,7 +318,7 @@ describe("host watchdog configuration", () => {
 		expect(fired).toBe(false);
 	});
 
-	it("removes supervisor public state on inherited-pipe EOF", async () => {
+	it.skipIf(process.platform === "win32")("removes supervisor public state on inherited-pipe EOF", async () => {
 		if (process.platform === "win32") {
 			// This fixture models POSIX FIFO EOF and synchronous filesystem cleanup;
 			// Windows named-pipe handle close and fs.rm completion are asynchronous,
@@ -347,7 +347,7 @@ describe("host watchdog configuration", () => {
 		expect(existsSync(settings)).toBe(false);
 	});
 
-	it("fires on inherited-pipe EOF and removes the supervisor's private directory", async () => {
+	it.skipIf(process.platform === "win32")("fires on inherited-pipe EOF and removes the supervisor's private directory", async () => {
 		if (process.platform === "win32") {
 			// This fixture models POSIX FIFO EOF and synchronous filesystem cleanup;
 			// Windows named-pipe handle close and fs.rm completion are asynchronous,

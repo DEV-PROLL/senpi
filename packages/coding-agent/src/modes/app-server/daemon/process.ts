@@ -22,12 +22,56 @@ export function parseDaemonPidFile(text: string): DaemonPidFile | undefined {
 	return { pid: parsed.pid, processStartTime: parsed.processStartTime };
 }
 
+export type ProcessIdentityResult =
+	| { readonly kind: "present"; readonly identity: string }
+	| { readonly kind: "absent" }
+	| { readonly kind: "error"; readonly error: unknown };
+
 export async function processMatchesPidFile(
 	pidFile: DaemonPidFile,
 	readStartTime: (pid: number) => Promise<string | undefined> = readProcessStartTime,
 ): Promise<boolean> {
 	const current = await readStartTime(pidFile.pid);
 	return current === pidFile.processStartTime;
+}
+
+export async function readProcessIdentity(
+	pid: number,
+	platform: NodeJS.Platform = process.platform,
+	timeoutMs?: number,
+): Promise<ProcessIdentityResult> {
+	const command =
+		platform === "win32"
+			? {
+					executable: "powershell.exe",
+					args: [
+						"-NoProfile",
+						"-NonInteractive",
+						"-Command",
+						`$process = Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}" -ErrorAction Stop; if ($null -eq $process) { '__SENPI_ABSENT__' } else { $process.CreationDate.ToFileTimeUtc().ToString("D", [Globalization.CultureInfo]::InvariantCulture) }`,
+					],
+				}
+			: { executable: "ps", args: ["-o", "lstart=", "-p", String(pid)] };
+	return new Promise((resolve) => {
+		const effectiveTimeoutMs = timeoutMs ?? (platform === "win32" ? 1_000 : undefined);
+		execFile(
+			command.executable,
+			command.args,
+			{ windowsHide: true, ...(effectiveTimeoutMs === undefined ? {} : { timeout: effectiveTimeoutMs }) },
+			(error, stdout) => {
+				if (error) {
+					const code = "code" in error ? error.code : undefined;
+					resolve(platform !== "win32" && code === 1 ? { kind: "absent" } : { kind: "error", error });
+					return;
+				}
+				const output = stdout.trim();
+				if (output === "__SENPI_ABSENT__") return resolve({ kind: "absent" });
+				if (!output || (platform === "win32" && !/^\\d+$/.test(output)))
+					return resolve({ kind: "error", error: new Error("invalid process identity output") });
+				resolve({ kind: "present", identity: output });
+			},
+		).once("error", (error) => resolve({ kind: "error", error }));
+	});
 }
 
 export async function stopValidatedPid(pidFile: DaemonPidFile, signal: NodeJS.Signals): Promise<void> {
@@ -55,37 +99,9 @@ export async function readProcessStartTime(
 	platform: NodeJS.Platform = process.platform,
 	timeoutMs?: number,
 ): Promise<string | undefined> {
-	const command =
-		platform === "win32"
-			? {
-					executable: "powershell.exe",
-					args: [
-						"-NoProfile",
-						"-NonInteractive",
-						"-Command",
-						// The Windows process object can remain OpenProcess-able after exit while a
-						// handle is held. Query the live CIM process table and emit one stable scalar.
-						`$process = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; $process.CreationDate.ToFileTimeUtc().ToString(\"D\", [Globalization.CultureInfo]::InvariantCulture)`,
-					],
-				}
-			: {
-					executable: "ps",
-					args: ["-o", "lstart=", "-p", String(pid)],
-				};
-	return new Promise((resolveStartTime, reject) => {
-		const effectiveTimeoutMs = timeoutMs ?? (platform === "win32" ? 1_000 : undefined);
-		execFile(
-			command.executable,
-			command.args,
-			{ windowsHide: true, ...(effectiveTimeoutMs === undefined ? {} : { timeout: effectiveTimeoutMs }) },
-			(error, stdout) => {
-				if (error) {
-					resolveStartTime(undefined);
-					return;
-				}
-				resolveStartTime(parseProcessStartTimeOutput(stdout, platform));
-			},
-		).once("error", reject);
+	return readProcessIdentity(pid, platform, timeoutMs).then((result) => {
+		if (result.kind === "error") throw result.error;
+		return result.kind === "present" ? result.identity : undefined;
 	});
 }
 
@@ -108,12 +124,6 @@ export async function waitForStartTime(pid: number, timeoutMs: number): Promise<
 		await delay(20);
 	}
 	throw new Error(`spawned daemon pid ${pid} had no process start time`);
-}
-
-function parseProcessStartTimeOutput(output: string, platform: NodeJS.Platform): string | undefined {
-	const trimmed = output.trim();
-	if (!trimmed || (platform === "win32" && !/^\d+$/.test(trimmed))) return undefined;
-	return trimmed;
 }
 
 function delay(ms: number): Promise<void> {

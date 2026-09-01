@@ -17,7 +17,7 @@
 import { createReadStream, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { envValue } from "../../core/brand.ts";
-import { readProcessStartTime } from "../app-server/daemon/process.ts";
+import { readProcessIdentity } from "../app-server/daemon/process.ts";
 
 /** Inherited fd whose EOF means "the supervisor died"; set by the supervisor only. */
 export const HOST_WATCH_FD_ENV = "SENPI_RPC_HOST_WATCH_FD";
@@ -176,11 +176,12 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 		}
 		if (checking) return;
 		checking = true;
-		void readProcessStartTime(supervisorPid, process.platform, HOST_WATCH_PPID_PROBE_TIMEOUT_MS)
-			.then((startTime) => {
-				if (startTime === undefined) missingIdentityChecks++;
+		void readProcessIdentity(supervisorPid, process.platform, HOST_WATCH_PPID_PROBE_TIMEOUT_MS)
+			.then((result) => {
+				if (result.kind === "error") return;
+				if (result.kind === "absent") missingIdentityChecks++;
 				else missingIdentityChecks = 0;
-				if (process.ppid === supervisorPid && startTime !== undefined) return;
+				if (process.ppid === supervisorPid && result.kind === "present") return;
 				if (process.ppid === supervisorPid && missingIdentityChecks < 3) return;
 				fire(`supervisor pid ${supervisorPid} is gone (ppid=${process.ppid})`);
 			})
@@ -197,7 +198,7 @@ function processAlive(pid: number): boolean {
 		process.kill(pid, 0);
 		return true;
 	} catch (cause) {
-		return cause instanceof Error && "code" in cause && cause.code === "EPERM";
+		return cause instanceof Error && "code" in cause && cause.code !== "ESRCH";
 	}
 }
 
