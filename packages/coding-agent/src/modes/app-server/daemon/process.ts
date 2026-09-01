@@ -48,7 +48,7 @@ export async function readProcessIdentity(
 						"-NoProfile",
 						"-NonInteractive",
 						"-Command",
-						`$process = Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; $process.CreationDate.ToFileTimeUtc().ToString("D", [Globalization.CultureInfo]::InvariantCulture)`,
+						`$process = Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}" -ErrorAction Stop; if ($null -eq $process) { Write-Output '__SENPI_ABSENT__'; exit 0 }; $process.CreationDate.ToFileTimeUtc().ToString("D", [Globalization.CultureInfo]::InvariantCulture)`,
 					],
 				}
 			: { executable: "ps", args: ["-o", "lstart=", "-p", String(pid)] };
