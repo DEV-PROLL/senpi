@@ -21,7 +21,6 @@ import { type RpcBindingFactory, SessionCommandRouter } from "./session-command-
 import { SessionEventWriter } from "./session-event-writer.ts";
 import { RpcSessionRegistry } from "./session-registry.ts";
 import { resolveSocketTransportAddress } from "./socket-transport.ts";
-import { listenSecureWindowsPipe } from "./windows-named-pipe.ts";
 
 export interface MultiSessionHostOptions {
 	agentDir: string;
@@ -350,11 +349,7 @@ function probeSocket(socketPath: string): Promise<boolean> {
 	});
 }
 
-async function listen(server: Server, socketPath: string): Promise<void> {
-	if (process.platform === "win32") {
-		await listenSecureWindowsPipe(server, resolveSocketTransportAddress(socketPath, process.platform));
-		return;
-	}
+function listen(server: Server, socketPath: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(resolveSocketTransportAddress(socketPath, process.platform), async () => {
