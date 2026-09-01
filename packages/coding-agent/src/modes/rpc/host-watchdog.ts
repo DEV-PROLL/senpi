@@ -26,7 +26,7 @@ export const HOST_SCRATCH_DIR_ENV = "SENPI_RPC_HOST_SCRATCH_DIR";
 /** Fallback binding when no inherited fd is available: poll this pid. */
 export const HOST_WATCH_PPID_ENV = "SENPI_RPC_HOST_WATCH_PPID";
 /** Poll cadence for the ppid fallback. */
-export const HOST_WATCH_PPID_INTERVAL_MS = 250;
+export const HOST_WATCH_PPID_INTERVAL_MS = 2_000;
 export const HOST_CLEANUP_PATHS_ENV = "SENPI_RPC_HOST_CLEANUP_PATHS";
 
 export interface HostWatchdogConfig {
@@ -136,20 +136,18 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
  */
 function watchPpid(supervisorPid: number, fire: (reason: string) => void): () => void {
 	let checking = false;
-	const checkSupervisor = async (): Promise<void> => {
+	const timer = setInterval(() => {
 		if (checking) return;
 		checking = true;
-		try {
-			const startTime = await readProcessStartTime(supervisorPid);
-			if (process.ppid !== supervisorPid || startTime === undefined) {
+		void readProcessStartTime(supervisorPid)
+			.then((startTime) => {
+				if (process.ppid === supervisorPid && startTime !== undefined) return;
 				fire(`supervisor pid ${supervisorPid} is gone (ppid=${process.ppid})`);
-			}
-		} finally {
-			checking = false;
-		}
-	};
-	const timer = setInterval(() => void checkSupervisor(), HOST_WATCH_PPID_INTERVAL_MS);
-	void checkSupervisor();
+			})
+			.finally(() => {
+				checking = false;
+			});
+	}, HOST_WATCH_PPID_INTERVAL_MS);
 	timer.unref?.();
 	return () => clearInterval(timer);
 }
@@ -168,10 +166,7 @@ async function cleanupWatchdogPaths(config: HostWatchdogConfig): Promise<void> {
 	await Promise.all(
 		paths.map(async (path) => {
 			try {
-				// Windows can briefly retain handles to daemon metadata after the
-				// supervisor is force-terminated. Let fs.rm retry those transient
-				// EPERM/EBUSY failures before the watchdog lets the host exit.
-				await rm(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+				await rm(path, { recursive: true, force: true });
 			} catch {
 				/* best effort: the host is exiting either way. */
 			}
