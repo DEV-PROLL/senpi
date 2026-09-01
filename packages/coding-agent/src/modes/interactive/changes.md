@@ -4,12 +4,31 @@
 
 ### What changed
 
-- Interactive quit now stops the TUI without restoring stderr, keeps the guard installed while session shutdown handlers drain, and restores stderr after cleanup completes, including when disposal fails.
-- Added regression coverage for stderr capture during disposal and restoration after both successful and failed cleanup.
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: the interactive quit path in
+  `shutdown()` now calls `stop({ restoreStderr: false })` so the TUI still stops first (no
+  final-frame repaint) while the stderr guard stays installed across `runtimeHost.dispose()`, and
+  `restoreInteractiveStderr()` runs in a `finally` after disposal so a disposal failure can neither
+  leave the guard swallowed nor skip the restore.
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: `stop()` now accepts
+  `FullscreenExitOutput | { restoreStderr?: boolean }`; the string form and every existing caller
+  keep the previous restore-always behavior.
+- `packages/coding-agent/test/suite/regressions/quit-stderr-guard-drain.test.ts`: regression
+  coverage proving stderr stays captured while session shutdown handlers drain and is restored
+  after both successful and failed disposal.
 
 ### Why
 
-- Session shutdown handlers can emit diagnostics while the interactive runtime is being disposed. Restoring stderr before disposal exposed those warnings beside the final resume hint and corrupted the user's terminal output.
+- Session shutdown handlers emit diagnostics while the interactive runtime is being disposed
+  (observed in production: omo's memory shutdown drain printed `memory shutdown drain hit its
+  budget` raw beside the resume hint at quit). Restoring stderr before disposal exposed those
+  warnings on the user's terminal; the signal-triggered path already disposed first and never had
+  the leak.
+
+### Why an extension could not handle it
+
+- The ordering lives in the interactive mode's own `shutdown()`/`stop()` lifecycle, which no
+  extension hook reaches: extensions are the payload being disposed inside `runtimeHost.dispose()`,
+  so only the host can hold the stderr guard across that window.
 
 ### Expected merge conflict zones
 
