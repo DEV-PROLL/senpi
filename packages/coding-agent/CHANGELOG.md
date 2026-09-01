@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- Interactive quit now keeps stderr capture installed while session shutdown handlers drain during runtime disposal, so shutdown-time diagnostics (for example memory drain warnings) are recorded in the debug log instead of printing raw beside the resume hint. The TUI still stops first to avoid final-frame repaints, and stderr is restored after disposal even when disposal fails.
+
 - Multi-session RPC hosts launched with `SENPI_RPC_CLIENT_CAPABILITIES` (for example `extension_events`) now apply those capabilities to connection-owned session bindings when the client never sends `set_client_info`. Previously the launch capabilities were advertised through `get_protocol_info` but dropped at binding creation, so undeclared clients received no `extension_event` frames (breaking downstream task/DAG/monitor liveness in omo-desktop-app). An explicit `set_client_info` declaration, including an empty capability list, still overrides the launch default.
 
 - RPC `abort` acknowledgements are now sent immediately after the abort signal is dispatched instead of waiting for full session quiescence, preventing desktop stop requests from hitting their 10-second bounded-ack timeout under host load.
