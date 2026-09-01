@@ -652,24 +652,47 @@ async function waitForHostExit(
 	timeoutMs = 12_000,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
+	let consecutiveProbeTimeouts = 0;
+	let dumpUsed = false;
+	let dumpSaysGone = false;
 	while (Date.now() <= deadline) {
-		// On Windows, process.kill(pid, 0) / OpenProcess can still succeed for a
-		// terminated process while a process handle is retained. Use the recorded
-		// creation-time identity through the production CIM helper, not raw PID liveness.
-		const currentIdentity = await readProcessStartTime(entry.pidFile.pid);
+		let currentIdentity: string | undefined;
+		let probeTimedOut = false;
+		if (process.platform === "win32") {
+			// Serialize the Windows CIM query: one bounded PowerShell probe at a time
+			// avoids the 50ms polling storm that caused every probe to time out.
+			const probe = probeWindowsProcessIdentity(entry.pidFile.pid);
+			currentIdentity = probe.identity;
+			probeTimedOut = probe.timedOut;
+			if (probeTimedOut) consecutiveProbeTimeouts++;
+			else consecutiveProbeTimeouts = 0;
+			if (probeTimedOut && consecutiveProbeTimeouts >= 3 && !dumpUsed) {
+				dumpUsed = true;
+				const dumpVerdict = dumpWindowsProcessDiagnostics(
+					entry.pidFile.pid,
+					dirname(dirname(dirname(entry.pidFilePath))),
+				);
+				dumpSaysGone = dumpVerdict === false;
+				if (dumpSaysGone) currentIdentity = undefined;
+			}
+		} else {
+			currentIdentity = await readProcessStartTime(entry.pidFile.pid);
+		}
 		if (currentIdentity === entry.pidFile.processStartTime) {
-			await delay(50);
+			await delay(process.platform === "win32" ? 1_000 : 50);
 			continue;
 		}
-		if (!existsSync(entry.pidFilePath)) return;
-		// Force-kill teardown can leave a stale pidfile after the recorded process is
-		// already gone (the CIM dump showed TARGET=empty and the endpoint was ENOENT).
-		// A nonmatching identity is the test's live-CIM stale-state proof, not a raw
-		// PID-liveness guess.
-		// File deletion and process death are not atomic; remove that stale state here
-		// so the next lifecycle scenario starts with the same semantics as ensureHost().
-		rmSync(entry.pidFilePath, { force: true });
-		return;
+		if (!probeTimedOut || dumpSaysGone) {
+			if (!existsSync(entry.pidFilePath)) return;
+			// Force-kill teardown can leave a stale pidfile after the recorded process
+			// is already gone (the CIM dump showed TARGET=empty and the endpoint was
+			// ENOENT). A nonmatching identity is the test's live-CIM stale-state proof,
+			// not a raw PID-liveness guess. File deletion and process death are not
+			// atomic; remove that stale state before the next lifecycle scenario.
+			rmSync(entry.pidFilePath, { force: true });
+			return;
+		}
+		await delay(1_000);
 	}
 	if (process.platform === "win32") {
 		const stderrPath = join(entry.pidFilePath, "..", "stderr.log");
@@ -680,7 +703,25 @@ async function waitForHostExit(
 	throw new Error(`RPC socket host pid ${entry.pidFile.pid} did not exit within ${timeoutMs}ms`);
 }
 
-function dumpWindowsProcessDiagnostics(pid: number, qaDir: string): void {
+function probeWindowsProcessIdentity(pid: number): { identity?: string; timedOut: boolean } {
+	const command = `$process = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; $process.CreationDate.ToFileTimeUtc().ToString(\"D\", [Globalization.CultureInfo]::InvariantCulture)`;
+	try {
+		const output = execFileSync(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-Command", command],
+			{ encoding: "utf8", windowsHide: true, timeout: 10_000 },
+		);
+		return { identity: output.trim() || undefined, timedOut: false };
+	} catch (cause) {
+		const error = cause as { code?: unknown; killed?: unknown; signal?: unknown };
+		return {
+			identity: undefined,
+			timedOut: error.code === "ETIMEDOUT" || error.killed === true || error.signal === "SIGTERM",
+		};
+	}
+}
+
+function dumpWindowsProcessDiagnostics(pid: number, qaDir: string): boolean | undefined {
 	const escapedQaDir = qaDir.replace(/'/g, "''");
 	const command = `$target = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" | Select-Object ProcessId,ParentProcessId,Name,CreationDate,CommandLine; $related = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -match [regex]::Escape('${escapedQaDir}') -or $_.CommandLine -match 'senpi') } | Select-Object ProcessId,ParentProcessId,Name,CommandLine; Write-Output ('TARGET=' + ($target | ConvertTo-Json -Compress)); Write-Output ('RELATED=' + ($related | ConvertTo-Json -Compress))`;
 	try {
@@ -689,11 +730,16 @@ function dumpWindowsProcessDiagnostics(pid: number, qaDir: string): void {
 			["-NoProfile", "-NonInteractive", "-Command", command],
 			{ encoding: "utf8", windowsHide: true },
 		);
+		let targetPresent: boolean | undefined;
 		for (const line of output.trim().split(/\r?\n/).filter(Boolean)) {
 			console.error(`RPC_WIN32_DIAGNOSTIC ${line}`);
+			if (line.startsWith("TARGET=")) targetPresent = line !== "TARGET=" && line !== "TARGET=null";
 		}
+		return targetPresent;
 	} catch (cause) {
-		console.error(`RPC_WIN32_DIAGNOSTIC process-dump-failed=${JSON.stringify(errorMessage(cause))}`);
+		const message = cause instanceof Error ? cause.message : String(cause);
+		console.error(`RPC_WIN32_DIAGNOSTIC process-dump-failed=${JSON.stringify(message)}`);
+		return undefined;
 	}
 }
 
