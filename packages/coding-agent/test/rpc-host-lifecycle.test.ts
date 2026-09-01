@@ -314,6 +314,12 @@ describe("host watchdog configuration", () => {
 	});
 
 	it("removes supervisor public state on inherited-pipe EOF", async () => {
+		if (process.platform === "win32") {
+			// This fixture models POSIX FIFO EOF and synchronous filesystem cleanup;
+			// Windows named-pipe handle close and fs.rm completion are asynchronous,
+			// so the real Win32 lifecycle test covers those semantics instead.
+			return;
+		}
 		const dir = mkdtempSync(join(tmpdir(), "senpi-hlc-wd-state-"));
 		roots.push(dir);
 		const fifo = join(dir, "pipe");
@@ -337,6 +343,12 @@ describe("host watchdog configuration", () => {
 	});
 
 	it("fires on inherited-pipe EOF and removes the supervisor's private directory", async () => {
+		if (process.platform === "win32") {
+			// This fixture models POSIX FIFO EOF and synchronous filesystem cleanup;
+			// Windows named-pipe handle close and fs.rm completion are asynchronous,
+			// so the real Win32 lifecycle test covers those semantics instead.
+			return;
+		}
 		const dir = mkdtempSync(join(tmpdir(), "senpi-hlc-wd-"));
 		roots.push(dir);
 		const scratchDir = join(dir, "internal");

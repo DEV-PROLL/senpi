@@ -52,6 +52,8 @@ export const DEFAULT_SESSION_IDLE_EVICTION_MS = 30 * 60_000;
 export const DEFAULT_MAX_SESSIONS = 8;
 /** Default empty-host exit: 15 minutes with zero open sessions, matching the supervisor's idle window. */
 export const DEFAULT_HOST_EMPTY_EXIT_MS = 15 * 60_000;
+/** Win32 named-pipe close can leave libuv's server callback pending after handles are destroyed. */
+const WINDOWS_SHUTDOWN_HARD_EXIT_MS = 2_000;
 
 /** Explicit occupancy-policy overrides for createHostCore; tests inject clocks and hooks here. */
 export interface HostIdleOverrides {
@@ -266,6 +268,14 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	const shutdown = async (exitCode = 0): Promise<never> => {
 		if (shuttingDown) process.exit(exitCode);
 		shuttingDown = true;
+		// On Windows, destroying named-pipe sockets does not always make libuv's
+		// server.close callback fire: connected pipe instances can remain in the
+		// kernel after the JavaScript handles are destroyed. Keep the normal drain
+		// path, but never let that platform-specific close stall orphan the host.
+		const hardExit =
+			process.platform === "win32"
+				? setTimeout(() => process.exit(exitCode), WINDOWS_SHUTDOWN_HARD_EXIT_MS)
+				: undefined;
 		writeWin32Diagnostic(`socket host shutdown entered exitCode=${exitCode} connections=${connections.size}`);
 		for (const connection of connections.values()) {
 			connection.detach();
@@ -278,6 +288,7 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 		await writer.flush();
 		await removeSocketPath(socketPath);
 		writeWin32Diagnostic(`socket host metadata removed activeResources=${JSON.stringify(summarizeActiveResources())}`);
+		if (hardExit) clearTimeout(hardExit);
 		process.exit(exitCode);
 	};
 	registerShutdownSignals(shutdown);
@@ -285,8 +296,11 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	// still close the child and clean its private endpoint.
 	armHostWatchdog(readHostWatchdogConfig(process.env), (reason) => {
 		process.stderr.write(`senpi rpc host: ${reason}; shutting down\n`);
-		killTrackedDetachedChildren();
+		// Enter shutdown before killing session-owned child processes. The Windows
+		// tree killer is synchronous, while the shutdown fallback must be armed
+		// before any such cleanup can delay the event loop.
 		void shutdown(0);
+		setImmediate(killTrackedDetachedChildren);
 	});
 	await listen(server, socketPath, secret);
 	process.stderr.write(`senpi rpc listening on ${formatSocketAddress(socketPath)}\n`);

@@ -169,15 +169,6 @@ function writeWin32Diagnostic(text: string): void {
 	} catch {}
 }
 
-function processAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (cause) {
-		return cause instanceof Error && "code" in cause && cause.code === "EPERM";
-	}
-}
-
 async function cleanupWatchdogPaths(config: HostWatchdogConfig): Promise<void> {
 	const paths = [...(config.cleanupPaths ?? []), ...(config.scratchDir ? [config.scratchDir] : [])];
 	writeWin32Diagnostic(`watchdog cleanup started paths=${JSON.stringify(paths)}`);
