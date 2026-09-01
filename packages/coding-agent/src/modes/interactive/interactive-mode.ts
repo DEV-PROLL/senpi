@@ -5694,8 +5694,12 @@ export class InteractiveMode {
 		this.themeController.disableAutoSync();
 		await this.ui.terminal.drainInput(1000);
 
-		this.stop();
-		await this.runtimeHost.dispose();
+		this.stop({ restoreStderr: false });
+		try {
+			await this.runtimeHost.dispose();
+		} finally {
+			restoreInteractiveStderr();
+		}
 
 		const resumeCommand = formatResumeCommand(this.sessionManager);
 		if (resumeCommand) {
@@ -8757,7 +8761,9 @@ export class InteractiveMode {
 		}
 	}
 
-	stop(fullscreenExitOutput?: FullscreenExitOutput): void {
+	stop(options?: FullscreenExitOutput | { restoreStderr?: boolean }): void {
+		const fullscreenExitOutput = typeof options === "string" ? options : undefined;
+		const restoreStderr = typeof options === "string" || options?.restoreStderr !== false;
 		InteractiveMode.restoreCompactionEscapeOverride(this);
 		this.streamingReveal.stop();
 		this.toolResultReveal.stop();
@@ -8782,9 +8788,9 @@ export class InteractiveMode {
 				this.stopInteractiveTui(fullscreenExitOutput ?? this.settingsManager.getFullscreenExitOutput());
 			} finally {
 				this.isInitialized = false;
-				restoreInteractiveStderr();
+				if (restoreStderr) restoreInteractiveStderr();
 			}
-		} else {
+		} else if (restoreStderr) {
 			restoreInteractiveStderr();
 		}
 		this.unregisterSignalHandlers();
