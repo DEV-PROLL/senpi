@@ -14,7 +14,7 @@
  * Both variables are unset for every other host launch, so nothing changes for
  * plain `senpi --mode rpc` runs, hosts started by hand, or embedders.
  */
-import { createReadStream } from "node:fs";
+import { createReadStream, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { envValue } from "../../core/brand.ts";
 import { readProcessStartTime } from "../app-server/daemon/process.ts";
@@ -91,7 +91,7 @@ export function readHostWatchdogConfigFromBrandEnv(): HostWatchdogConfig | undef
  */
 export function armHostWatchdog(
 	config: HostWatchdogConfig | undefined,
-	onSupervisorGone: (reason: string) => void,
+	onSupervisorGone: (reason: string, cleanup?: Promise<void>) => void,
 ): () => void {
 	if (!config) return () => {};
 	writeWin32Diagnostic(
@@ -101,12 +101,11 @@ export function armHostWatchdog(
 		writeWin32Diagnostic(`watchdog fired reason=${reason} fd=${String(config.fd)} ppid=${String(config.ppid)}`);
 		disarm();
 		if (process.platform === "win32") {
-			// Shutdown must not wait for Windows metadata cleanup: a transiently held
-			// pid/settings handle can otherwise keep the host alive indefinitely. The
-			// normal shutdown path removes the endpoint and exits; cleanup remains
-			// best-effort and runs concurrently.
-			void cleanupWatchdogPaths(config);
-			onSupervisorGone(reason);
+			// Arm the host shutdown fallback before attempting metadata cleanup. The
+			// synchronous Win32 removal below handles the state files deterministically,
+			// while the fallback still covers a named-pipe close that never completes.
+			const cleanup = Promise.resolve().then(() => cleanupWatchdogPaths(config));
+			onSupervisorGone(reason, cleanup);
 		} else {
 			void cleanupWatchdogPaths(config).finally(() => onSupervisorGone(reason));
 		}
@@ -204,6 +203,17 @@ function processAlive(pid: number): boolean {
 async function cleanupWatchdogPaths(config: HostWatchdogConfig): Promise<void> {
 	const paths = [...(config.cleanupPaths ?? []), ...(config.scratchDir ? [config.scratchDir] : [])];
 	writeWin32Diagnostic(`watchdog cleanup started paths=${JSON.stringify(paths)}`);
+	if (process.platform === "win32") {
+		for (const path of paths) {
+			try {
+				rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+				writeWin32Diagnostic(`watchdog cleanup completed path=${path}`);
+			} catch {
+				writeWin32Diagnostic(`watchdog cleanup failed path=${path}`);
+			}
+		}
+		return;
+	}
 	await Promise.all(
 		paths.map(async (path) => {
 			try {
