@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- RPC `abort` acknowledgements are now sent immediately after the abort signal is dispatched instead of waiting for full session quiescence, preventing desktop stop requests from hitting their 10-second bounded-ack timeout under host load.
+
 ### New Features
 
 ### Breaking Changes
