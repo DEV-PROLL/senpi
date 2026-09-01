@@ -328,7 +328,7 @@ export class SessionCommandRouter {
 							...this.connectionOptions,
 							capabilities:
 								owner !== undefined
-									? (this.pendingCapabilities.get(owner) ?? [])
+									? (this.pendingCapabilities.get(owner) ?? this.connectionOptions?.capabilities ?? [])
 									: this.connectionOptions?.capabilities,
 							sharedWidth: {
 								getWidth: () => {
