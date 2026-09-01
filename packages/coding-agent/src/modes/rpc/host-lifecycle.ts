@@ -86,6 +86,8 @@ export interface HostLifecyclePolicy {
 }
 
 const CHILD_STOP_TIMEOUT_MS = 5_000;
+/** Win32 named-pipe shutdown can leave supervisor handles live after close starts. */
+const WINDOWS_SUPERVISOR_SHUTDOWN_HARD_EXIT_MS = 2_000;
 
 /**
  * Child stdio slot carrying the supervisor-lifetime pipe. The supervisor holds
@@ -487,29 +489,40 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		if (shuttingDown) process.exit(exitCode);
 		shuttingDown = true;
 		clearInterval(ticker);
-		writeStderrLine(`senpi rpc host supervisor: ${reason} shutdown`);
-		writeWin32Diagnostic(`supervisor shutdown entered reason=${reason} exitCode=${exitCode} clients=${clientSockets.size} observer=${String(observerHealthy)}`);
-		writeWin32Diagnostic("supervisor closing clients");
-		for (const client of clientSockets) client.destroy();
-		await closeServer(server);
-		writeWin32Diagnostic("supervisor public server closed");
-		// Unlink the private directory BEFORE the child stop, which can take seconds:
-		// an external SIGKILL landing during that wait (ensureHost escalates while
-		// replacing a host) would otherwise leave the directory behind. The child
-		// keeps serving through its already-open socket fd until it exits, and its
-		// own watchdog cleanup makes the removal idempotent.
-		if (internal.dir) await rm(internal.dir, { recursive: true, force: true });
-		writeWin32Diagnostic("supervisor internal directory removed");
-		await stopChild(child);
-		writeWin32Diagnostic(`supervisor child stopped exitCode=${child.exitCode} signal=${child.signalCode}`);
-		observer?.destroy();
-		if (publicSocketOwned && process.platform !== "win32") await rm(publicSocket, { force: true });
-		// Mirror ensureHost's cleanupState: the pidfile and settings describe a
-		// live host only; the stderr log stays for diagnostics.
-		await rm(paths.pidFile, { force: true });
-		await rm(paths.settingsFile, { force: true });
-		writeWin32Diagnostic("supervisor metadata removed; exiting");
-		process.exit(exitCode);
+		const hardExit =
+			process.platform === "win32"
+				? setTimeout(() => process.exit(exitCode), WINDOWS_SUPERVISOR_SHUTDOWN_HARD_EXIT_MS)
+				: undefined;
+		try {
+			writeStderrLine(`senpi rpc host supervisor: ${reason} shutdown`);
+			writeWin32Diagnostic(`supervisor shutdown entered reason=${reason} exitCode=${exitCode} clients=${clientSockets.size} observer=${String(observerHealthy)}`);
+			writeWin32Diagnostic("supervisor closing clients");
+			for (const client of clientSockets) client.destroy();
+			await closeServer(server);
+			writeWin32Diagnostic("supervisor public server closed");
+			// Unlink the private directory BEFORE the child stop, which can take seconds:
+			// an external SIGKILL landing during that wait (ensureHost escalates while
+			// replacing a host) would otherwise leave the directory behind. The child
+			// keeps serving through its already-open socket fd until it exits, and its
+			// own watchdog cleanup makes the removal idempotent.
+			if (internal.dir) await rm(internal.dir, { recursive: true, force: true });
+			writeWin32Diagnostic("supervisor internal directory removed");
+			await stopChild(child);
+			writeWin32Diagnostic(`supervisor child stopped exitCode=${child.exitCode} signal=${child.signalCode}`);
+			observer?.destroy();
+			if (publicSocketOwned && process.platform !== "win32") await rm(publicSocket, { force: true });
+			// Mirror ensureHost's cleanupState: the pidfile and settings describe a
+			// live host only; the stderr log stays for diagnostics.
+			await rm(paths.pidFile, { force: true });
+			await rm(paths.settingsFile, { force: true });
+			writeWin32Diagnostic("supervisor metadata removed; exiting");
+		} finally {
+			if (hardExit) clearTimeout(hardExit);
+			// Explicitly terminate after every supervisor shutdown trigger. Windows
+			// named-pipe handles can outlive their JavaScript wrappers, so cleanup
+			// failure must never leave the supervisor resident or the host orphaned.
+			process.exit(exitCode);
+		}
 	}
 
 	let observer: Socket | undefined;
