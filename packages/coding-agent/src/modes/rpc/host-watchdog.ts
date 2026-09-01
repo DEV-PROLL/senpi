@@ -92,6 +92,9 @@ export function armHostWatchdog(
 	onSupervisorGone: (reason: string) => void,
 ): () => void {
 	if (!config) return () => {};
+	writeWin32Diagnostic(
+		`watchdog armed fd=${String(config.fd)} ppid=${String(config.ppid)} processPid=${String(process.pid)} processPpid=${String(process.ppid)}`,
+	);
 	const fire = (reason: string): void => {
 		writeWin32Diagnostic(`watchdog fired reason=${reason} fd=${String(config.fd)} ppid=${String(config.ppid)}`);
 		disarm();
@@ -126,6 +129,7 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 	try {
 		stream = createReadStream("", { fd, autoClose: false });
 	} catch {
+		writeWin32Diagnostic(`watchdog fd setup failed fd=${String(fd)}`);
 		return () => {};
 	}
 	stream.resume();
@@ -135,7 +139,10 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 	// dead supervisor from this side; treating it as EOF keeps the binding safe.
 	// An unavailable inherited fd is a configuration/setup failure, not proof
 	// that the supervisor died. The PPID binding, when supplied, remains active.
-	stream.once("error", () => {});
+	stream.once("error", (cause) => {
+		const message = cause instanceof Error ? cause.message : String(cause);
+		writeWin32Diagnostic(`watchdog fd error fd=${String(fd)} error=${message}`);
+	});
 	return () => {
 		stream.off("end", onEnd);
 		stream.off("error", onEnd);
@@ -158,6 +165,9 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 		checking = true;
 		void readProcessStartTime(supervisorPid)
 			.then((startTime) => {
+				writeWin32Diagnostic(
+					`watchdog ppid check supervisorPid=${String(supervisorPid)} processPpid=${String(process.ppid)} startTime=${String(startTime)}`,
+				);
 				if (process.ppid === supervisorPid && startTime !== undefined) return;
 				fire(`supervisor pid ${supervisorPid} is gone (ppid=${process.ppid})`);
 			})
