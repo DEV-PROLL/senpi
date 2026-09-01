@@ -664,6 +664,8 @@ async function waitForHostExit(
 		if (!existsSync(entry.pidFilePath)) return;
 		// Force-kill teardown can leave a stale pidfile after the recorded process is
 		// already gone (the CIM dump showed TARGET=empty and the endpoint was ENOENT).
+		// A nonmatching identity is the test's live-CIM stale-state proof, not a raw
+		// PID-liveness guess.
 		// File deletion and process death are not atomic; remove that stale state here
 		// so the next lifecycle scenario starts with the same semantics as ensureHost().
 		rmSync(entry.pidFilePath, { force: true });
