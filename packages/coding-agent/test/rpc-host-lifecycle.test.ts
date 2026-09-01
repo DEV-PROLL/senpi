@@ -14,7 +14,7 @@ import { readFile } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer, type ServerResponse } from "node:http";
 import { type AddressInfo, createConnection, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { VERSION } from "../src/config.ts";
 import { processMatchesPidFile, readProcessStartTime } from "../src/modes/app-server/daemon/process.ts";
@@ -664,8 +664,26 @@ async function waitForHostExit(
 		const stderrPath = join(entry.pidFilePath, "..", "stderr.log");
 		console.error(`RPC_WIN32_DIAGNOSTIC waitForHostExit timeout pid=${entry.pidFile.pid} timeoutMs=${timeoutMs}`);
 		console.error(`RPC_WIN32_DIAGNOSTIC supervisor-stderr-tail=${JSON.stringify(readFileSync(stderrPath, "utf8").slice(-12_000))}`);
+		dumpWindowsProcessDiagnostics(entry.pidFile.pid, dirname(dirname(dirname(entry.pidFilePath))));
 	}
 	throw new Error(`RPC socket host pid ${entry.pidFile.pid} did not exit within ${timeoutMs}ms`);
+}
+
+function dumpWindowsProcessDiagnostics(pid: number, qaDir: string): void {
+	const escapedQaDir = qaDir.replace(/'/g, "''");
+	const command = `$target = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" | Select-Object ProcessId,ParentProcessId,Name,CreationDate,CommandLine; $related = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -match [regex]::Escape('${escapedQaDir}') -or $_.CommandLine -match 'senpi') } | Select-Object ProcessId,ParentProcessId,Name,CommandLine; Write-Output ('TARGET=' + ($target | ConvertTo-Json -Compress)); Write-Output ('RELATED=' + ($related | ConvertTo-Json -Compress))`;
+	try {
+		const output = execFileSync(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-Command", command],
+			{ encoding: "utf8", windowsHide: true },
+		);
+		for (const line of output.trim().split(/\r?\n/).filter(Boolean)) {
+			console.error(`RPC_WIN32_DIAGNOSTIC ${line}`);
+		}
+	} catch (cause) {
+		console.error(`RPC_WIN32_DIAGNOSTIC process-dump-failed=${JSON.stringify(errorMessage(cause))}`);
+	}
 }
 
 async function stopHostProcess(pidFile: { pid: number; processStartTime: string }, pidFilePath: string): Promise<void> {
