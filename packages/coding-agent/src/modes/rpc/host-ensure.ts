@@ -73,6 +73,7 @@ type ProtocolInfo = {
 
 const lockOptions = { retries: { retries: 100, minTimeout: 20, maxTimeout: 100 } } as const;
 const REQUIRED_CAPABILITIES = ["multi_session", EXTENSION_EVENTS_CAPABILITY] as const;
+const EXISTING_HOST_PROBE_TIMEOUT_MS = 10_000;
 /**
  * Every ensured host starts with this installation-wide profile, independent of
  * the first caller. In particular, extension_events must remain available when
@@ -118,7 +119,7 @@ async function ensureHostLocked(
 	testOptions: EnsureHostOptions["_test"],
 ): Promise<EnsuredHost> {
 	const pidFile = await readPidFile(paths);
-	const protocol = await probeProtocolInfo(socket, 1_000);
+	const protocol = await probeProtocolInfo(socket, EXISTING_HOST_PROBE_TIMEOUT_MS);
 	const pidMatches = pidFile ? await processMatchesPidFile(pidFile) : false;
 	if (isCompatible(protocol)) {
 		// A compatible socket is attachable even when another client surface
