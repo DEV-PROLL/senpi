@@ -1,5 +1,42 @@
 # changes
 
+## 2026-09-01 - Never swallow an interactive quit request
+
+### What changed
+
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: `handleStartupSubmit` now
+  treats `/quit` and `/exit` as control actions and calls `shutdown()` instead of parking the text
+  in the editor behind the "Startup is still in progress" notice. Every other submission keeps the
+  previous restore-and-notify behavior unchanged.
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`: the extension-facing
+  `ctx.shutdown()` routes through a new `requestExtensionShutdown()` that records the request and
+  shuts down immediately when `session.isIdle`, matching the existing `shutdownHandler` rule.
+- `packages/coding-agent/test/interactive-mode-startup-input.test.ts`: coverage for quit and exit
+  during managed-tool setup, immediate versus deferred extension shutdown, and consumption of a
+  pending request at idle.
+
+### Why
+
+- Startup awaits `ensureTool("fd"/"rg")`, which downloads binaries on first run, so the startup
+  window is long enough to hit in practice. Submitting `/quit` there did nothing visible except
+  re-insert the text, and because `CustomEditor` only forwards Ctrl+D while the editor is EMPTY,
+  that re-inserted text also disabled the Ctrl+D quit escape — the user's natural quit sequence
+  became a dead end until they manually cleared the line.
+- `ctx.shutdown()` only set `shutdownRequested`, whose sole consumer is the `agent_settled` event.
+  An idle session emits no further settle event, so an extension asking to quit while idle was
+  stranded until the user happened to run another turn.
+
+### Why an extension could not handle it
+
+- Both paths are the interactive host's own input gate and shutdown bookkeeping: the startup submit
+  handler and the `shutdownRequested` flag live in `interactive-mode.ts`, and the swallowed request
+  is precisely the extension-facing API failing to reach them. No extension hook can repair the
+  handler that is meant to serve extensions.
+
+### Expected merge conflict zones
+
+- LOW: `handleStartupSubmit` and the extension command-context wiring in `interactive-mode.ts`.
+
 ## 2026-09-01 - Keep stderr hidden through interactive quit cleanup
 
 ### What changed

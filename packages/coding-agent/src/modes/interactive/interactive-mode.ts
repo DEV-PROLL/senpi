@@ -2743,7 +2743,7 @@ export class InteractiveMode {
 			requestReload: () => this.handleReloadCommand(),
 			isCompacting: () => this.session.isCompacting,
 			shutdown: () => {
-				this.shutdownRequested = true;
+				this.requestExtensionShutdown();
 			},
 			getContextUsage: () => this.session.getContextUsage(),
 			getCompactionSettings: () => this.settingsManager.getCompactionSettings(),
@@ -4137,6 +4137,14 @@ export class InteractiveMode {
 	}
 
 	private handleStartupSubmit(text: string): void {
+		// Quit is a control action, not a prompt: honor it even while managed-tool setup
+		// is still running. Parking it in the editor would also disable the Ctrl+D quit
+		// escape, which CustomEditor only forwards while the editor is empty.
+		if (text.trim() === "/quit" || text.trim() === "/exit") {
+			this.editor.setText("");
+			void this.shutdown();
+			return;
+		}
 		this.editor.setText(text);
 		this.showStatus("Startup is still in progress");
 	}
@@ -5776,6 +5784,20 @@ export class InteractiveMode {
 		console.error(`${APP_NAME} exiting due to uncaughtException:`);
 		console.error(error);
 		process.exit(1);
+	}
+
+	/**
+	 * Record an extension shutdown request and honor it as soon as it is safe to do so.
+	 *
+	 * An idle session emits no further `agent_settled`, and that event is the only
+	 * consumer of the deferred flag, so an idle request must shut down here or it
+	 * strands until the user happens to run another turn.
+	 */
+	private requestExtensionShutdown(): void {
+		this.shutdownRequested = true;
+		if (this.session.isIdle) {
+			void this.shutdown();
+		}
 	}
 
 	/**
