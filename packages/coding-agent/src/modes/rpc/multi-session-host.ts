@@ -280,7 +280,7 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 		killTrackedDetachedChildren();
 		void shutdown(0);
 	});
-	await listen(server, socketPath);
+	await listen(server, socketPath, secret);
 	process.stderr.write(`senpi rpc listening on ${formatSocketAddress(socketPath)}\n`);
 
 	// Opt-in only: set by the lifecycle supervisor so this host can never outlive
@@ -363,10 +363,10 @@ function probeSocket(socketPath: string): Promise<boolean> {
 	});
 }
 
-function listen(server: Server, socketPath: string): Promise<void> {
+function listen(server: Server, socketPath: string, secret?: Uint8Array): Promise<void> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(resolveSocketTransportAddress(socketPath, process.platform), async () => {
+		server.listen(resolveSocketTransportAddress(socketPath, process.platform, secret), async () => {
 			server.off("error", reject);
 			try {
 				if (process.platform !== "win32" && !socketPath.startsWith("\0")) await chmod(socketPath, 0o600);

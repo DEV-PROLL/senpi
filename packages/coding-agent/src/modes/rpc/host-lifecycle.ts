@@ -100,9 +100,15 @@ const CHILD_WATCH_FD = 3;
  * regardless of where the public socket lives, and private against other local
  * users, so it gets its own 0700 directory under the OS temp directory.
  */
-async function createInternalSocketPath(): Promise<{ socket: string; dir?: string }> {
+async function createInternalSocketPath(): Promise<{ socket: string; dir?: string; secretPath?: string }> {
 	if (process.platform === "win32") {
-		return { socket: `\\\\.\\pipe\\senpi-rpc-internal-${randomUUID()}` };
+		const dir = join(tmpdir(), `senpi-rpc-host-internal-${randomUUID()}`);
+		await mkdir(dir, { recursive: false, mode: 0o700 });
+		return {
+			socket: `\\\\.\\pipe\\senpi-rpc-internal-${randomUUID()}`,
+			dir,
+			secretPath: join(dir, "secret"),
+		};
 	}
 	const dir = join(tmpdir(), `senpi-rpc-host-internal-${randomUUID().slice(0, 8)}`);
 	await mkdir(dir, { recursive: false, mode: 0o700 });
@@ -115,7 +121,7 @@ async function createInternalSocketPath(): Promise<{ socket: string; dir?: strin
 		}),
 		{ mode: 0o600 },
 	);
-	return { socket: join(dir, "host.sock"), dir };
+	return { socket: join(dir, "host.sock"), dir, secretPath: join(dir, ".secret") };
 }
 
 export function parseColdStart(value: string | undefined): HostColdStart | undefined {
@@ -356,7 +362,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	const publicSocket = launch.socket;
 	const internal = await createInternalSocketPath();
 	const internalSocket = internal.socket;
-	const internalSecretPath = socketSecretPath(internalSocket);
+	const internalSecretPath = internal.secretPath ?? socketSecretPath(internalSocket);
 	const internalSecret = process.platform === "win32" ? await createSocketSecret(internalSecretPath) : undefined;
 	const publicSecret =
 		process.platform === "win32" ? await readSocketSecret(socketSecretPath(publicSocket)) : undefined;
@@ -509,7 +515,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		await waitForListener(internalSocket, 30_000);
 		await connectObserver();
 		await prepareSocketPath(publicSocket);
-		await listen(server, publicSocket);
+		await listen(server, publicSocket, publicSecret);
 		publicSocketOwned = true;
 	} catch (cause) {
 		await shutdown(`startup failed: ${errorMessage(cause)}`, 1);
@@ -653,12 +659,12 @@ async function prepareSocketPath(socketPath: string): Promise<void> {
 	await unlink(socketPath);
 }
 
-function listen(server: Server, socketPath: string): Promise<void> {
+function listen(server: Server, socketPath: string, secret?: Uint8Array): Promise<void> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(
 			{
-				path: resolveSocketTransportAddress(socketPath, process.platform),
+				path: resolveSocketTransportAddress(socketPath, process.platform, secret),
 				readableAll: false,
 				writableAll: false,
 			},

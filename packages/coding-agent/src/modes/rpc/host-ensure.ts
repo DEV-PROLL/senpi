@@ -24,7 +24,13 @@ import {
 	INTERNAL_SUPERVISOR_FLAG,
 } from "./host-lifecycle.ts";
 import { acquireOwnershipSafeLock } from "./ownership-safe-lock.ts";
-import { createSocketSecret, resolveSocketTransportAddress, socketSecretPath } from "./socket-transport.ts";
+import {
+	createSocketSecret,
+	readSocketSecret,
+	resolveSocketTransportAddress,
+	sendSocketHandshake,
+	socketSecretPath,
+} from "./socket-transport.ts";
 
 export type { HostColdStart, HostLifecyclePolicyInput };
 
@@ -283,9 +289,14 @@ function isChildExit(value: ProtocolInfo | ChildExit | undefined): value is Chil
 	return !!value && "code" in value && "signal" in value;
 }
 
-function probeProtocolInfo(socketPath: string, timeoutMs: number): Promise<ProtocolInfo | undefined> {
+async function probeProtocolInfo(socketPath: string, timeoutMs: number): Promise<ProtocolInfo | undefined> {
+	const secret =
+		process.platform === "win32"
+			? await readSocketSecret(socketSecretPath(socketPath)).catch(() => undefined)
+			: undefined;
 	return new Promise((resolveProbe) => {
-		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
+		if (secret) sendSocketHandshake(socket, secret);
 		let buffer = "";
 		let settled = false;
 		const finish = (value?: ProtocolInfo): void => {

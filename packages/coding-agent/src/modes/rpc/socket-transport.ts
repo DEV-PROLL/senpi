@@ -13,6 +13,16 @@ export function socketSecretPath(logicalPath: string): string {
 	return `${logicalPath}${SOCKET_SECRET_SUFFIX}`;
 }
 
+export async function ensureSocketSecret(path: string): Promise<Buffer> {
+	try {
+		const existing = await readFile(path);
+		if (existing.length === SOCKET_SECRET_BYTES) return existing;
+	} catch (error: unknown) {
+		if (!isNodeErrorCode(error, "ENOENT")) throw error;
+	}
+	return createSocketSecret(path);
+}
+
 export async function createSocketSecret(path: string): Promise<Buffer> {
 	await mkdir(dirname(path), { recursive: true });
 	const secret = randomBytes(SOCKET_SECRET_BYTES);
@@ -65,4 +75,8 @@ export function authenticateSocket(socket: Socket, secret: Uint8Array, onAuthent
 
 export function sendSocketHandshake(socket: Socket, secret: Uint8Array): void {
 	socket.write(Buffer.from(secret));
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+	return error instanceof Error && "code" in error && error.code === code;
 }
