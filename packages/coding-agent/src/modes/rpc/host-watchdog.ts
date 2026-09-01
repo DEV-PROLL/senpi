@@ -26,7 +26,7 @@ export const HOST_SCRATCH_DIR_ENV = "SENPI_RPC_HOST_SCRATCH_DIR";
 /** Fallback binding when no inherited fd is available: poll this pid. */
 export const HOST_WATCH_PPID_ENV = "SENPI_RPC_HOST_WATCH_PPID";
 /** Poll cadence for the ppid fallback. */
-export const HOST_WATCH_PPID_INTERVAL_MS = 2_000;
+export const HOST_WATCH_PPID_INTERVAL_MS = 250;
 export const HOST_CLEANUP_PATHS_ENV = "SENPI_RPC_HOST_CLEANUP_PATHS";
 
 export interface HostWatchdogConfig {
@@ -95,7 +95,12 @@ export function armHostWatchdog(
 	const fire = (reason: string): void => {
 		writeWin32Diagnostic(`watchdog fired reason=${reason} fd=${String(config.fd)} ppid=${String(config.ppid)}`);
 		disarm();
-		void cleanupWatchdogPaths(config).finally(() => onSupervisorGone(reason));
+		// Shutdown must not wait for Windows metadata cleanup: a transiently held
+		// pid/settings handle can otherwise keep the host alive indefinitely. The
+		// normal shutdown path removes the endpoint and exits; cleanup remains
+		// best-effort and runs concurrently.
+		void cleanupWatchdogPaths(config);
+		onSupervisorGone(reason);
 	};
 	const disarmers: Array<() => void> = [];
 	const disarm = (): void => {
