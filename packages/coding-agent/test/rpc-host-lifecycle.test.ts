@@ -656,7 +656,11 @@ function terminateSupervisor(pid: number, signal: NodeJS.Signals): void {
 		// Bun cannot deliver catchable POSIX signals to detached Windows processes.
 		// taskkill is the real Windows termination primitive; the child watchdog must
 		// still perform the cleanup assertions below when this bypasses JS handlers.
-		execFileSync("taskkill.exe", ["/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+		execFileSync(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-Command", `Stop-Process -Id ${String(pid)} -Force`],
+			{ stdio: "ignore", windowsHide: true },
+		);
 		return;
 	}
 	process.kill(pid, signal);

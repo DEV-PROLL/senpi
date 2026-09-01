@@ -17,6 +17,7 @@
 import { createReadStream } from "node:fs";
 import { rm } from "node:fs/promises";
 import { envValue } from "../../core/brand.ts";
+import { readProcessStartTime } from "../app-server/daemon/process.ts";
 
 /** Inherited fd whose EOF means "the supervisor died"; set by the supervisor only. */
 export const HOST_WATCH_FD_ENV = "SENPI_RPC_HOST_WATCH_FD";
@@ -134,9 +135,18 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
  * fd could be inherited.
  */
 function watchPpid(supervisorPid: number, fire: (reason: string) => void): () => void {
+	let checking = false;
 	const timer = setInterval(() => {
-		if (process.ppid === supervisorPid && processAlive(supervisorPid)) return;
-		fire(`supervisor pid ${supervisorPid} is gone (ppid=${process.ppid})`);
+		if (checking) return;
+		checking = true;
+		void readProcessStartTime(supervisorPid)
+			.then((startTime) => {
+				if (process.ppid === supervisorPid && startTime !== undefined) return;
+				fire(`supervisor pid ${supervisorPid} is gone (ppid=${process.ppid})`);
+			})
+			.finally(() => {
+				checking = false;
+			});
 	}, HOST_WATCH_PPID_INTERVAL_MS);
 	timer.unref?.();
 	return () => clearInterval(timer);
