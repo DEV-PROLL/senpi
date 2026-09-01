@@ -1,5 +1,20 @@
 # changes
 
+## 2026-09-01 - Keep stderr hidden through interactive quit cleanup
+
+### What changed
+
+- Interactive quit now stops the TUI without restoring stderr, keeps the guard installed while session shutdown handlers drain, and restores stderr after cleanup completes, including when disposal fails.
+- Added regression coverage for stderr capture during disposal and restoration after both successful and failed cleanup.
+
+### Why
+
+- Session shutdown handlers can emit diagnostics while the interactive runtime is being disposed. Restoring stderr before disposal exposed those warnings beside the final resume hint and corrupted the user's terminal output.
+
+### Expected merge conflict zones
+
+- LOW: interactive shutdown and `stop()` lifecycle in `interactive-mode.ts`.
+
 ## 2026-08-30 - Harden shared-host reconnect fallback
 
 ### What changed
