@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,13 +31,7 @@ function logEvents(harness: Harness): Array<{ event: string }> {
 			.filter((entry): entry is string => typeof entry === "string" && entry.endsWith("compaction.log"))
 			.map((entry) => join(harness.tempDir, entry)),
 	];
-	const path = candidates.find((candidate) => {
-		try {
-			return readFileSync(candidate);
-		} catch {
-			return false;
-		}
-	});
+	const path = candidates.find((candidate) => existsSync(candidate));
 	try {
 		if (!path) return [];
 		return readFileSync(path, "utf8")
@@ -52,10 +46,6 @@ function logEvents(harness: Harness): Array<{ event: string }> {
 
 function count(events: Array<{ event: string }>, event: string): number {
 	return events.filter((entry) => entry.event === event).length;
-}
-
-function _eventIndex(events: Array<{ event: string }>, event: string): number {
-	return events.findIndex((entry) => entry.event === event);
 }
 
 async function runLongSession(
@@ -134,6 +124,12 @@ async function runLongSession(
 	// A storm would invalidate on every one of the 324 churn context events; the shipped
 	// contract invalidates only on real lifecycle events.
 	expect(count(midChurn, "speculative_invalidated")).toBeLessThanOrEqual(count(midChurn, "speculative_started") + 2);
+	// ABSOLUTE lifecycle bounds. The relative bound above cannot see the incident's real
+	// mechanism - a kill-and-RESTART loop increments both counters in lockstep, so it
+	// satisfies `invalidated <= started + 2` by construction. Churn must not manufacture
+	// speculative lifecycles at all: a healthy run starts one job and keeps it.
+	expect(count(midChurn, "speculative_started")).toBeLessThanOrEqual(3);
+	expect(count(midChurn, "speculative_invalidated")).toBeLessThanOrEqual(3);
 	// 36x9 churn events plus exactly one context event from the in-flight speculative
 	// summary request itself - that extra event only exists because a real speculative
 	// job is running, so this count is itself part of the in-flight proof.
@@ -173,6 +169,10 @@ describe("production-shaped compaction thrash regression", () => {
 		expect(count(events, "emergency_prune")).toBe(0);
 		expect(count(events, "speculative_started")).toBeGreaterThanOrEqual(1);
 		expect(count(events, "speculative_invalidated")).toBeLessThanOrEqual(count(events, "speculative_started") + 2);
+		// Mirrored absolute bounds - see the mid-churn site: paired invalidate+restart
+		// storms are invisible to the relative bound.
+		expect(count(events, "speculative_started")).toBeLessThanOrEqual(3);
+		expect(count(events, "speculative_invalidated")).toBeLessThanOrEqual(3);
 		expect(thresholdTokens - lead).toBeLessThan(thresholdTokens);
 		expect(thresholdTokens).toBeLessThan(contextWindow - reserve);
 		expect(contextEvents).toBe(36 * 9 + 2);
