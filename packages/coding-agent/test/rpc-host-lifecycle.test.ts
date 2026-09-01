@@ -647,6 +647,9 @@ async function waitForHostExit(
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
+		// On Windows, process.kill(pid, 0) / OpenProcess can still succeed for a
+		// terminated process while a process handle is retained. Use the recorded
+		// creation-time identity through the production helper, not raw PID liveness.
 		const running = await processMatchesPidFile(entry.pidFile, readProcessStartTime);
 		if (!running && !existsSync(entry.pidFilePath)) return;
 		await delay(50);

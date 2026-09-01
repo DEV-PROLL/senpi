@@ -5,7 +5,7 @@
 ### What changed
 
 - `packages/coding-agent/src/modes/app-server/daemon/process.ts` reads process start time with PowerShell `Get-Process` on Windows and preserves `ps -o lstart=` on POSIX.
-- Process identity is validated with a platform-specific start-time reader before signaling managed children; exit waits repeat that identity check while waiting for termination.
+- Process identity is validated with a platform-specific start-time reader before signaling managed children; exit waits repeat that identity check while waiting for termination. On Windows the probe rejects `Get-Process` objects whose `HasExited` flag is set and uses a bounded query, so a terminated process retained by an open handle cannot appear live indefinitely.
 
 ### Why
 

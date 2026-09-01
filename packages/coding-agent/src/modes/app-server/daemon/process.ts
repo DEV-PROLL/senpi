@@ -63,7 +63,9 @@ export async function readProcessStartTime(
 						"-NoProfile",
 						"-NonInteractive",
 						"-Command",
-						`(Get-Process -Id ${String(pid)} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
+						// A terminated Windows process can remain OpenProcess-able while a handle is held;
+						// HasExited makes the identity probe agree with actual process liveness.
+						`$process = Get-Process -Id ${String(pid)} -ErrorAction Stop; if ($process.HasExited) { exit 1 }; $process.StartTime.ToUniversalTime().Ticks`,
 					],
 				}
 			: {
@@ -71,10 +73,11 @@ export async function readProcessStartTime(
 					args: ["-o", "lstart=", "-p", String(pid)],
 				};
 	return new Promise((resolveStartTime, reject) => {
+		const effectiveTimeoutMs = timeoutMs ?? (platform === "win32" ? 1_000 : undefined);
 		execFile(
 			command.executable,
 			command.args,
-			{ windowsHide: true, ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }) },
+			{ windowsHide: true, ...(effectiveTimeoutMs === undefined ? {} : { timeout: effectiveTimeoutMs }) },
 			(error, stdout) => {
 				if (error) {
 					resolveStartTime(undefined);
