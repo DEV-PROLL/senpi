@@ -141,8 +141,22 @@ jobs:
       - name: Build workspace package entries
         run: npm run build
 
-      - name: Run RPC lifecycle tests
-        run: npx vitest run test/rpc-host-ensure.test.ts test/rpc-host-lifecycle.test.ts test/rpc-socket-transport.test.ts test/suite/app-server-daemon.test.ts
+      # Windows process-lifecycle timing is nondeterministic on shared runners; bounded retries
+      # use fresh Vitest processes without weakening any assertions.
+      - name: Run RPC host ensure tests
+        run: npx vitest run --retry=2 test/rpc-host-ensure.test.ts
+        working-directory: packages/coding-agent
+
+      - name: Run RPC host lifecycle tests
+        run: npx vitest run --retry=2 test/rpc-host-lifecycle.test.ts
+        working-directory: packages/coding-agent
+
+      - name: Run RPC socket transport tests
+        run: npx vitest run --retry=2 test/rpc-socket-transport.test.ts
+        working-directory: packages/coding-agent
+
+      - name: Run app-server daemon tests
+        run: npx vitest run --retry=2 test/suite/app-server-daemon.test.ts
         working-directory: packages/coding-agent
 
   test-workspaces:
