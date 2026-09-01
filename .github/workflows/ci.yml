@@ -136,7 +136,7 @@ jobs:
           cache: npm
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@735343b667d3e2a3f2a8f4f1b8b8e4c5f3e0a7f2 # v2.0.2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.0"
 
