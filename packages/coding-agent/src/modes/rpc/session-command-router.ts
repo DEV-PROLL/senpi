@@ -1,5 +1,6 @@
 import { VERSION } from "../../config.ts";
 import { buildRpcSessionState } from "./connection-handler.ts";
+import { AUTO_TITLE_SESSIONS_CAPABILITY } from "./custom-capability.ts";
 import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
 import {
 	RPC_ERROR_MISSING_SESSION_ID,
@@ -103,7 +104,11 @@ export class SessionCommandRouter {
 
 	async handle(command: RpcCommand): Promise<RpcResponse | undefined> {
 		if (command.type === "get_protocol_info") {
-			const capabilities = new Set(["multi_session", ...(this.connectionOptions?.capabilities ?? [])]);
+			const capabilities = new Set([
+				"multi_session",
+				AUTO_TITLE_SESSIONS_CAPABILITY,
+				...(this.connectionOptions?.capabilities ?? []),
+			]);
 			return {
 				id: command.id,
 				type: "response",

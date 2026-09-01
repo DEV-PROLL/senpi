@@ -12,6 +12,11 @@
 
 - Capability negotiation and session binding creation are transport routing behavior beneath the extension API.
 
+## 2026-09-01 - Negotiate RPC session auto-titling
+
+- Added the `auto_title_sessions` client capability. RPC sessions auto-generate a title only when the client advertises support, while interactive defaults and resumed-session context guards remain unchanged.
+- Advertised the capability from both classic and multi-session `get_protocol_info` responses.
+
 ## 2026-09-01 - Acknowledge RPC abort before quiesce
 
 ### What changed

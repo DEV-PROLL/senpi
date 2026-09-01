@@ -1,5 +1,24 @@
 # changes
 
+## 2026-09-01 - Negotiate RPC session auto-titling
+
+### What changed
+
+- `packages/coding-agent/src/main.ts` enables RPC session auto-titling when the client advertises `auto_title_sessions`, while preserving the context-message guard and default behavior for clients without the capability.
+- `packages/coding-agent/src/modes/rpc/connection-handler.ts`, `packages/coding-agent/src/modes/rpc/custom-capability.ts`, and `packages/coding-agent/src/modes/rpc/session-command-router.ts` define and advertise the capability in both RPC protocol surfaces.
+
+### Why
+
+- RPC clients that support native session titles need the engine to generate titles and forward the existing `session_info_changed` event without changing the default wire contract.
+
+### Why an extension could not handle it
+
+- The auto-title decision is made while the entrypoint constructs each `AgentSession`, before extension code loads.
+
+### Expected merge conflict zones
+
+- LOW: the `resolveAutoTitleSessions` helper and `autoTitleSessions` option in `main.ts`, plus RPC capability declarations and protocol responses.
+
 ## 2026-08-30 - Export the RPC transport-gone classifier
 
 ### What changed
