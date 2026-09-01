@@ -21,6 +21,7 @@ import type { RpcExtensionUIRequest } from "./rpc-types.ts";
 export const CUSTOM_UNSUPPORTED_CAPABILITY = "custom_unsupported";
 export const EXTENSION_EVENTS_CAPABILITY = "extension_events";
 export const RENDERED_COMPONENTS_CAPABILITY = "rendered_components";
+export const AUTO_TITLE_SESSIONS_CAPABILITY = "auto_title_sessions";
 
 /**
  * Env var carrying client capabilities to a single-connection stdio RPC host

@@ -46,7 +46,12 @@ describe("multi-session RPC routing", () => {
 			type: "response",
 			command: "get_protocol_info",
 			success: true,
-			data: { protocolVersion: 1, serverVersion: VERSION, capabilities: ["multi_session"], mode: "multi" },
+			data: {
+				protocolVersion: 1,
+				serverVersion: VERSION,
+				capabilities: ["multi_session", "auto_title_sessions"],
+				mode: "multi",
+			},
 		});
 	});
 
