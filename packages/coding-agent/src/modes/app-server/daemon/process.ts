@@ -64,8 +64,8 @@ export async function readProcessStartTime(
 						"-NonInteractive",
 						"-Command",
 						// The Windows process object can remain OpenProcess-able after exit while a
-						// handle is held. Query the live CIM process table instead of that stale object.
-						`$process = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; [System.Management.ManagementDateTimeConverter]::ToDateTime($process.CreationDate).ToUniversalTime().Ticks`,
+						// handle is held. Query the live CIM process table and emit one stable scalar.
+						`$process = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; $process.CreationDate.ToFileTimeUtc().ToString(\"D\", [Globalization.CultureInfo]::InvariantCulture)`,
 					],
 				}
 			: {
@@ -83,7 +83,7 @@ export async function readProcessStartTime(
 					resolveStartTime(undefined);
 					return;
 				}
-				resolveStartTime(stdout.trim() || undefined);
+				resolveStartTime(parseProcessStartTimeOutput(stdout, platform));
 			},
 		).once("error", reject);
 	});
@@ -108,6 +108,12 @@ export async function waitForStartTime(pid: number, timeoutMs: number): Promise<
 		await delay(20);
 	}
 	throw new Error(`spawned daemon pid ${pid} had no process start time`);
+}
+
+function parseProcessStartTimeOutput(output: string, platform: NodeJS.Platform): string | undefined {
+	const trimmed = output.trim();
+	if (!trimmed || (platform === "win32" && !/^\d+$/.test(trimmed))) return undefined;
+	return trimmed;
 }
 
 function delay(ms: number): Promise<void> {

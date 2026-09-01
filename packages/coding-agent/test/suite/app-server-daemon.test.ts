@@ -41,6 +41,22 @@ describe("app-server daemon state", () => {
 		expect(stale).toBe(false);
 	});
 
+	it("reads a stable identity for a live process and none for an exited process", async () => {
+		const liveIdentity = await readProcessStartTime(process.pid);
+		expect(liveIdentity).toBeTruthy();
+		expect(await readProcessStartTime(process.pid)).toBe(liveIdentity);
+
+		const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		await withTimeout(once(child, "spawn"), 2_000, "identity probe child did not spawn");
+		if (child.pid === undefined) throw new Error("expected identity probe child pid");
+		const childPid = child.pid;
+		child.kill();
+		await withTimeout(once(child, "exit"), 2_000, "identity probe child did not exit");
+		expect(await readProcessStartTime(childPid)).toBeUndefined();
+	});
+
 	it("serializes daemon commands with the state lock", async () => {
 		// Given: two daemon operations sharing one state directory.
 		const root = await scratchRoot("senpi-daemon-lock-");
