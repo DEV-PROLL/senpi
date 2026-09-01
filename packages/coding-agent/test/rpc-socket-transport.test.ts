@@ -1,7 +1,54 @@
-import { createHash } from "node:crypto";
-import { win32 } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { createConnection, createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join, win32 } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveSocketTransportAddress } from "../src/modes/rpc/socket-transport.ts";
+import {
+	authenticateSocket,
+	createSocketSecret,
+	readSocketSecret,
+	resolveSocketTransportAddress,
+	sendSocketHandshake,
+	socketSecretPath,
+} from "../src/modes/rpc/socket-transport.ts";
+
+describe("Windows RPC socket security", () => {
+	it("writes and reads a 32-byte secret with owner-only mode", async () => {
+		const root = await mkdtemp(join(tmpdir(), "senpi-rpc-secret-"));
+		try {
+			const path = socketSecretPath(join(root, "rpc.sock"));
+			const secret = await createSocketSecret(path);
+			expect(secret).toHaveLength(32);
+			expect(await readSocketSecret(path)).toEqual(secret);
+			expect((await stat(path)).mode & 0o777).toBe(0o600);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("derives different pipe names for the same logical path with different secrets", () => {
+		const path = "C:\\\\Users\\\\demo\\\\rpc.sock";
+		expect(resolveSocketTransportAddress(path, "win32", randomBytes(32))).not.toBe(
+			resolveSocketTransportAddress(path, "win32", randomBytes(32)),
+		);
+	});
+
+	it("rejects a client before registration when the handshake is wrong", async () => {
+		const server = createServer((socket) =>
+			authenticateSocket(socket, Buffer.alloc(32, 7), () => socket.write("registered")),
+		);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const address = server.address();
+		if (typeof address !== "object" || address === null) throw new Error("missing test address");
+		const socket = createConnection(address.port, "127.0.0.1");
+		await new Promise<void>((resolve) => socket.once("connect", resolve));
+		sendSocketHandshake(socket, Buffer.alloc(32, 8));
+		await new Promise<void>((resolve) => socket.once("close", resolve));
+		expect(socket.destroyed).toBe(true);
+		server.close();
+	});
+});
 
 describe("resolveSocketTransportAddress", () => {
 	it("maps a logical Windows socket path to one deterministic named pipe", () => {

@@ -20,7 +20,13 @@ import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
 import { type RpcBindingFactory, SessionCommandRouter } from "./session-command-router.ts";
 import { SessionEventWriter } from "./session-event-writer.ts";
 import { RpcSessionRegistry } from "./session-registry.ts";
-import { resolveSocketTransportAddress } from "./socket-transport.ts";
+import {
+	authenticateSocket,
+	readSocketSecret,
+	resolveSocketTransportAddress,
+	SOCKET_SECRET_FILE_ENV,
+	socketSecretPath,
+} from "./socket-transport.ts";
 
 export interface MultiSessionHostOptions {
 	agentDir: string;
@@ -197,50 +203,58 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	);
 	let nextConnection = 0;
 	let shuttingDown = false;
+	const secret =
+		process.platform === "win32"
+			? await readSocketSecret(process.env[SOCKET_SECRET_FILE_ENV] ?? socketSecretPath(socketPath))
+			: undefined;
 	const server = createServer((socket) => {
-		const id = `socket-${++nextConnection}`;
-		const sink = socketSink(socket);
-		writer.registerConnection(id, sink);
-		const detachReader = attachJsonlLineReader(
-			socket,
-			(line) => {
-				// Do not serialize awaited commands: extension_ui_response and other
-				// re-entrant frames must be able to resolve a command already awaiting them.
-				void writer
-					.withConnection(id, () => handle(line))
-					.catch((cause) => {
-						process.stderr.write(`senpi rpc connection ${id} failed: ${errorMessage(cause)}\n`);
-					});
-			},
-			{
-				maxLineLength: MAX_RPC_LINE_CHARACTERS,
-				onOversizedLine: () => {
+		const accept = (): void => {
+			const id = `socket-${++nextConnection}`;
+			const sink = socketSink(socket);
+			writer.registerConnection(id, sink);
+			const detachReader = attachJsonlLineReader(
+				socket,
+				(line) => {
+					// Do not serialize awaited commands: extension_ui_response and other
+					// re-entrant frames must be able to resolve a command already awaiting them.
 					void writer
-						.withConnection(id, () => writer.enqueueControl(parseError(oversizedLineError())))
-						.catch((cause) =>
-							process.stderr.write(`senpi rpc connection ${id} failed: ${errorMessage(cause)}\n`),
-						);
+						.withConnection(id, () => handle(line))
+						.catch((cause) => {
+							process.stderr.write(`senpi rpc connection ${id} failed: ${errorMessage(cause)}\n`);
+						});
 				},
-			},
-		);
-		let detached = false;
-		const detach = () => {
-			if (detached) return;
-			detached = true;
-			detachReader();
-			writer.unregisterConnection(id);
-			connections.delete(id);
-			// A socket that dies without close_session still owns its sessions' attachments
-			// and path reservations. Release them on the command chain so this runs after any
-			// in-flight command for this connection settles, otherwise the path stays pinned
-			// by a runtime whose client is gone and later resumes attach to that orphan.
-			void router.releaseConnection(id).catch((cause) => {
-				process.stderr.write(`senpi rpc connection ${id} release failed: ${errorMessage(cause)}\n`);
-			});
+				{
+					maxLineLength: MAX_RPC_LINE_CHARACTERS,
+					onOversizedLine: () => {
+						void writer
+							.withConnection(id, () => writer.enqueueControl(parseError(oversizedLineError())))
+							.catch((cause) =>
+								process.stderr.write(`senpi rpc connection ${id} failed: ${errorMessage(cause)}\n`),
+							);
+					},
+				},
+			);
+			let detached = false;
+			const detach = () => {
+				if (detached) return;
+				detached = true;
+				detachReader();
+				writer.unregisterConnection(id);
+				connections.delete(id);
+				// A socket that dies without close_session still owns its sessions' attachments
+				// and path reservations. Release them on the command chain so this runs after any
+				// in-flight command for this connection settles, otherwise the path stays pinned
+				// by a runtime whose client is gone and later resumes attach to that orphan.
+				void router.releaseConnection(id).catch((cause) => {
+					process.stderr.write(`senpi rpc connection ${id} release failed: ${errorMessage(cause)}\n`);
+				});
+			};
+			connections.set(id, { id, sink, detach, close: () => socket.destroy() });
+			socket.once("close", detach);
+			socket.once("error", () => detach());
 		};
-		connections.set(id, { id, sink, detach, close: () => socket.destroy() });
-		socket.once("close", detach);
-		socket.once("error", () => detach());
+		if (secret) authenticateSocket(socket, secret, accept);
+		else accept();
 	});
 	server.on("error", (cause) => {
 		if (!shuttingDown) process.stderr.write(`senpi rpc socket listener failed: ${errorMessage(cause)}\n`);

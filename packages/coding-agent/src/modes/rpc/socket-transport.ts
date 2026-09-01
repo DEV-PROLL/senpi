@@ -1,17 +1,68 @@
-import { createHash } from "node:crypto";
-import { win32 } from "node:path";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import type { Socket } from "node:net";
+import { dirname, win32 } from "node:path";
 
 const WINDOWS_PIPE_PREFIX = "\\\\.\\pipe\\senpi-rpc-";
-export function resolveSocketTransportAddress(socketPath: string, platform: NodeJS.Platform): string {
-	if (platform !== "win32" || socketPath.toLowerCase().startsWith("\\\\.\\pipe\\")) return socketPath;
-	// Endpoint identity must not depend on the caller's current working directory.
-	// The built-in default is absolute; custom Windows endpoints must be absolute.
-	if (!/^[a-zA-Z]:[\\/]/.test(socketPath) && !/^\\\\[^\\/]/.test(socketPath)) {
+export const SOCKET_SECRET_BYTES = 32;
+export const SOCKET_SECRET_SUFFIX = ".secret";
+export const SOCKET_SECRET_FILE_ENV = "SENPI_RPC_SOCKET_SECRET_FILE";
+export const SOCKET_HANDSHAKE_TIMEOUT_MS = 2_000;
+
+export function socketSecretPath(logicalPath: string): string {
+	return `${logicalPath}${SOCKET_SECRET_SUFFIX}`;
+}
+
+export async function createSocketSecret(path: string): Promise<Buffer> {
+	await mkdir(dirname(path), { recursive: true });
+	const secret = randomBytes(SOCKET_SECRET_BYTES);
+	await writeFile(path, secret, { mode: 0o600 });
+	await chmod(path, 0o600);
+	return secret;
+}
+
+export async function readSocketSecret(path: string): Promise<Buffer> {
+	const secret = await readFile(path);
+	if (secret.length !== SOCKET_SECRET_BYTES) throw new Error(`invalid RPC socket secret: ${path}`);
+	return secret;
+}
+
+export function resolveSocketTransportAddress(
+	socketPath: string,
+	platform: NodeJS.Platform,
+	secret?: Uint8Array,
+): string {
+	if (platform !== "win32") return socketPath;
+	if (socketPath.toLowerCase().startsWith("\\\\.\\pipe\\")) return socketPath;
+	if (!/^[a-zA-Z]:[\\/]/.test(socketPath) && !/^\\\\[^/]/.test(socketPath)) {
 		throw new Error(`Windows RPC socket path must be drive-qualified or UNC: ${socketPath}`);
 	}
-	// Windows paths are case-insensitive and accept both slash styles. Resolve
-	// them with win32 semantics even when this helper is unit-tested on POSIX.
 	const canonical = win32.normalize(socketPath).toLowerCase();
-	const name = createHash("sha256").update(canonical, "utf8").digest("hex").slice(0, 32);
+	const identity = Buffer.concat([Buffer.from(canonical, "utf8"), Buffer.from(secret ?? [])]);
+	const name = createHash("sha256").update(identity).digest("hex").slice(0, 32);
 	return `${WINDOWS_PIPE_PREFIX}${name}`;
+}
+
+export function authenticateSocket(socket: Socket, secret: Uint8Array, onAuthenticated: () => void): void {
+	let received = Buffer.alloc(0);
+	const timer = setTimeout(() => socket.destroy(), SOCKET_HANDSHAKE_TIMEOUT_MS);
+	const onData = (chunk: Buffer): void => {
+		received = Buffer.concat([received, chunk]);
+		if (received.length < secret.length) return;
+		socket.off("data", onData);
+		clearTimeout(timer);
+		if (!timingSafeEqual(received.subarray(0, secret.length), Buffer.from(secret))) {
+			socket.destroy();
+			return;
+		}
+		const remainder = received.subarray(secret.length);
+		if (remainder.length > 0) socket.unshift(remainder);
+		onAuthenticated();
+	};
+	socket.on("data", onData);
+	socket.once("close", () => clearTimeout(timer));
+}
+
+export function sendSocketHandshake(socket: Socket, secret: Uint8Array): void {
+	socket.write(Buffer.from(secret));
 }

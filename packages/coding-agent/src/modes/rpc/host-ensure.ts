@@ -24,7 +24,7 @@ import {
 	INTERNAL_SUPERVISOR_FLAG,
 } from "./host-lifecycle.ts";
 import { acquireOwnershipSafeLock } from "./ownership-safe-lock.ts";
-import { resolveSocketTransportAddress } from "./socket-transport.ts";
+import { createSocketSecret, resolveSocketTransportAddress, socketSecretPath } from "./socket-transport.ts";
 
 export type { HostColdStart, HostLifecyclePolicyInput };
 
@@ -138,6 +138,7 @@ async function startHost(
 ): Promise<EnsuredHost> {
 	// The settings file must exist before the supervisor reads it at boot, so it
 	// records the policy before the spawn instead of beside the pidfile.
+	if (process.platform === "win32") await createSocketSecret(socketSecretPath(socket));
 	await writeFile(
 		paths.settingsFile,
 		`${JSON.stringify({

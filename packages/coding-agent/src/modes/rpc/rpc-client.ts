@@ -30,7 +30,12 @@ import type {
 	RpcSessionState,
 	RpcSlashCommand,
 } from "./rpc-types.ts";
-import { resolveSocketTransportAddress } from "./socket-transport.ts";
+import {
+	readSocketSecret,
+	resolveSocketTransportAddress,
+	sendSocketHandshake,
+	socketSecretPath,
+} from "./socket-transport.ts";
 
 // ============================================================================
 // Types
@@ -266,7 +271,8 @@ export class RpcClient {
 	}
 
 	private async startSocket(path: string): Promise<void> {
-		const socket = createConnection(resolveSocketTransportAddress(path, process.platform));
+		const secret = process.platform === "win32" ? await readSocketSecret(socketSecretPath(path)) : undefined;
+		const socket = createConnection(resolveSocketTransportAddress(path, process.platform, secret));
 		this.socket = socket;
 		await new Promise<void>((resolve, reject) => {
 			const onConnect = () => {
@@ -285,6 +291,7 @@ export class RpcClient {
 			socket.once("connect", onConnect);
 			socket.once("error", onError);
 		});
+		if (secret) sendSocketHandshake(socket, secret);
 		this.stopReadingStdout = attachJsonlLineReader(socket, (line) => this.handleLine(line));
 		socket.once("close", () => {
 			if (this.socket !== socket) return;

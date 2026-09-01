@@ -55,7 +55,15 @@ import {
 	HOST_WATCH_PPID_ENV,
 } from "./host-watchdog.ts";
 import { attachJsonlLineReader, MAX_RPC_LINE_CHARACTERS } from "./jsonl.ts";
-import { resolveSocketTransportAddress } from "./socket-transport.ts";
+import {
+	authenticateSocket,
+	createSocketSecret,
+	readSocketSecret,
+	resolveSocketTransportAddress,
+	SOCKET_SECRET_FILE_ENV,
+	sendSocketHandshake,
+	socketSecretPath,
+} from "./socket-transport.ts";
 
 export type HostColdStart = "transient" | "persistent";
 
@@ -100,7 +108,11 @@ async function createInternalSocketPath(): Promise<{ socket: string; dir?: strin
 	await mkdir(dir, { recursive: false, mode: 0o700 });
 	await writeFile(
 		join(dir, ".owner"),
-		JSON.stringify({ pid: process.pid, processStartTime: await readProcessStartTime(process.pid), createdAt: Date.now() }),
+		JSON.stringify({
+			pid: process.pid,
+			processStartTime: await readProcessStartTime(process.pid),
+			createdAt: Date.now(),
+		}),
 		{ mode: 0o600 },
 	);
 	return { socket: join(dir, "host.sock"), dir };
@@ -344,6 +356,10 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	const publicSocket = launch.socket;
 	const internal = await createInternalSocketPath();
 	const internalSocket = internal.socket;
+	const internalSecretPath = socketSecretPath(internalSocket);
+	const internalSecret = process.platform === "win32" ? await createSocketSecret(internalSecretPath) : undefined;
+	const publicSecret =
+		process.platform === "win32" ? await readSocketSecret(socketSecretPath(publicSocket)) : undefined;
 	const clientSockets = new Set<Socket>();
 	const busySessions = new Map<string, number>();
 	let observerHealthy = false;
@@ -359,7 +375,12 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 			[HOST_WATCH_FD_ENV]: String(CHILD_WATCH_FD),
 			[HOST_WATCH_PPID_ENV]: String(process.pid),
 			...(internal.dir ? { [HOST_SCRATCH_DIR_ENV]: internal.dir } : {}),
-			[HOST_CLEANUP_PATHS_ENV]: [paths.pidFile, paths.settingsFile, ...(process.platform === "win32" ? [] : [publicSocket])].join("\n"),
+			...(internalSecret ? { [SOCKET_SECRET_FILE_ENV]: internalSecretPath } : {}),
+			[HOST_CLEANUP_PATHS_ENV]: [
+				paths.pidFile,
+				paths.settingsFile,
+				...(process.platform === "win32" ? [] : [publicSocket]),
+			].join("\n"),
 		},
 		// Slot 3 is the lifetime pipe: "pipe" gives the child a read end it can
 		// wait on and keeps the write end owned by this process alone.
@@ -381,23 +402,30 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	});
 
 	const server = createServer((client) => {
-		if (shuttingDown) {
-			client.destroy();
-			return;
-		}
-		const internal = createConnection(resolveSocketTransportAddress(internalSocket, process.platform));
-		clientSockets.add(client);
-		const detach = (): void => {
-			clientSockets.delete(client);
-			internal.destroy();
-			client.destroy();
+		const accept = (): void => {
+			if (shuttingDown) {
+				client.destroy();
+				return;
+			}
+			const internal = createConnection(
+				resolveSocketTransportAddress(internalSocket, process.platform, internalSecret),
+			);
+			if (internalSecret) sendSocketHandshake(internal, internalSecret);
+			clientSockets.add(client);
+			const detach = (): void => {
+				clientSockets.delete(client);
+				internal.destroy();
+				client.destroy();
+			};
+			client.pipe(internal);
+			internal.pipe(client);
+			client.once("close", detach);
+			client.once("error", detach);
+			internal.once("close", detach);
+			internal.once("error", detach);
 		};
-		client.pipe(internal);
-		internal.pipe(client);
-		client.once("close", detach);
-		client.once("error", detach);
-		internal.once("close", detach);
-		internal.once("error", detach);
+		if (publicSecret) authenticateSocket(client, publicSecret, accept);
+		else accept();
 	});
 	server.once("error", (cause) => {
 		if (!shuttingDown) void shutdown(`public socket listener failed: ${errorMessage(cause)}`, 1);
@@ -487,7 +515,10 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		await shutdown(`startup failed: ${errorMessage(cause)}`, 1);
 	}
 	async function connectObserver(): Promise<void> {
-		const next = createConnection(resolveSocketTransportAddress(internalSocket, process.platform));
+		const secret =
+			process.platform === "win32" ? await readSocketSecret(socketSecretPath(internalSocket)) : undefined;
+		const next = createConnection(resolveSocketTransportAddress(internalSocket, process.platform, secret));
+		if (secret) sendSocketHandshake(next, secret);
 		await waitForConnect(next, 5_000);
 		observer = next;
 		observerHealthy = true;
