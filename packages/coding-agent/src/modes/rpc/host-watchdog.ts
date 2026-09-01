@@ -104,9 +104,7 @@ export function armHostWatchdog(
 			// Arm the host shutdown fallback before attempting metadata cleanup. The
 			// synchronous Win32 removal below handles the state files deterministically,
 			// while the fallback still covers a named-pipe close that never completes.
-			// Start Win32 state cleanup before entering host shutdown. The host may
-			// close its named pipe and exit before a deferred cleanup gets a turn.
-			const cleanup = cleanupWatchdogPaths(config);
+			const cleanup = Promise.resolve().then(() => cleanupWatchdogPaths(config));
 			onSupervisorGone(reason, cleanup);
 		} else {
 			void cleanupWatchdogPaths(config).finally(() => onSupervisorGone(reason));

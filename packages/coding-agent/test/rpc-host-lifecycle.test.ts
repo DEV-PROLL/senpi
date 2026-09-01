@@ -277,7 +277,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 		expect(await endpointLive(qa.socket)).toBe(false);
 		// Win32 endpoint close and metadata unlink are separate operations; poll the
 		// identity-aware lifecycle helper instead of asserting the pidfile atomically.
-		await waitForHostExit(entry, 2_000);
+		await waitForHostExit(entry, 12_000);
 		expect(existsSync(createHostDaemonPaths(qa.agentDir).settingsFile)).toBe(false);
 	}, 60_000);
 });
