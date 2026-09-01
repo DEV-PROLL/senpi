@@ -655,10 +655,19 @@ async function waitForHostExit(
 	while (Date.now() <= deadline) {
 		// On Windows, process.kill(pid, 0) / OpenProcess can still succeed for a
 		// terminated process while a process handle is retained. Use the recorded
-		// creation-time identity through the production helper, not raw PID liveness.
-		const running = await processMatchesPidFile(entry.pidFile, readProcessStartTime);
-		if (!running && !existsSync(entry.pidFilePath)) return;
-		await delay(50);
+		// creation-time identity through the production CIM helper, not raw PID liveness.
+		const currentIdentity = await readProcessStartTime(entry.pidFile.pid);
+		if (currentIdentity === entry.pidFile.processStartTime) {
+			await delay(50);
+			continue;
+		}
+		if (!existsSync(entry.pidFilePath)) return;
+		// Force-kill teardown can leave a stale pidfile after the recorded process is
+		// already gone (the CIM dump showed TARGET=empty and the endpoint was ENOENT).
+		// File deletion and process death are not atomic; remove that stale state here
+		// so the next lifecycle scenario starts with the same semantics as ensureHost().
+		rmSync(entry.pidFilePath, { force: true });
+		return;
 	}
 	if (process.platform === "win32") {
 		const stderrPath = join(entry.pidFilePath, "..", "stderr.log");
