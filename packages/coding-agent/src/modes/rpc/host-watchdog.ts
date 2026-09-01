@@ -161,6 +161,10 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 	// is a valid live binding rather than evidence of supervisor loss.
 	if (supervisorPid === process.pid) return () => {};
 	const timer = setInterval(() => {
+		if (!processAlive(supervisorPid)) {
+			fire(`supervisor pid ${supervisorPid} is gone (ppid=${process.ppid})`);
+			return;
+		}
 		if (checking) return;
 		checking = true;
 		void readProcessStartTime(supervisorPid)
@@ -184,6 +188,15 @@ function writeWin32Diagnostic(text: string): void {
 	try {
 		process.stderr.write(`RPC_WIN32_DIAGNOSTIC ${text}\n`);
 	} catch {}
+}
+
+function processAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (cause) {
+		return cause instanceof Error && "code" in cause && cause.code === "EPERM";
+	}
 }
 
 async function cleanupWatchdogPaths(config: HostWatchdogConfig): Promise<void> {
