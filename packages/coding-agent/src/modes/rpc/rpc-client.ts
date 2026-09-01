@@ -181,6 +181,9 @@ export class RpcClient {
 			cwd: this.options.cwd,
 			env: { ...process.env, ...this.options.env },
 			stdio: ["pipe", "pipe", "pipe"],
+			// Callers may be console-less on win32 (GUI hosts, detached daemons), and a
+			// console-subsystem child would then allocate a fresh visible terminal window.
+			windowsHide: true,
 		});
 		this.process = childProcess;
 

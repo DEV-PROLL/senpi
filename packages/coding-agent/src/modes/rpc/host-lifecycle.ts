@@ -43,7 +43,7 @@ import { realpathSync, writeSync } from "node:fs";
 import { access, chmod, mkdir, readFile, rm, unlink } from "node:fs/promises";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir, isBunBinary } from "../../config.ts";
 import { createHostDaemonPaths } from "./host-ensure.ts";
@@ -298,6 +298,37 @@ export function resolveHostChildLaunch(
 	};
 }
 
+const WINDOWS_SHELL_META_CHARS = /([()%!^"<>&|;, ])/g;
+
+/** Mirrors cross-spawn: survives cmd.exe parsing and `CommandLineToArgvW`. */
+function quoteWindowsShellArg(value: string): string {
+	const escaped = value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1");
+	return `"${escaped}"`.replace(WINDOWS_SHELL_META_CHARS, "^$1");
+}
+
+/**
+ * Windows refuses to spawn a `.cmd`/`.bat` without a shell, and Node's
+ * `shell: true` concatenates argv without escaping it. Quoting here means an
+ * embedder passes its launcher script and arguments VERBATIM through
+ * `--child-command`/`--child-args`; pre-escaping them on the caller's side
+ * would be escaped a second time by this spawn and arrive as garbage.
+ * Exported for tests.
+ */
+export function spawnableChildLaunch(
+	launch: { command: string; args: string[] },
+	platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[]; shell: boolean } {
+	const extension = extname(launch.command).toLowerCase();
+	if (platform !== "win32" || (extension !== ".cmd" && extension !== ".bat")) {
+		return { ...launch, shell: false };
+	}
+	return {
+		command: quoteWindowsShellArg(launch.command),
+		args: launch.args.map(quoteWindowsShellArg),
+		shell: true,
+	};
+}
+
 export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void> {
 	const paths = createHostDaemonPaths(launch.agentDir ?? getAgentDir());
 	const policy = resolveHostPolicy(await readSettingsFile(paths.settingsFile), process.env);
@@ -311,7 +342,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	let shuttingDown = false;
 	let shutdownPromise: Promise<never> | undefined;
 
-	const childLaunch = resolveHostChildLaunch(launch, internalSocket);
+	const childLaunch = spawnableChildLaunch(resolveHostChildLaunch(launch, internalSocket));
 	const child = spawn(childLaunch.command, childLaunch.args, {
 		env: {
 			...process.env,
@@ -323,7 +354,13 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		},
 		// Slot 3 is the lifetime pipe: "pipe" gives the child a read end it can
 		// wait on and keeps the write end owned by this process alone.
+		shell: childLaunch.shell,
 		stdio: ["ignore", "ignore", "inherit", "pipe"],
+		// The supervisor is spawned detached, so on win32 it owns no console. A
+		// console-subsystem child started from it would allocate a fresh one,
+		// which Windows Terminal renders as an empty window that takes focus.
+		// CREATE_NO_WINDOW gives the child a console with no window instead.
+		windowsHide: true,
 	});
 	// Nothing is ever written; the pipe exists purely so its EOF is a reliable
 	// death notification. Errors on it must not crash the supervisor.
