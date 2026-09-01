@@ -1,5 +1,20 @@
 # changes.md — builtin compaction policy
 
+## Emergency-prune counter emitted at its one true site (2026-09-01)
+
+### What changed
+
+The `emergency_prune` debug event previously fired in `index.ts` on the proactive
+speculative-start branch, so the counter recorded speculation starts, not prunes,
+and incident analysis (the 2026-08-30 session-death shape) read a corrupted value.
+That mislabeled emission is removed (the speculative start already logs
+`speculative_started` itself), and `buildCompactionContext` now emits the real
+`emergency_prune` exactly when `hardLimitEmergencyPrune` engaged - new array or
+`needsAggressiveCompaction` - through a `logEmergencyPrune` callback passed from
+the context handler. The thrash harness pins the shipped output-adjusted basis at
+the production context callsite with a band payload (image blocks, which bypass the
+text-part admission cap): the assertion fails when the callsite reverts to the full
+window.
 ## Recover compaction from a summarizer tool-call hijack (2026-08-31)
 
 ### What changed
