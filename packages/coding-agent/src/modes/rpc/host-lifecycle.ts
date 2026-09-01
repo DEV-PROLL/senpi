@@ -100,9 +100,11 @@ const CHILD_WATCH_FD = 3;
  * regardless of where the public socket lives, and private against other local
  * users, so it gets its own 0700 directory under the OS temp directory.
  */
-async function createInternalSocketPath(): Promise<{ socket: string; dir?: string; secretPath?: string }> {
+async function createInternalSocketPath(
+	baseDir = tmpdir(),
+): Promise<{ socket: string; dir?: string; secretPath?: string }> {
 	if (process.platform === "win32") {
-		const dir = join(tmpdir(), `senpi-rpc-host-internal-${randomUUID()}`);
+		const dir = join(baseDir, `internal-${randomUUID()}`);
 		await mkdir(dir, { recursive: false, mode: 0o700 });
 		return {
 			socket: `\\\\.\\pipe\\senpi-rpc-internal-${randomUUID()}`,
@@ -360,7 +362,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	const paths = createHostDaemonPaths(launch.agentDir ?? getAgentDir());
 	const policy = resolveHostPolicy(await readSettingsFile(paths.settingsFile), process.env);
 	const publicSocket = launch.socket;
-	const internal = await createInternalSocketPath();
+	const internal = await createInternalSocketPath(paths.dir);
 	const internalSocket = internal.socket;
 	const internalSecretPath = internal.secretPath ?? socketSecretPath(internalSocket);
 	const internalSecret = process.platform === "win32" ? await createSocketSecret(internalSecretPath) : undefined;
@@ -512,7 +514,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	// would leave that directory behind.
 	registerSupervisorSignals(shutdown);
 	try {
-		await waitForListener(internalSocket, 30_000);
+		await waitForListener(internalSocket, 30_000, internalSecret);
 		await connectObserver();
 		await prepareSocketPath(publicSocket);
 		await listen(server, publicSocket, publicSecret);
@@ -601,18 +603,19 @@ function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boole
 	});
 }
 
-async function waitForListener(socketPath: string, timeoutMs: number): Promise<void> {
+async function waitForListener(socketPath: string, timeoutMs: number, secret?: Uint8Array): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
-		if (await canConnect(socketPath)) return;
+		if (await canConnect(socketPath, secret)) return;
 		await delay(50);
 	}
 	throw new Error(`${socketPath}: host did not start listening within ${timeoutMs}ms`);
 }
 
-function canConnect(socketPath: string): Promise<boolean> {
+function canConnect(socketPath: string, secret?: Uint8Array): Promise<boolean> {
 	return new Promise((resolve) => {
-		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
+		if (secret) sendSocketHandshake(socket, secret);
 		const settle = (value: boolean): void => {
 			socket.destroy();
 			resolve(value);
