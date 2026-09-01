@@ -94,11 +94,7 @@ export function armHostWatchdog(
 	onSupervisorGone: (reason: string, cleanup?: Promise<void>) => void,
 ): () => void {
 	if (!config) return () => {};
-	writeWin32Diagnostic(
-		`watchdog armed fd=${String(config.fd)} ppid=${String(config.ppid)} processPid=${String(process.pid)} processPpid=${String(process.ppid)}`,
-	);
 	const fire = (reason: string): void => {
-		writeWin32Diagnostic(`watchdog fired reason=${reason} fd=${String(config.fd)} ppid=${String(config.ppid)}`);
 		disarm();
 		if (process.platform === "win32") {
 			// Arm the host shutdown fallback before attempting metadata cleanup. The
@@ -139,7 +135,6 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 		// Win32 so the stream releases fd 3 and observes the pipe's terminal close.
 		stream = createReadStream("", { fd, autoClose: true });
 	} catch {
-		writeWin32Diagnostic(`watchdog fd setup failed fd=${String(fd)}`);
 		return () => {};
 	}
 	stream.resume();
@@ -147,10 +142,8 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 	const onClose = (): void => {
 		if (!streamFailed) onEnd();
 	};
-	const onError = (cause: unknown): void => {
+	const onError = (): void => {
 		streamFailed = true;
-		const message = cause instanceof Error ? cause.message : String(cause);
-		writeWin32Diagnostic(`watchdog fd error fd=${String(fd)} error=${message}`);
 	};
 	stream.once("end", onEnd);
 	// Win32 pipe teardown may report close without end; POSIX invalid-fd close is
@@ -187,9 +180,6 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 			.then((startTime) => {
 				if (startTime === undefined) missingIdentityChecks++;
 				else missingIdentityChecks = 0;
-				writeWin32Diagnostic(
-					`watchdog ppid check supervisorPid=${String(supervisorPid)} processPpid=${String(process.ppid)} startTime=${String(startTime)}`,
-				);
 				if (process.ppid === supervisorPid && startTime !== undefined) return;
 				if (process.ppid === supervisorPid && missingIdentityChecks < 3) return;
 				fire(`supervisor pid ${supervisorPid} is gone (ppid=${process.ppid})`);
@@ -200,13 +190,6 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 	}, HOST_WATCH_PPID_INTERVAL_MS);
 	timer.unref?.();
 	return () => clearInterval(timer);
-}
-
-function writeWin32Diagnostic(text: string): void {
-	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
-	try {
-		process.stderr.write(`RPC_WIN32_DIAGNOSTIC ${text}\n`);
-	} catch {}
 }
 
 function processAlive(pid: number): boolean {
@@ -220,15 +203,11 @@ function processAlive(pid: number): boolean {
 
 async function cleanupWatchdogPaths(config: HostWatchdogConfig): Promise<void> {
 	const paths = [...(config.cleanupPaths ?? []), ...(config.scratchDir ? [config.scratchDir] : [])];
-	writeWin32Diagnostic(`watchdog cleanup started paths=${JSON.stringify(paths)}`);
 	if (process.platform === "win32") {
 		for (const path of paths) {
 			try {
 				rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-				writeWin32Diagnostic(`watchdog cleanup completed path=${path}`);
-			} catch {
-				writeWin32Diagnostic(`watchdog cleanup failed path=${path}`);
-			}
+			} catch {}
 		}
 		return;
 	}
@@ -236,10 +215,7 @@ async function cleanupWatchdogPaths(config: HostWatchdogConfig): Promise<void> {
 		paths.map(async (path) => {
 			try {
 				await rm(path, { recursive: true, force: true });
-				writeWin32Diagnostic(`watchdog cleanup completed path=${path}`);
-			} catch {
-				writeWin32Diagnostic(`watchdog cleanup failed path=${path}`);
-			}
+			} catch {}
 		}),
 	);
 }

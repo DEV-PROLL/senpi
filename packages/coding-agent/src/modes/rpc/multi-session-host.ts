@@ -167,14 +167,10 @@ async function runStdioHost(options: MultiSessionHostOptions): Promise<never> {
 	const shutdown = async (exitCode = 0): Promise<never> => {
 		if (shuttingDown) process.exit(exitCode);
 		shuttingDown = true;
-		writeWin32Diagnostic(`stdio host shutdown entered exitCode=${exitCode}`);
 		detach();
-		writeWin32Diagnostic("stdio host reader detached");
 		await router.dispose();
-		writeWin32Diagnostic("stdio host router disposed");
 		await writer.flush();
 		await flushRawStdout();
-		writeWin32Diagnostic("stdio host flushed; exiting");
 		process.exit(exitCode);
 	};
 	const onEnd = () => void shutdown();
@@ -277,19 +273,15 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 				? setTimeout(() => process.exit(exitCode), WINDOWS_SHUTDOWN_HARD_EXIT_MS)
 				: undefined;
 		try {
-			writeWin32Diagnostic(`socket host shutdown entered exitCode=${exitCode} connections=${connections.size}`);
 			for (const connection of connections.values()) {
 				connection.detach();
 				connection.close();
 			}
 			await closeServer(server);
-			writeWin32Diagnostic("socket host server closed");
 			await router.dispose();
-			writeWin32Diagnostic("socket host router disposed");
 			await writer.flush();
 			await removeSocketPath(socketPath);
 			if (watchdogCleanup) await watchdogCleanup;
-			writeWin32Diagnostic(`socket host metadata removed activeResources=${JSON.stringify(summarizeActiveResources())}`);
 		} finally {
 			if (hardExit) clearTimeout(hardExit);
 			// Explicitly terminate after every shutdown trigger. Windows named-pipe
@@ -315,24 +307,6 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	// Opt-in only: set by the lifecycle supervisor so this host can never outlive
 	// it, including when the supervisor is SIGKILLed and runs no handler at all.
 	return new Promise(() => {});
-}
-
-function writeWin32Diagnostic(text: string): void {
-	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
-	try {
-		process.stderr.write(`RPC_WIN32_DIAGNOSTIC ${text}\n`);
-	} catch {}
-}
-
-function summarizeActiveResources(): Record<string, unknown> {
-	const processWithResources = process as NodeJS.Process & {
-		_getActiveHandles?: () => unknown[];
-		_getActiveRequests?: () => unknown[];
-	};
-	return {
-		handles: (processWithResources._getActiveHandles?.() ?? []).map((value) => value?.constructor?.name ?? typeof value),
-		requests: (processWithResources._getActiveRequests?.() ?? []).map((value) => value?.constructor?.name ?? typeof value),
-	};
 }
 
 function parseError(error: string): RpcResponse {

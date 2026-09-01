@@ -375,8 +375,6 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	let observerHealthy = false;
 	let observerReconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	let childExitWatchTimer: ReturnType<typeof setInterval> | undefined;
-	let supervisorHeartbeatTimer: ReturnType<typeof setInterval> | undefined;
-	let childExitWatchStatus = "not armed";
 	let shuttingDown = false;
 	let shutdownPromise: Promise<never> | undefined;
 
@@ -493,34 +491,27 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		shuttingDown = true;
 		clearInterval(ticker);
 		if (childExitWatchTimer) clearInterval(childExitWatchTimer);
-		if (supervisorHeartbeatTimer) clearInterval(supervisorHeartbeatTimer);
 		const hardExit =
 			process.platform === "win32"
 				? setTimeout(() => process.exit(exitCode), WINDOWS_SUPERVISOR_SHUTDOWN_HARD_EXIT_MS)
 				: undefined;
 		try {
 			writeStderrLine(`senpi rpc host supervisor: ${reason} shutdown`);
-			writeWin32Diagnostic(`supervisor shutdown entered reason=${reason} exitCode=${exitCode} clients=${clientSockets.size} observer=${String(observerHealthy)}`);
-			writeWin32Diagnostic("supervisor closing clients");
 			for (const client of clientSockets) client.destroy();
 			await closeServer(server);
-			writeWin32Diagnostic("supervisor public server closed");
 			// Unlink the private directory BEFORE the child stop, which can take seconds:
 			// an external SIGKILL landing during that wait (ensureHost escalates while
 			// replacing a host) would otherwise leave the directory behind. The child
 			// keeps serving through its already-open socket fd until it exits, and its
 			// own watchdog cleanup makes the removal idempotent.
 			if (internal.dir) await rm(internal.dir, { recursive: true, force: true });
-			writeWin32Diagnostic("supervisor internal directory removed");
 			await stopChild(child);
-			writeWin32Diagnostic(`supervisor child stopped exitCode=${child.exitCode} signal=${child.signalCode}`);
 			observer?.destroy();
 			if (publicSocketOwned && process.platform !== "win32") await rm(publicSocket, { force: true });
 			// Mirror ensureHost's cleanupState: the pidfile and settings describe a
 			// live host only; the stderr log stays for diagnostics.
 			await rm(paths.pidFile, { force: true });
 			await rm(paths.settingsFile, { force: true });
-			writeWin32Diagnostic("supervisor metadata removed; exiting");
 		} finally {
 			if (hardExit) clearTimeout(hardExit);
 			// Explicitly terminate after every supervisor shutdown trigger. Windows
@@ -574,38 +565,20 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		const childStartTime = await readProcessStartTime(child.pid, process.platform, 1_000);
 		let missingIdentityChecks = 0;
 		let checkingChildIdentity = false;
-		childExitWatchStatus = `armed pid=${String(child.pid)} recorded=${String(childStartTime)}`;
 		const checkChildIdentity = (): void => {
-			if (shuttingDown) {
-				childExitWatchStatus = "skipped: shutting down";
-				return;
-			}
-			if (checkingChildIdentity) {
-				childExitWatchStatus = "skipped: previous probe pending";
-				return;
-			}
-			if (child.exitCode !== null || child.signalCode !== null) {
-				childExitWatchStatus = `skipped: child handle exitCode=${String(child.exitCode)} signal=${String(child.signalCode)}`;
-				return;
-			}
+			if (shuttingDown || checkingChildIdentity || child.exitCode !== null || child.signalCode !== null) return;
 			checkingChildIdentity = true;
-			childExitWatchStatus = `probing pid=${String(child.pid)} recorded=${String(childStartTime)}`;
 			void readProcessStartTime(child.pid!, process.platform, 1_000)
 				.then((currentStartTime) => {
 					if (currentStartTime === undefined) missingIdentityChecks++;
 					else missingIdentityChecks = 0;
 					const identityChanged =
 						childStartTime !== undefined && currentStartTime !== undefined && currentStartTime !== childStartTime;
-					childExitWatchStatus = `result current=${String(currentStartTime)} recorded=${String(childStartTime)} missing=${String(missingIdentityChecks)} changed=${String(identityChanged)}`;
 					if (identityChanged || missingIdentityChecks >= 2) {
-						writeWin32Diagnostic("supervisor child exit watchdog detected missing or changed child identity");
 						void shutdown("rpc host child exit observed by identity watchdog", 0);
 					}
 				})
-				.catch((cause) => {
-					childExitWatchStatus = `probe rejected: ${errorMessage(cause)}`;
-					writeStderrLine(`RPC_WIN32_DIAGNOSTIC supervisor child probe rejected error=${errorMessage(cause)}`);
-				})
+				.catch(() => {})
 				.finally(() => {
 					checkingChildIdentity = false;
 				});
@@ -618,16 +591,6 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 			policy.coldStart === "persistent" ? "never" : String(policy.idleExitMs)
 		})`,
 	);
-	if (process.platform === "win32" && process.env.SENPI_RPC_WIN32_DIAGNOSTIC === "1") {
-		let heartbeatCount = 0;
-		supervisorHeartbeatTimer = setInterval(() => {
-			heartbeatCount++;
-			writeStderrLine(
-				`RPC_WIN32_DIAGNOSTIC supervisor heartbeat count=${String(heartbeatCount)} childWatch=${childExitWatchStatus}`,
-			);
-		}, 1_000);
-		supervisorHeartbeatTimer.unref?.();
-	}
 	await new Promise<never>(() => {});
 }
 
@@ -764,11 +727,6 @@ function closeServer(server: Server): Promise<void> {
 	return new Promise((resolve) => {
 		server.close(() => resolve());
 	});
-}
-
-function writeWin32Diagnostic(text: string): void {
-	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
-	writeStderrLine(`RPC_WIN32_DIAGNOSTIC ${text}`);
 }
 
 function writeStderrLine(text: string): void {

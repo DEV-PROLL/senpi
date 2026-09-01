@@ -52,7 +52,6 @@ const peers: JsonlPeer[] = [];
 const models: HeldAnthropicModel[] = [];
 const managed: Array<{ pidFile: { pid: number; processStartTime: string }; pidFilePath: string }> = [];
 const collisionChildFixture = join(import.meta.dirname, "fixtures", "rpc-collision-child.ts");
-const WIN32_DIAGNOSTIC_ENV = "SENPI_RPC_WIN32_DIAGNOSTIC";
 // Windows supervisor-exit observation is load-dependent; teardown is eventually
 // consistent within the watchdog fallback bound, so the affected waits allow 30s.
 const WINDOWS_SUPERVISOR_EXIT_TIMEOUT_MS = 30_000;
@@ -544,21 +543,15 @@ async function waitForChildPids(pid: number, timeoutMs = 10_000): Promise<number
 async function endpointLive(socketPath: string): Promise<boolean> {
 	const secret = process.platform === "win32" ? await readSocketSecret(socketSecretPath(socketPath)) : undefined;
 	return new Promise((resolve) => {
-		const address = resolveSocketTransportAddress(socketPath, process.platform, secret);
-		const startedAt = Date.now();
-		const socket = createConnection(address);
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
 		if (secret) sendSocketHandshake(socket, secret);
-		const settle = (live: boolean, event: string, cause?: unknown): void => {
-			if (process.platform === "win32") {
-				const error = cause instanceof Error ? { name: cause.name, message: cause.message, code: "code" in cause ? cause.code : undefined } : cause;
-				console.error(`RPC_WIN32_DIAGNOSTIC probe address=${JSON.stringify(address)} logical=${JSON.stringify(socketPath)} event=${event} live=${String(live)} elapsedMs=${Date.now() - startedAt} error=${JSON.stringify(error)}`);
-			}
+		const settle = (live: boolean): void => {
 			socket.destroy();
 			resolve(live);
 		};
-		socket.once("connect", () => settle(true, "connect"));
-		socket.once("error", (cause) => settle(false, "error", cause));
-		socket.setTimeout(1_000, () => settle(false, "timeout"));
+		socket.once("connect", () => settle(true));
+		socket.once("error", () => settle(false));
+		socket.setTimeout(1_000, () => settle(false));
 	});
 }
 
@@ -597,7 +590,6 @@ async function ensureLifecycleHost(
 					PI_TELEMETRY: "0",
 					SENPI_RUNTIME: "node",
 					SENPI_CODING_AGENT_SESSION_DIR: qa.sessionDir,
-					[WIN32_DIAGNOSTIC_ENV]: "1",
 					...(options.env ?? {}),
 				},
 				hostArgs,
@@ -652,29 +644,15 @@ async function waitForHostExit(
 	timeoutMs = 12_000,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
-	let consecutiveProbeTimeouts = 0;
-	let dumpUsed = false;
-	let dumpSaysGone = false;
 	while (Date.now() <= deadline) {
 		let currentIdentity: string | undefined;
 		let probeTimedOut = false;
 		if (process.platform === "win32") {
 			// Serialize the Windows CIM query: one bounded PowerShell probe at a time
 			// avoids the 50ms polling storm that caused every probe to time out.
-			const probe = probeWindowsProcessIdentity(entry.pidFile.pid);
+			const probe = probeWindowsProcessIdentity(entry.pidFile.pid, 10_000);
 			currentIdentity = probe.identity;
 			probeTimedOut = probe.timedOut;
-			if (probeTimedOut) consecutiveProbeTimeouts++;
-			else consecutiveProbeTimeouts = 0;
-			if (probeTimedOut && consecutiveProbeTimeouts >= 3 && !dumpUsed) {
-				dumpUsed = true;
-				const dumpVerdict = dumpWindowsProcessDiagnostics(
-					entry.pidFile.pid,
-					dirname(dirname(dirname(entry.pidFilePath))),
-				);
-				dumpSaysGone = dumpVerdict === false;
-				if (dumpSaysGone) currentIdentity = undefined;
-			}
 		} else {
 			currentIdentity = await readProcessStartTime(entry.pidFile.pid);
 		}
@@ -682,11 +660,11 @@ async function waitForHostExit(
 			await delay(process.platform === "win32" ? 1_000 : 50);
 			continue;
 		}
-		if (!probeTimedOut || dumpSaysGone) {
+		if (!probeTimedOut) {
 			if (!existsSync(entry.pidFilePath)) return;
 			// Force-kill teardown can leave a stale pidfile after the recorded process
-			// is already gone (the CIM dump showed TARGET=empty and the endpoint was
-			// ENOENT). A nonmatching identity is the test's live-CIM stale-state proof,
+			// is already gone and the endpoint is no longer connectable. A nonmatching
+			// identity is the test's live-CIM stale-state proof,
 			// not a raw PID-liveness guess. File deletion and process death are not
 			// atomic; remove the stale state before the next lifecycle scenario.
 			rmSync(entry.pidFilePath, { force: true });
@@ -695,23 +673,17 @@ async function waitForHostExit(
 		}
 		await delay(1_000);
 	}
-	if (process.platform === "win32") {
-		const stderrPath = join(entry.pidFilePath, "..", "stderr.log");
-		console.error(`RPC_WIN32_DIAGNOSTIC waitForHostExit timeout pid=${entry.pidFile.pid} timeoutMs=${timeoutMs}`);
-		console.error(`RPC_WIN32_DIAGNOSTIC supervisor-stderr-tail=${JSON.stringify(readFileSync(stderrPath, "utf8").slice(-12_000))}`);
-		dumpWindowsProcessDiagnostics(entry.pidFile.pid, dirname(dirname(dirname(entry.pidFilePath))));
-	}
 	throw new Error(`RPC socket host pid ${entry.pidFile.pid} did not exit within ${timeoutMs}ms`);
 }
 
-function probeWindowsProcessIdentity(pid: number): { identity?: string; timedOut: boolean } {
-	const command = `$process = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; $process.CreationDate.ToFileTimeUtc().ToString(\"D\", [Globalization.CultureInfo]::InvariantCulture)`;
+function probeWindowsProcessIdentity(pid: number, timeoutMs: number): { identity?: string; timedOut: boolean } {
+	const command = `$process = Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; $process.CreationDate.ToFileTimeUtc().ToString("D", [Globalization.CultureInfo]::InvariantCulture)`;
 	try {
-		const output = execFileSync(
-			"powershell.exe",
-			["-NoProfile", "-NonInteractive", "-Command", command],
-			{ encoding: "utf8", windowsHide: true, timeout: 10_000 },
-		);
+		const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], {
+			encoding: "utf8",
+			windowsHide: true,
+			timeout: timeoutMs,
+		});
 		return { identity: output.trim() || undefined, timedOut: false };
 	} catch (cause) {
 		const error = cause as { code?: unknown; killed?: unknown; signal?: unknown };
@@ -719,28 +691,6 @@ function probeWindowsProcessIdentity(pid: number): { identity?: string; timedOut
 			identity: undefined,
 			timedOut: error.code === "ETIMEDOUT" || error.killed === true || error.signal === "SIGTERM",
 		};
-	}
-}
-
-function dumpWindowsProcessDiagnostics(pid: number, qaDir: string): boolean | undefined {
-	const escapedQaDir = qaDir.replace(/'/g, "''");
-	const command = `$target = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" | Select-Object ProcessId,ParentProcessId,Name,CreationDate,CommandLine; $related = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -match [regex]::Escape('${escapedQaDir}') -or $_.CommandLine -match 'senpi') } | Select-Object ProcessId,ParentProcessId,Name,CommandLine; Write-Output ('TARGET=' + ($target | ConvertTo-Json -Compress)); Write-Output ('RELATED=' + ($related | ConvertTo-Json -Compress))`;
-	try {
-		const output = execFileSync(
-			"powershell.exe",
-			["-NoProfile", "-NonInteractive", "-Command", command],
-			{ encoding: "utf8", windowsHide: true },
-		);
-		let targetPresent: boolean | undefined;
-		for (const line of output.trim().split(/\r?\n/).filter(Boolean)) {
-			console.error(`RPC_WIN32_DIAGNOSTIC ${line}`);
-			if (line.startsWith("TARGET=")) targetPresent = line !== "TARGET=" && line !== "TARGET=null";
-		}
-		return targetPresent;
-	} catch (cause) {
-		const message = cause instanceof Error ? cause.message : String(cause);
-		console.error(`RPC_WIN32_DIAGNOSTIC process-dump-failed=${JSON.stringify(message)}`);
-		return undefined;
 	}
 }
 
