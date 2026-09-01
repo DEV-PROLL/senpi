@@ -175,12 +175,14 @@ function processAlive(pid: number): boolean {
 
 async function cleanupWatchdogPaths(config: HostWatchdogConfig): Promise<void> {
 	const paths = [...(config.cleanupPaths ?? []), ...(config.scratchDir ? [config.scratchDir] : [])];
+	writeWin32Diagnostic(`watchdog cleanup started paths=${JSON.stringify(paths)}`);
 	await Promise.all(
 		paths.map(async (path) => {
 			try {
 				await rm(path, { recursive: true, force: true });
+				writeWin32Diagnostic(`watchdog cleanup completed path=${path}`);
 			} catch {
-				/* best effort: the host is exiting either way. */
+				writeWin32Diagnostic(`watchdog cleanup failed path=${path}`);
 			}
 		}),
 	);
