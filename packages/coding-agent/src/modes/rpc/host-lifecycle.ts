@@ -375,6 +375,8 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	let observerHealthy = false;
 	let observerReconnectTimer: ReturnType<typeof setTimeout> | undefined;
 	let childExitWatchTimer: ReturnType<typeof setInterval> | undefined;
+	let supervisorHeartbeatTimer: ReturnType<typeof setInterval> | undefined;
+	let childExitWatchStatus = "not armed";
 	let shuttingDown = false;
 	let shutdownPromise: Promise<never> | undefined;
 
@@ -491,6 +493,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		shuttingDown = true;
 		clearInterval(ticker);
 		if (childExitWatchTimer) clearInterval(childExitWatchTimer);
+		if (supervisorHeartbeatTimer) clearInterval(supervisorHeartbeatTimer);
 		const hardExit =
 			process.platform === "win32"
 				? setTimeout(() => process.exit(exitCode), WINDOWS_SUPERVISOR_SHUTDOWN_HARD_EXIT_MS)
@@ -571,19 +574,37 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		const childStartTime = await readProcessStartTime(child.pid, process.platform, 1_000);
 		let missingIdentityChecks = 0;
 		let checkingChildIdentity = false;
+		childExitWatchStatus = `armed pid=${String(child.pid)} recorded=${String(childStartTime)}`;
 		const checkChildIdentity = (): void => {
-			if (shuttingDown || checkingChildIdentity || child.exitCode !== null || child.signalCode !== null) return;
+			if (shuttingDown) {
+				childExitWatchStatus = "skipped: shutting down";
+				return;
+			}
+			if (checkingChildIdentity) {
+				childExitWatchStatus = "skipped: previous probe pending";
+				return;
+			}
+			if (child.exitCode !== null || child.signalCode !== null) {
+				childExitWatchStatus = `skipped: child handle exitCode=${String(child.exitCode)} signal=${String(child.signalCode)}`;
+				return;
+			}
 			checkingChildIdentity = true;
+			childExitWatchStatus = `probing pid=${String(child.pid)} recorded=${String(childStartTime)}`;
 			void readProcessStartTime(child.pid!, process.platform, 1_000)
 				.then((currentStartTime) => {
 					if (currentStartTime === undefined) missingIdentityChecks++;
 					else missingIdentityChecks = 0;
 					const identityChanged =
 						childStartTime !== undefined && currentStartTime !== undefined && currentStartTime !== childStartTime;
+					childExitWatchStatus = `result current=${String(currentStartTime)} recorded=${String(childStartTime)} missing=${String(missingIdentityChecks)} changed=${String(identityChanged)}`;
 					if (identityChanged || missingIdentityChecks >= 2) {
 						writeWin32Diagnostic("supervisor child exit watchdog detected missing or changed child identity");
 						void shutdown("rpc host child exit observed by identity watchdog", 0);
 					}
+				})
+				.catch((cause) => {
+					childExitWatchStatus = `probe rejected: ${errorMessage(cause)}`;
+					writeStderrLine(`RPC_WIN32_DIAGNOSTIC supervisor child probe rejected error=${errorMessage(cause)}`);
 				})
 				.finally(() => {
 					checkingChildIdentity = false;
@@ -597,6 +618,16 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 			policy.coldStart === "persistent" ? "never" : String(policy.idleExitMs)
 		})`,
 	);
+	if (process.platform === "win32" && process.env.SENPI_RPC_WIN32_DIAGNOSTIC === "1") {
+		let heartbeatCount = 0;
+		supervisorHeartbeatTimer = setInterval(() => {
+			heartbeatCount++;
+			writeStderrLine(
+				`RPC_WIN32_DIAGNOSTIC supervisor heartbeat count=${String(heartbeatCount)} childWatch=${childExitWatchStatus}`,
+			);
+		}, 1_000);
+		supervisorHeartbeatTimer.unref?.();
+	}
 	await new Promise<never>(() => {});
 }
 
