@@ -136,6 +136,9 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 	stream.resume();
 	const onEnd = (): void => fire(`supervisor pipe fd ${fd} closed`);
 	stream.once("end", onEnd);
+	// Win32 pipe teardown may report close without an end event; both are kernel
+	// signals and must outrank the slower process-identity fallback.
+	stream.once("close", onEnd);
 	// A read error means the pipe is unusable, which is indistinguishable from a
 	// dead supervisor from this side; treating it as EOF keeps the binding safe.
 	// An unavailable inherited fd is a configuration/setup failure, not proof
@@ -146,6 +149,7 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 	});
 	return () => {
 		stream.off("end", onEnd);
+		stream.off("close", onEnd);
 		stream.off("error", onEnd);
 		stream.destroy();
 	};
@@ -158,6 +162,7 @@ function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
  */
 function watchPpid(supervisorPid: number, fire: (reason: string) => void): () => void {
 	let checking = false;
+	let missingIdentityChecks = 0;
 	// Tests and embedders may bind the watchdog to this process itself; that
 	// is a valid live binding rather than evidence of supervisor loss.
 	if (supervisorPid === process.pid) return () => {};
@@ -170,10 +175,13 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 		checking = true;
 		void readProcessStartTime(supervisorPid, process.platform, HOST_WATCH_PPID_PROBE_TIMEOUT_MS)
 			.then((startTime) => {
+				if (startTime === undefined) missingIdentityChecks++;
+				else missingIdentityChecks = 0;
 				writeWin32Diagnostic(
 					`watchdog ppid check supervisorPid=${String(supervisorPid)} processPpid=${String(process.ppid)} startTime=${String(startTime)}`,
 				);
 				if (process.ppid === supervisorPid && startTime !== undefined) return;
+				if (process.ppid === supervisorPid && missingIdentityChecks < 3) return;
 				fire(`supervisor pid ${supervisorPid} is gone (ppid=${process.ppid})`);
 			})
 			.finally(() => {
