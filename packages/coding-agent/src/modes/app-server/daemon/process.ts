@@ -48,7 +48,7 @@ export async function readProcessIdentity(
 						"-NoProfile",
 						"-NonInteractive",
 						"-Command",
-						`$process = Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}" -ErrorAction Stop; if ($null -eq $process) { '__SENPI_ABSENT__' } else { $process.CreationDate.ToFileTimeUtc().ToString("D", [Globalization.CultureInfo]::InvariantCulture) }`,
+						`$process = Get-CimInstance Win32_Process -Filter "ProcessId=${String(pid)}" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; $process.CreationDate.ToFileTimeUtc().ToString("D", [Globalization.CultureInfo]::InvariantCulture)`,
 					],
 				}
 			: { executable: "ps", args: ["-o", "lstart=", "-p", String(pid)] };
@@ -68,7 +68,7 @@ export async function readProcessIdentity(
 				if (output === "__SENPI_ABSENT__") return resolve({ kind: "absent" });
 				if (!output || (platform === "win32" && !/^\\d+$/.test(output)))
 					return resolve({ kind: "error", error: new Error("invalid process identity output") });
-				resolve({ kind: "present", identity: output });
+				resolve({ kind: "present", identity: identity.trim() });
 			},
 		).once("error", (error) => resolve({ kind: "error", error }));
 	});
