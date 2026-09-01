@@ -27,6 +27,8 @@ export const HOST_SCRATCH_DIR_ENV = "SENPI_RPC_HOST_SCRATCH_DIR";
 export const HOST_WATCH_PPID_ENV = "SENPI_RPC_HOST_WATCH_PPID";
 /** Poll cadence for the ppid fallback. */
 export const HOST_WATCH_PPID_INTERVAL_MS = 250;
+/** Bound the Windows PowerShell identity probe so one stuck query cannot stop future polls. */
+const HOST_WATCH_PPID_PROBE_TIMEOUT_MS = 1_000;
 export const HOST_CLEANUP_PATHS_ENV = "SENPI_RPC_HOST_CLEANUP_PATHS";
 
 export interface HostWatchdogConfig {
@@ -167,7 +169,7 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 		}
 		if (checking) return;
 		checking = true;
-		void readProcessStartTime(supervisorPid)
+		void readProcessStartTime(supervisorPid, process.platform, HOST_WATCH_PPID_PROBE_TIMEOUT_MS)
 			.then((startTime) => {
 				writeWin32Diagnostic(
 					`watchdog ppid check supervisorPid=${String(supervisorPid)} processPpid=${String(process.ppid)} startTime=${String(startTime)}`,

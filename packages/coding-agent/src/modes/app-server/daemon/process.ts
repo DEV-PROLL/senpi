@@ -53,6 +53,7 @@ export async function waitForGone(pidFile: DaemonPidFile, timeoutMs: number): Pr
 export async function readProcessStartTime(
 	pid: number,
 	platform: NodeJS.Platform = process.platform,
+	timeoutMs?: number,
 ): Promise<string | undefined> {
 	const command =
 		platform === "win32"
@@ -70,13 +71,18 @@ export async function readProcessStartTime(
 					args: ["-o", "lstart=", "-p", String(pid)],
 				};
 	return new Promise((resolveStartTime, reject) => {
-		execFile(command.executable, command.args, { windowsHide: true }, (error, stdout) => {
-			if (error) {
-				resolveStartTime(undefined);
-				return;
-			}
-			resolveStartTime(stdout.trim() || undefined);
-		}).once("error", reject);
+		execFile(
+			command.executable,
+			command.args,
+			{ windowsHide: true, ...(timeoutMs === undefined ? {} : { timeout: timeoutMs }) },
+			(error, stdout) => {
+				if (error) {
+					resolveStartTime(undefined);
+					return;
+				}
+				resolveStartTime(stdout.trim() || undefined);
+			},
+		).once("error", reject);
 	});
 }
 
