@@ -63,9 +63,9 @@ export async function readProcessStartTime(
 						"-NoProfile",
 						"-NonInteractive",
 						"-Command",
-						// A terminated Windows process can remain OpenProcess-able while a handle is held;
-						// HasExited makes the identity probe agree with actual process liveness.
-						`$process = Get-Process -Id ${String(pid)} -ErrorAction Stop; if ($process.HasExited) { exit 1 }; $process.StartTime.ToUniversalTime().Ticks`,
+						// The Windows process object can remain OpenProcess-able after exit while a
+						// handle is held. Query the live CIM process table instead of that stale object.
+						`$process = Get-CimInstance Win32_Process -Filter \"ProcessId=${String(pid)}\" -ErrorAction Stop; if ($null -eq $process) { exit 1 }; [System.Management.ManagementDateTimeConverter]::ToDateTime($process.CreationDate).ToUniversalTime().Ticks`,
 					],
 				}
 			: {
