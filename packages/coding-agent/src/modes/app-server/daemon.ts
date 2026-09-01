@@ -220,8 +220,28 @@ async function spawnDaemon(paths: DaemonPaths, listen: AppServerListen): Promise
 			await cleanupState(paths, listen);
 			throw error;
 		}
-		await writeFile(paths.pidFile, `${JSON.stringify({ pid, processStartTime: startTime })}\n`, { mode: 0o600 });
-		await writeFile(paths.settingsFile, `${JSON.stringify({ listen })}\n`, { mode: 0o600 });
+		try {
+			await writeFile(paths.pidFile, `${JSON.stringify({ pid, processStartTime: startTime })}\n`, { mode: 0o600 });
+			await writeFile(paths.settingsFile, `${JSON.stringify({ listen })}\n`, { mode: 0o600 });
+		} catch (error: unknown) {
+			// Registration is the ownership hand-off point. Until both files exist,
+			// retain the exact ChildProcess handle and terminate it on any write
+			// failure so a partial registration can never leave an unmanaged daemon.
+			if (child.exitCode === null && child.signalCode === null) {
+				try {
+					child.kill("SIGTERM");
+				} catch {}
+				await Promise.race([exited, delay(2_000)]);
+				if (child.exitCode === null && child.signalCode === null) {
+					try {
+						child.kill("SIGKILL");
+					} catch {}
+					await exited;
+				}
+			}
+			await cleanupState(paths, listen);
+			throw error;
+		}
 		child.unref();
 		return { pid, exited };
 	} finally {
