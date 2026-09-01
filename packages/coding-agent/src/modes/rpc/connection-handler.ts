@@ -57,6 +57,7 @@ import { getSupportedThinkingLevels } from "../../core/thinking-levels.ts";
 import { ProjectTrustStore } from "../../core/trust-manager.ts";
 import { type Theme, theme } from "../interactive/theme/theme.ts";
 import {
+	AUTO_TITLE_SESSIONS_CAPABILITY,
 	buildCustomUnsupportedRequest,
 	DEFAULT_CUSTOM_EXTENSION_LABEL,
 	EXTENSION_EVENTS_CAPABILITY,
@@ -989,7 +990,9 @@ export function createRpcConnectionHandler(
 					data: {
 						protocolVersion: 1,
 						serverVersion: VERSION,
-						capabilities: [...new Set(["multi_session", ...(options.capabilities ?? [])])],
+						capabilities: [
+							...new Set(["multi_session", AUTO_TITLE_SESSIONS_CAPABILITY, ...(options.capabilities ?? [])]),
+						],
 						mode: "classic",
 					},
 				};
