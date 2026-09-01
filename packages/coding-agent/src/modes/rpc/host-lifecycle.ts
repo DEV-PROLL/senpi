@@ -298,14 +298,12 @@ export function resolveHostChildLaunch(
 	};
 }
 
-const WINDOWS_SHELL_META_CHARS = /([()%!^"<>&|;, ])/g;
-
 /** Mirrors cross-spawn: survives cmd.exe parsing and `CommandLineToArgvW`. */
 function quoteWindowsShellArg(value: string): string {
 	const escaped = value
 		.replace(/(\\*)"/g, '$1$1\\"')
 		.replace(/(\\*)$/, "$1$1")
-		.replace(WINDOWS_SHELL_META_CHARS, "^$1");
+		.replace(/([()%!^"<>&|;,])/g, "^$1");
 	return `"${escaped}"`;
 }
 
