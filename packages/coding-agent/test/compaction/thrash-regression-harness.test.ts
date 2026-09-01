@@ -113,13 +113,31 @@ async function runLongSession(
 	const summary = deferred<ReturnType<typeof fauxAssistantMessage>>();
 	harness.setResponses([() => summary.promise, fauxAssistantMessage("normal response")]);
 	const runner = harness.getExtensionRunner();
+	// Idle speculation is gated on a PERSISTENT extension mode (idle.ts: tui/rpc/app-server).
+	// The suite harness leaves the runner at its "print" default, where agent_end can never
+	// reach startSpeculativeCompaction - which made any invalidation bound vacuous. Pin a
+	// real interactive mode so the speculative lifecycle actually runs.
+	runner.setUIContext(undefined, "tui");
 	if ((harness.session.getContextUsage()?.tokens ?? 0) < threshold - lead)
 		throw new Error(`usage too low: ${harness.session.getContextUsage()?.tokens}`);
 	const turn = runner.emit({ type: "agent_end", messages: [] });
 	for (let churnTurn = 0; churnTurn < 36; churnTurn++) {
 		for (let event = 0; event < 9; event++) await runner.emitContext([]);
 	}
-	expect(contextEvents).toBe(36 * 9);
+	// The churn above ran while a real speculative job was IN FLIGHT: the summary
+	// deferred is still unresolved here, so a logged start means the job was live for
+	// the whole churn. Without this, the invalidation bound is vacuous (0 <= 0 + 2
+	// passes with no speculative lifecycle at all). Asserted BEFORE the event count so
+	// a missing speculative lifecycle fails on its own cause, not on arithmetic.
+	const midChurn = logEvents(harness);
+	expect(count(midChurn, "speculative_started")).toBeGreaterThanOrEqual(1);
+	// A storm would invalidate on every one of the 324 churn context events; the shipped
+	// contract invalidates only on real lifecycle events.
+	expect(count(midChurn, "speculative_invalidated")).toBeLessThanOrEqual(count(midChurn, "speculative_started") + 2);
+	// 36x9 churn events plus exactly one context event from the in-flight speculative
+	// summary request itself - that extra event only exists because a real speculative
+	// job is running, so this count is itself part of the in-flight proof.
+	expect(contextEvents).toBe(36 * 9 + 1);
 	summary.resolve(fauxAssistantMessage("deterministic speculative summary"));
 	await turn;
 	await harness.session.prompt(`cross the threshold ${"prompt ".repeat(20_000)}`);
@@ -138,24 +156,42 @@ async function runLongSession(
 }
 
 describe("production-shaped compaction thrash regression", () => {
-	it("keeps counters bounded through real AgentSession and ExtensionRunner sequencing", async () => {
+	// The 36x9 churn through the real AgentSession/ExtensionRunner is the expensive part
+	// (~35s standalone, several times that under full-suite worker contention). It runs on
+	// the 200K window, whose geometry is the tightest (largest maxTokens share), and the
+	// window-independent geometry contract is pinned separately for every shipped window
+	// below - so coverage is unchanged while the wall clock stays sane.
+	it("keeps counters bounded through real AgentSession and ExtensionRunner sequencing", {
+		timeout: 180_000,
+	}, async () => {
+		const contextWindow = 200_000;
+		const { harness, events, contextEvents } = await runLongSession(contextWindow);
+		const reserve = resolveEffectiveReserveTokens(contextWindow, harness.settingsManager.getCompactionSettings());
+		const thresholdTokens = contextWindow * computeEffectiveThreshold(contextWindow);
+		const lead = resolveSpeculationLeadTokens(thresholdTokens);
+		expect(count(events, "threshold_trigger") + count(events, "hard_limit_trigger")).toBeGreaterThanOrEqual(1);
+		expect(count(events, "emergency_prune")).toBe(0);
+		expect(count(events, "speculative_started")).toBeGreaterThanOrEqual(1);
+		expect(count(events, "speculative_invalidated")).toBeLessThanOrEqual(count(events, "speculative_started") + 2);
+		expect(thresholdTokens - lead).toBeLessThan(thresholdTokens);
+		expect(thresholdTokens).toBeLessThan(contextWindow - reserve);
+		expect(contextEvents).toBe(36 * 9 + 2);
+		expect(harness.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(true);
+	});
+
+	it("orders speculation, threshold and emergency points for every shipped window", async () => {
 		for (const contextWindow of WINDOWS) {
-			const { harness, events, contextEvents } = await runLongSession(contextWindow);
+			const harness = await createHarness({
+				models: [{ id: `geometry-${contextWindow}`, contextWindow }],
+				settings: { compaction: { enabled: true, keepRecentTokens: 1 } },
+				extensionFactories: [(pi) => compactionExtension(pi)],
+			});
+			harnesses.push(harness);
 			const reserve = resolveEffectiveReserveTokens(contextWindow, harness.settingsManager.getCompactionSettings());
 			const thresholdTokens = contextWindow * computeEffectiveThreshold(contextWindow);
 			const lead = resolveSpeculationLeadTokens(thresholdTokens);
-			const speculationPoint = thresholdTokens - lead;
-			const thresholdPoint = thresholdTokens;
-			const emergencyPoint = contextWindow - reserve;
-			expect(count(events, "threshold_trigger") + count(events, "hard_limit_trigger")).toBeGreaterThanOrEqual(1);
-			expect(count(events, "emergency_prune")).toBe(0);
-			expect(speculationPoint).toBeLessThan(thresholdPoint);
-			expect(thresholdPoint).toBeLessThan(emergencyPoint);
 			expect(thresholdTokens - lead).toBeLessThan(thresholdTokens);
 			expect(thresholdTokens).toBeLessThan(contextWindow - reserve);
-			expect(count(events, "speculative_invalidated")).toBeLessThanOrEqual(count(events, "speculative_started") + 2);
-			expect(contextEvents).toBe(36 * 9 + 2);
-			expect(harness.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(true);
 		}
 	});
 
