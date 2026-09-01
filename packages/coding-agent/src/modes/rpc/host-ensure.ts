@@ -9,6 +9,7 @@ import { ENV_AGENT_DIR, getAgentDir, isBunBinary, VERSION } from "../../config.t
 import {
 	type DaemonPidFile,
 	parseDaemonPidFile,
+	processIsLive,
 	processMatchesPidFile,
 	waitForStartTime,
 } from "../app-server/daemon/process.ts";
@@ -24,6 +25,7 @@ import {
 	INTERNAL_SUPERVISOR_FLAG,
 } from "./host-lifecycle.ts";
 import { acquireOwnershipSafeLock } from "./ownership-safe-lock.ts";
+import { resolveSocketTransportAddress } from "./socket-transport.ts";
 
 export type { HostColdStart, HostLifecyclePolicyInput };
 
@@ -228,7 +230,7 @@ async function signalValidated(pidFile: DaemonPidFile, signal: NodeJS.Signals): 
 async function waitForGone(pidFile: DaemonPidFile, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
-		if (!(await processMatchesPidFile(pidFile))) return true;
+		if (!processIsLive(pidFile.pid)) return true;
 		await delay(50);
 	}
 	return false;
@@ -264,7 +266,7 @@ function isChildExit(value: ProtocolInfo | ChildExit | undefined): value is Chil
 
 function probeProtocolInfo(socketPath: string, timeoutMs: number): Promise<ProtocolInfo | undefined> {
 	return new Promise((resolveProbe) => {
-		const socket = createConnection(socketPath);
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
 		let buffer = "";
 		let settled = false;
 		const finish = (value?: ProtocolInfo): void => {

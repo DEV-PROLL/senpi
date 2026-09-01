@@ -1,5 +1,30 @@
 # changes
 
+## 2026-09-01 - Windows shared hosts use deterministic named pipes
+
+### What changed
+
+- `packages/coding-agent/src/modes/rpc/socket-transport.ts` maps every logical Windows socket path to `\\.\pipe\senpi-rpc-<sha256[:32]>`; POSIX filesystem and abstract socket addresses remain unchanged.
+- `host-lifecycle.ts`, `multi-session-host.ts`, `host-ensure.ts`, and `rpc-client.ts` resolve that transport address at every listen/connect boundary while locks, settings, diagnostics, and CLI arguments keep the original logical socket path.
+- Windows skips filesystem-only socket chmod/unlink cleanup; the pipe is kernel-owned and disappears when its listener closes.
+
+### Why
+
+- Node treats a Windows filesystem path passed to `net.Server.listen()` as an invalid pipe address and fails with `EACCES`. Both the private supervisor-to-host hop and the public shared endpoint used `.sock` paths, so no Windows shared host could start.
+- A path hash gives independently launched clients and listeners the same bounded pipe name without publishing user paths into the global pipe namespace.
+
+### Known Windows gap (not addressed here)
+
+- When the lifecycle supervisor is hard-terminated, Windows tears the internal host down without running any JS, so the watchdog's cleanup never executes and the supervisor's empty `senpi-rpc-host-internal-*` directory survives. That is process-lifetime behavior, not transport: the directories leak empty, no host or pipe outlives them, and `rpc-host-lifecycle.test.ts` still pins the POSIX contract. Fixing it needs an ownership janitor at ensure time, which is deliberately out of this change's scope.
+
+### Why an extension could not handle it
+
+- Socket address resolution happens before extensions or sessions exist and must be identical in the lifecycle supervisor, host, ensure probe, and SDK client.
+
+### Expected merge conflict zones
+
+- LOW: the net transport calls and filesystem cleanup guards in `host-lifecycle.ts` and `multi-session-host.ts`; one import and one `createConnection` expression each in `host-ensure.ts` and `rpc-client.ts`.
+
 ## 2026-08-31 - Ownership-safe RPC and app-server state locks
 
 - Replaced proper-lockfile for the shared RPC-host and app-server daemon locks with a persistent regular SQLite lock file using `BEGIN EXCLUSIVE`; release commits and closes without unlinking.

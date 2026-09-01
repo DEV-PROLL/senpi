@@ -6,6 +6,10 @@
 
 ### Fixed
 
+- Windows: the shared RPC host can start. Listeners and clients now map the logical socket path to a deterministic named pipe (`\\.\pipe\senpi-rpc-<hash>`) instead of passing a `.sock` filesystem path to `listen()`, which Windows rejected with `EACCES`.
+- Windows: daemon and shared-host ownership registration works. Process start time is read with PowerShell instead of `ps -o lstart=`, which Git for Windows' MSYS `ps` rejects, so a spawned host no longer fails with "had no process start time".
+- Waiting for a validated process to exit no longer re-runs the start-time ownership probe on every poll; liveness uses a signal-0 check, removing up to ~100 subprocess launches per stop.
+
 ### New Features
 
 ### Breaking Changes

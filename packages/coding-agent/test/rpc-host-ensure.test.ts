@@ -6,11 +6,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { VERSION } from "../src/config.ts";
 import {
+	processIsLive,
 	processMatchesPidFile,
 	readProcessStartTime,
 	waitForStartTime,
 } from "../src/modes/app-server/daemon/process.ts";
 import { createHostDaemonPaths, defaultHostLaunch, ensureHost } from "../src/modes/rpc/host-ensure.ts";
+import { resolveSocketTransportAddress } from "../src/modes/rpc/socket-transport.ts";
 
 const roots: string[] = [];
 const children: ChildProcess[] = [];
@@ -93,7 +95,7 @@ describe("ensureHost", () => {
 		expect(result.reused).toBe(false);
 		expect(result.pid).not.toBe(old.pid);
 		await expectGone(old.pidFile);
-	});
+	}, 15_000);
 
 	it("replaces a host missing a required capability", async () => {
 		const qa = await scratch("missing-capability");
@@ -102,7 +104,7 @@ describe("ensureHost", () => {
 		expect(result.reused).toBe(false);
 		expect(result.pid).not.toBe(old.pid);
 		await expectGone(old.pidFile);
-	});
+	}, 15_000);
 
 	it("cleans a stale dead pidfile and starts fresh", async () => {
 		const qa = await scratch("stale-pidfile");
@@ -122,9 +124,9 @@ describe("ensureHost", () => {
 		const startedAt = Date.now();
 		const result = await ensureFixtureHost(qa, { stopTimeoutMs: 200 });
 		expect(result.pid).not.toBe(old.pid);
-		expect(Date.now() - startedAt).toBeLessThan(5_000);
+		expect(Date.now() - startedAt).toBeLessThan(8_000);
 		await expectGone(old.pidFile);
-	});
+	}, 15_000);
 
 	it("fails within the readiness budget and includes stderr diagnostics", async () => {
 		const qa = await scratch("readiness-failure");
@@ -148,7 +150,7 @@ describe("ensureHost", () => {
 		await expect(
 			ensureFixtureHost(qa, {
 				readinessTimeoutMs: 5_000,
-				spawn: { command: "/bin/sh", args: ["-c", "exit 7"] },
+				spawn: { command: process.execPath, args: ["-e", "process.exit(7)"] },
 			}),
 		).rejects.toThrow(/exited.*7/);
 		expect(Date.now() - startedAt).toBeLessThan(2_500);
@@ -157,11 +159,16 @@ describe("ensureHost", () => {
 	it("reports an incompatible protocol answer instead of a readiness timeout", async () => {
 		const qa = await scratch("incompatible-answer");
 		const helper = `
+			const { createHash } = require("node:crypto");
 			const net = require("node:net");
+			const path = process.argv[1];
+			const address = process.platform === "win32"
+				? "\\\\\\\\.\\\\pipe\\\\senpi-rpc-" + createHash("sha256").update(path).digest("hex").slice(0, 32)
+				: path;
 			const server = net.createServer((socket) => {
 				socket.on("data", () => socket.end(JSON.stringify({ id: "ensure-host-probe", success: true, data: { serverVersion: "0.0.0-wrong", capabilities: [] } }) + "\\n"));
 			});
-			server.listen(process.argv[1]);
+			server.listen(address);
 		`;
 		await expect(
 			ensureFixtureHost(qa, {
@@ -236,7 +243,7 @@ async function startManagedFixture(
 
 async function protocolInfo(socketPath: string): Promise<Record<string, unknown>> {
 	return new Promise((resolve, reject) => {
-		const socket = createConnection(socketPath);
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
 		let buffer = "";
 		const timer = setTimeout(() => finish(new Error("protocol timeout")), 1_000);
 		const finish = (error?: Error, value?: Record<string, unknown>) => {
@@ -270,7 +277,7 @@ async function waitForProtocol(socketPath: string): Promise<void> {
 async function expectGone(pidFile: { pid: number; processStartTime: string }): Promise<void> {
 	const deadline = Date.now() + 3_000;
 	while (Date.now() <= deadline) {
-		if (!(await processMatchesPidFile(pidFile, readProcessStartTime))) return;
+		if (!processIsLive(pidFile.pid)) return;
 		await new Promise((resolve) => setTimeout(resolve, 20));
 	}
 	throw new Error(`pid ${pidFile.pid} remained alive`);

@@ -30,6 +30,7 @@ import type {
 	RpcSessionState,
 	RpcSlashCommand,
 } from "./rpc-types.ts";
+import { resolveSocketTransportAddress } from "./socket-transport.ts";
 
 // ============================================================================
 // Types
@@ -262,7 +263,7 @@ export class RpcClient {
 	}
 
 	private async startSocket(path: string): Promise<void> {
-		const socket = createConnection(path);
+		const socket = createConnection(resolveSocketTransportAddress(path, process.platform));
 		this.socket = socket;
 		await new Promise<void>((resolve, reject) => {
 			const onConnect = () => {

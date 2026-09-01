@@ -20,6 +20,7 @@ import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
 import { type RpcBindingFactory, SessionCommandRouter } from "./session-command-router.ts";
 import { SessionEventWriter } from "./session-event-writer.ts";
 import { RpcSessionRegistry } from "./session-registry.ts";
+import { resolveSocketTransportAddress } from "./socket-transport.ts";
 
 export interface MultiSessionHostOptions {
 	agentDir: string;
@@ -337,7 +338,7 @@ async function prepareSocketPath(socketPath: string): Promise<void> {
 
 function probeSocket(socketPath: string): Promise<boolean> {
 	return new Promise((resolve) => {
-		const socket = createConnection(socketPath);
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
 		const settle = (live: boolean) => {
 			socket.destroy();
 			resolve(live);
@@ -351,9 +352,9 @@ function probeSocket(socketPath: string): Promise<boolean> {
 function listen(server: Server, socketPath: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(socketPath, async () => {
+		server.listen(resolveSocketTransportAddress(socketPath, process.platform), async () => {
 			server.off("error", reject);
-			if (!socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
+			if (process.platform !== "win32" && !socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
 			resolve();
 		});
 	});
@@ -366,7 +367,7 @@ function closeServer(server: Server): Promise<void> {
 }
 
 async function removeSocketPath(socketPath: string): Promise<void> {
-	if (socketPath.startsWith("\0")) return;
+	if (process.platform === "win32" || socketPath.startsWith("\0")) return;
 	try {
 		await unlink(socketPath);
 	} catch (cause) {

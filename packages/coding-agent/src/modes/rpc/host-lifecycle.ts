@@ -54,6 +54,7 @@ import {
 	HOST_WATCH_PPID_ENV,
 } from "./host-watchdog.ts";
 import { attachJsonlLineReader, MAX_RPC_LINE_CHARACTERS } from "./jsonl.ts";
+import { resolveSocketTransportAddress } from "./socket-transport.ts";
 
 export type HostColdStart = "transient" | "persistent";
 
@@ -338,7 +339,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 			client.destroy();
 			return;
 		}
-		const internal = createConnection(internalSocket);
+		const internal = createConnection(resolveSocketTransportAddress(internalSocket, process.platform));
 		clientSockets.add(client);
 		const detach = (): void => {
 			clientSockets.delete(client);
@@ -440,7 +441,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		await shutdown(`startup failed: ${errorMessage(cause)}`, 1);
 	}
 	async function connectObserver(): Promise<void> {
-		const next = createConnection(internalSocket);
+		const next = createConnection(resolveSocketTransportAddress(internalSocket, process.platform));
 		await waitForConnect(next, 5_000);
 		observer = next;
 		observerHealthy = true;
@@ -528,7 +529,7 @@ async function waitForListener(socketPath: string, timeoutMs: number): Promise<v
 
 function canConnect(socketPath: string): Promise<boolean> {
 	return new Promise((resolve) => {
-		const socket = createConnection(socketPath);
+		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform));
 		const settle = (value: boolean): void => {
 			socket.destroy();
 			resolve(value);
@@ -564,6 +565,7 @@ function waitForConnect(socket: Socket, timeoutMs: number): Promise<void> {
 
 async function prepareSocketPath(socketPath: string): Promise<void> {
 	await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
+	if (process.platform === "win32") return;
 	try {
 		await access(socketPath);
 	} catch (cause) {
@@ -577,9 +579,9 @@ async function prepareSocketPath(socketPath: string): Promise<void> {
 function listen(server: Server, socketPath: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(socketPath, async () => {
+		server.listen(resolveSocketTransportAddress(socketPath, process.platform), async () => {
 			server.off("error", reject);
-			if (!socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
+			if (process.platform !== "win32" && !socketPath.startsWith("\0")) await chmod(socketPath, 0o600);
 			resolve();
 		});
 	});

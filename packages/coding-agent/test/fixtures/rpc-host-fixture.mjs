@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname } from "node:path";
@@ -9,7 +10,11 @@ const capabilities = (process.argv[4] ?? "multi_session,extension_events").split
 const behavior = process.argv[5] ?? "answer";
 if (!socketPath) throw new Error("socket path required");
 await mkdir(dirname(socketPath), { recursive: true });
-await rm(socketPath, { force: true });
+if (process.platform !== "win32") await rm(socketPath, { force: true });
+const transportAddress =
+	process.platform === "win32"
+		? `\\\\.\\pipe\\senpi-rpc-${createHash("sha256").update(socketPath, "utf8").digest("hex").slice(0, 32)}`
+		: socketPath;
 if (behavior === "ignore-term") process.on("SIGTERM", () => {});
 const server = createServer((socket) => {
 	let buffer = "";
@@ -32,7 +37,7 @@ const server = createServer((socket) => {
 		}
 	});
 });
-server.listen(socketPath);
+server.listen(transportAddress);
 process.on("SIGTERM", () => {
 	if (behavior === "ignore-term") return;
 	server.close(() => process.exit(0));

@@ -44,15 +44,33 @@ export async function stopValidatedPid(pidFile: DaemonPidFile, signal: NodeJS.Si
 export async function waitForGone(pidFile: DaemonPidFile, timeoutMs: number): Promise<boolean> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
-		if (!(await processMatchesPidFile(pidFile))) return true;
+		if (!processIsLive(pidFile.pid)) return true;
 		await delay(100);
 	}
 	return false;
 }
 
-export async function readProcessStartTime(pid: number): Promise<string | undefined> {
+export async function readProcessStartTime(
+	pid: number,
+	platform: NodeJS.Platform = process.platform,
+): Promise<string | undefined> {
+	const command =
+		platform === "win32"
+			? {
+					executable: "powershell.exe",
+					args: [
+						"-NoProfile",
+						"-NonInteractive",
+						"-Command",
+						`(Get-Process -Id ${String(pid)} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
+					],
+				}
+			: {
+					executable: "ps",
+					args: ["-o", "lstart=", "-p", String(pid)],
+				};
 	return new Promise((resolveStartTime, reject) => {
-		execFile("ps", ["-o", "lstart=", "-p", String(pid)], (error, stdout) => {
+		execFile(command.executable, command.args, { windowsHide: true }, (error, stdout) => {
 			if (error) {
 				resolveStartTime(undefined);
 				return;
@@ -60,6 +78,16 @@ export async function readProcessStartTime(pid: number): Promise<string | undefi
 			resolveStartTime(stdout.trim() || undefined);
 		}).once("error", reject);
 	});
+}
+
+export function processIsLive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error: unknown) {
+		if (isNodeErrorCode(error, "ESRCH")) return false;
+		throw error;
+	}
 }
 
 export async function waitForStartTime(pid: number, timeoutMs: number): Promise<string> {
