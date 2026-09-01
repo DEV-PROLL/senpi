@@ -374,6 +374,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	const busySessions = new Map<string, number>();
 	let observerHealthy = false;
 	let observerReconnectTimer: ReturnType<typeof setTimeout> | undefined;
+	let childExitWatchTimer: ReturnType<typeof setInterval> | undefined;
 	let shuttingDown = false;
 	let shutdownPromise: Promise<never> | undefined;
 
@@ -489,6 +490,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		if (shuttingDown) process.exit(exitCode);
 		shuttingDown = true;
 		clearInterval(ticker);
+		if (childExitWatchTimer) clearInterval(childExitWatchTimer);
 		const hardExit =
 			process.platform === "win32"
 				? setTimeout(() => process.exit(exitCode), WINDOWS_SUPERVISOR_SHUTDOWN_HARD_EXIT_MS)
@@ -565,6 +567,31 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		next.once("error", lost);
 	}
 
+	if (process.platform === "win32" && child.pid !== undefined) {
+		const childStartTime = await readProcessStartTime(child.pid, process.platform, 1_000);
+		let missingIdentityChecks = 0;
+		let checkingChildIdentity = false;
+		const checkChildIdentity = (): void => {
+			if (shuttingDown || checkingChildIdentity || child.exitCode !== null || child.signalCode !== null) return;
+			checkingChildIdentity = true;
+			void readProcessStartTime(child.pid!, process.platform, 1_000)
+				.then((currentStartTime) => {
+					if (currentStartTime === undefined) missingIdentityChecks++;
+					else missingIdentityChecks = 0;
+					const identityChanged =
+						childStartTime !== undefined && currentStartTime !== undefined && currentStartTime !== childStartTime;
+					if (identityChanged || missingIdentityChecks >= 2) {
+						writeWin32Diagnostic("supervisor child exit watchdog detected missing or changed child identity");
+						void shutdown("rpc host child exit observed by identity watchdog", 0);
+					}
+				})
+				.finally(() => {
+					checkingChildIdentity = false;
+				});
+		};
+		childExitWatchTimer = setInterval(checkChildIdentity, 500);
+		childExitWatchTimer.unref?.();
+	}
 	writeStderrLine(
 		`senpi rpc host ready on unix://${publicSocket} (coldStart=${policy.coldStart}, idleExitMs=${
 			policy.coldStart === "persistent" ? "never" : String(policy.idleExitMs)
