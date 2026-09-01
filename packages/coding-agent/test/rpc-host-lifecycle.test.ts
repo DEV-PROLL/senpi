@@ -38,6 +38,8 @@ import {
 	readHostWatchdogConfig,
 } from "../src/modes/rpc/host-watchdog.ts";
 import {
+	authenticateSocket,
+	createSocketSecret,
 	readSocketSecret,
 	resolveSocketTransportAddress,
 	sendSocketHandshake,
@@ -49,6 +51,7 @@ const roots: string[] = [];
 const peers: JsonlPeer[] = [];
 const models: HeldAnthropicModel[] = [];
 const managed: Array<{ pidFile: { pid: number; processStartTime: string }; pidFilePath: string }> = [];
+const collisionChildFixture = join(import.meta.dirname, "fixtures", "rpc-collision-child.ts");
 
 afterEach(async () => {
 	for (const peer of peers.splice(0)) peer.destroy();
@@ -224,12 +227,14 @@ describe("ensureHost-spawned host lifecycle", () => {
 
 	it("preserves a live public socket when supervisor startup cannot bind it", async () => {
 		const qa = scratch("collision");
-		const live = createServer((socket) => socket.resume());
+		const secret = process.platform === "win32" ? await createSocketSecret(socketSecretPath(qa.socket)) : undefined;
+		const live = createServer((socket) => {
+			if (secret) authenticateSocket(socket, secret, () => socket.resume());
+			else socket.resume();
+		});
 		await new Promise<void>((resolve) =>
-			live.listen(resolveSocketTransportAddress(qa.socket, process.platform), resolve),
+			live.listen(resolveSocketTransportAddress(qa.socket, process.platform, secret), resolve),
 		);
-		const childScript =
-			"const {createHash}=require('node:crypto'); const {createServer}=require('node:net'); const p=process.argv.at(-1); const a=process.platform==='win32'?'\\\\\\\\.\\\\pipe\\\\senpi-rpc-'+createHash('sha256').update(p).digest('hex').slice(0,32):p; const s=createServer(); s.listen(a);";
 		const supervisor = spawn(
 			process.execPath,
 			[
@@ -241,7 +246,7 @@ describe("ensureHost-spawned host lifecycle", () => {
 				"--child-command",
 				process.execPath,
 				"--child-args",
-				JSON.stringify(["-e", childScript]),
+				JSON.stringify(["--import", "tsx", collisionChildFixture]),
 			],
 			{ stdio: ["ignore", "ignore", "pipe"] },
 		);

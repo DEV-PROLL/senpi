@@ -21,6 +21,7 @@ import {
 const roots: string[] = [];
 const children: ChildProcess[] = [];
 const fixture = join(import.meta.dirname, "fixtures", "rpc-host-fixture.mjs");
+const incompatibleProtocolFixture = join(import.meta.dirname, "fixtures", "rpc-incompatible-protocol-host.ts");
 
 afterEach(async () => {
 	for (const child of children.splice(0)) await stopChild(child);
@@ -162,22 +163,13 @@ describe("ensureHost", () => {
 
 	it("reports an incompatible protocol answer instead of a readiness timeout", async () => {
 		const qa = await scratch("incompatible-answer");
-		const helper = `
-			const { createHash } = require("node:crypto");
-			const net = require("node:net");
-			const path = process.argv[1];
-			const address = process.platform === "win32"
-				? "\\\\\\\\.\\\\pipe\\\\senpi-rpc-" + createHash("sha256").update(path).digest("hex").slice(0, 32)
-				: path;
-			const server = net.createServer((socket) => {
-				socket.on("data", () => socket.end(JSON.stringify({ id: "ensure-host-probe", success: true, data: { serverVersion: "0.0.0-wrong", capabilities: [] } }) + "\\n"));
-			});
-			server.listen(address);
-		`;
 		await expect(
 			ensureFixtureHost(qa, {
 				readinessTimeoutMs: 500,
-				spawn: { command: process.execPath, args: ["-e", helper, qa.socket] },
+				spawn: {
+					command: process.execPath,
+					args: ["--import", "tsx", incompatibleProtocolFixture, qa.socket],
+				},
 			}),
 		).rejects.toThrow(/incompatible|0\\.0\\.0-wrong/);
 	}, 10_000);
