@@ -65,11 +65,15 @@ export function readHostWatchdogConfig(
 
 /** Same configuration, resolved through the brand-aware env prefixes. */
 export function readHostWatchdogConfigFromBrandEnv(): HostWatchdogConfig | undefined {
+	// The lifecycle supervisor intentionally uses the canonical SENPI_RPC_HOST_*
+	// names when spawning a child. envValue() resolves branded aliases for normal
+	// launches, but must not hide the canonical variables from the supervisor
+	// handoff or the lifetime binding is silently disabled.
 	return readHostWatchdogConfig({
-		[HOST_WATCH_FD_ENV]: envValue("RPC_HOST_WATCH_FD"),
-		[HOST_WATCH_PPID_ENV]: envValue("RPC_HOST_WATCH_PPID"),
-		[HOST_SCRATCH_DIR_ENV]: envValue("RPC_HOST_SCRATCH_DIR"),
-		[HOST_CLEANUP_PATHS_ENV]: envValue("RPC_HOST_CLEANUP_PATHS"),
+		[HOST_WATCH_FD_ENV]: process.env[HOST_WATCH_FD_ENV] ?? envValue("RPC_HOST_WATCH_FD"),
+		[HOST_WATCH_PPID_ENV]: process.env[HOST_WATCH_PPID_ENV] ?? envValue("RPC_HOST_WATCH_PPID"),
+		[HOST_SCRATCH_DIR_ENV]: process.env[HOST_SCRATCH_DIR_ENV] ?? envValue("RPC_HOST_SCRATCH_DIR"),
+		[HOST_CLEANUP_PATHS_ENV]: process.env[HOST_CLEANUP_PATHS_ENV] ?? envValue("RPC_HOST_CLEANUP_PATHS"),
 	});
 }
 
