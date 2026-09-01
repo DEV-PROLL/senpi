@@ -127,14 +127,22 @@ export function armHostWatchdog(
  */
 function watchFdForEof(fd: number, fire: (reason: string) => void): () => void {
 	let stream: ReturnType<typeof createReadStream>;
+	let fired = false;
+	const fireOnce = (reason: string): void => {
+		if (fired) return;
+		fired = true;
+		fire(reason);
+	};
 	try {
-		stream = createReadStream("", { fd, autoClose: false });
+		// The watchdog owns this inherited read end. autoClose is required on
+		// Win32 so the stream releases fd 3 and observes the pipe's terminal close.
+		stream = createReadStream("", { fd, autoClose: true });
 	} catch {
 		writeWin32Diagnostic(`watchdog fd setup failed fd=${String(fd)}`);
 		return () => {};
 	}
 	stream.resume();
-	const onEnd = (): void => fire(`supervisor pipe fd ${fd} closed`);
+	const onEnd = (): void => fireOnce(`supervisor pipe fd ${fd} closed`);
 	stream.once("end", onEnd);
 	// Win32 pipe teardown may report close without an end event; both are kernel
 	// signals and must outrank the slower process-identity fallback.
