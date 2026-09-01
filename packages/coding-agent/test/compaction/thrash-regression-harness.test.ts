@@ -99,12 +99,7 @@ async function runLongSession(contextWindow: number): Promise<{ harness: Harness
 	const runner = harness.getExtensionRunner();
 	if ((harness.session.getContextUsage()?.tokens ?? 0) < threshold - lead)
 		throw new Error(`usage too low: ${harness.session.getContextUsage()?.tokens}`);
-	await runner.emit({
-		type: "before_agent_start",
-		prompt: "speculate",
-		systemPrompt: "test",
-		systemPromptOptions: { cwd: harness.tempDir },
-	});
+	await harness.session.prompt("speculate through a real AgentSession turn");
 	const firstEntry = harness.sessionManager.getEntries()[0];
 	if (!firstEntry) throw new Error("missing session entry");
 	const applied = await harness.session.applyCompaction(
