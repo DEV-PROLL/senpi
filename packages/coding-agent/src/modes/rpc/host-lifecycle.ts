@@ -488,21 +488,27 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 		shuttingDown = true;
 		clearInterval(ticker);
 		writeStderrLine(`senpi rpc host supervisor: ${reason} shutdown`);
+		writeWin32Diagnostic(`supervisor shutdown entered reason=${reason} exitCode=${exitCode} clients=${clientSockets.size} observer=${String(observerHealthy)}`);
+		writeWin32Diagnostic("supervisor closing clients");
 		for (const client of clientSockets) client.destroy();
 		await closeServer(server);
+		writeWin32Diagnostic("supervisor public server closed");
 		// Unlink the private directory BEFORE the child stop, which can take seconds:
 		// an external SIGKILL landing during that wait (ensureHost escalates while
 		// replacing a host) would otherwise leave the directory behind. The child
 		// keeps serving through its already-open socket fd until it exits, and its
 		// own watchdog cleanup makes the removal idempotent.
 		if (internal.dir) await rm(internal.dir, { recursive: true, force: true });
+		writeWin32Diagnostic("supervisor internal directory removed");
 		await stopChild(child);
+		writeWin32Diagnostic(`supervisor child stopped exitCode=${child.exitCode} signal=${child.signalCode}`);
 		observer?.destroy();
 		if (publicSocketOwned && process.platform !== "win32") await rm(publicSocket, { force: true });
 		// Mirror ensureHost's cleanupState: the pidfile and settings describe a
 		// live host only; the stderr log stays for diagnostics.
 		await rm(paths.pidFile, { force: true });
 		await rm(paths.settingsFile, { force: true });
+		writeWin32Diagnostic("supervisor metadata removed; exiting");
 		process.exit(exitCode);
 	}
 
@@ -687,6 +693,11 @@ function closeServer(server: Server): Promise<void> {
 	return new Promise((resolve) => {
 		server.close(() => resolve());
 	});
+}
+
+function writeWin32Diagnostic(text: string): void {
+	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
+	writeStderrLine(`RPC_WIN32_DIAGNOSTIC ${text}`);
 }
 
 function writeStderrLine(text: string): void {

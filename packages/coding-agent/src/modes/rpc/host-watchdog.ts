@@ -89,6 +89,7 @@ export function armHostWatchdog(
 ): () => void {
 	if (!config) return () => {};
 	const fire = (reason: string): void => {
+		writeWin32Diagnostic(`watchdog fired reason=${reason} fd=${String(config.fd)} ppid=${String(config.ppid)}`);
 		disarm();
 		void cleanupWatchdogPaths(config).finally(() => onSupervisorGone(reason));
 	};
@@ -150,6 +151,13 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 	}, HOST_WATCH_PPID_INTERVAL_MS);
 	timer.unref?.();
 	return () => clearInterval(timer);
+}
+
+function writeWin32Diagnostic(text: string): void {
+	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
+	try {
+		process.stderr.write(`RPC_WIN32_DIAGNOSTIC ${text}\n`);
+	} catch {}
 }
 
 function processAlive(pid: number): boolean {

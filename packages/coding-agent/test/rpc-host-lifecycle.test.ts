@@ -52,6 +52,7 @@ const peers: JsonlPeer[] = [];
 const models: HeldAnthropicModel[] = [];
 const managed: Array<{ pidFile: { pid: number; processStartTime: string }; pidFilePath: string }> = [];
 const collisionChildFixture = join(import.meta.dirname, "fixtures", "rpc-collision-child.ts");
+const WIN32_DIAGNOSTIC_ENV = "SENPI_RPC_WIN32_DIAGNOSTIC";
 
 afterEach(async () => {
 	for (const peer of peers.splice(0)) peer.destroy();
@@ -525,15 +526,21 @@ async function waitForChildPids(pid: number, timeoutMs = 10_000): Promise<number
 async function endpointLive(socketPath: string): Promise<boolean> {
 	const secret = process.platform === "win32" ? await readSocketSecret(socketSecretPath(socketPath)) : undefined;
 	return new Promise((resolve) => {
-		const socket = createConnection(resolveSocketTransportAddress(socketPath, process.platform, secret));
+		const address = resolveSocketTransportAddress(socketPath, process.platform, secret);
+		const startedAt = Date.now();
+		const socket = createConnection(address);
 		if (secret) sendSocketHandshake(socket, secret);
-		const settle = (live: boolean): void => {
+		const settle = (live: boolean, event: string, cause?: unknown): void => {
+			if (process.platform === "win32") {
+				const error = cause instanceof Error ? { name: cause.name, message: cause.message, code: "code" in cause ? cause.code : undefined } : cause;
+				console.error(`RPC_WIN32_DIAGNOSTIC probe address=${JSON.stringify(address)} logical=${JSON.stringify(socketPath)} event=${event} live=${String(live)} elapsedMs=${Date.now() - startedAt} error=${JSON.stringify(error)}`);
+			}
 			socket.destroy();
 			resolve(live);
 		};
-		socket.once("connect", () => settle(true));
-		socket.once("error", () => settle(false));
-		socket.setTimeout(1_000, () => settle(false));
+		socket.once("connect", () => settle(true, "connect"));
+		socket.once("error", (cause) => settle(false, "error", cause));
+		socket.setTimeout(1_000, () => settle(false, "timeout"));
 	});
 }
 
@@ -572,6 +579,7 @@ async function ensureLifecycleHost(
 					PI_TELEMETRY: "0",
 					SENPI_RUNTIME: "node",
 					SENPI_CODING_AGENT_SESSION_DIR: qa.sessionDir,
+					[WIN32_DIAGNOSTIC_ENV]: "1",
 					...(options.env ?? {}),
 				},
 				hostArgs,
@@ -630,6 +638,11 @@ async function waitForHostExit(
 		const running = await processMatchesPidFile(entry.pidFile, readProcessStartTime);
 		if (!running && !existsSync(entry.pidFilePath)) return;
 		await delay(50);
+	}
+	if (process.platform === "win32") {
+		const stderrPath = join(entry.pidFilePath, "..", "stderr.log");
+		console.error(`RPC_WIN32_DIAGNOSTIC waitForHostExit timeout pid=${entry.pidFile.pid} timeoutMs=${timeoutMs}`);
+		console.error(`RPC_WIN32_DIAGNOSTIC supervisor-stderr-tail=${JSON.stringify(readFileSync(stderrPath, "utf8").slice(-12_000))}`);
 	}
 	throw new Error(`RPC socket host pid ${entry.pidFile.pid} did not exit within ${timeoutMs}ms`);
 }
