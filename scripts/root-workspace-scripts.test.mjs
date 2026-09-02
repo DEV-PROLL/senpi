@@ -16,19 +16,36 @@ const rootManifest = JSON.parse(readFileSync(join(repoRoot, "package.json"), "ut
  *
  *   bun run test --workspaces --if-present --workspaces --if-present ...
  *
- * The flag-before form (`npm run --workspaces --if-present test`) fans out
- * correctly under both npm and bun, so that is the shape we require here.
+ * Two shapes are safe, and they are NOT interchangeable:
+ *
+ *   - plural:   `npm run --workspaces --if-present <script>` — bun parses
+ *     `--workspaces` as its own flag and fans out natively.
+ *   - singular: `npm --workspace=<name> run <script>` — bun does NOT recognize
+ *     `--workspace=<name>`, so `npm run --workspace=<name> <script>` STILL
+ *     recurses. The flag must sit before `run` so no `npm run` substring is
+ *     left for bun to rewrite, keeping the call on real npm.
+ *
+ * Anything that leaves `npm run` followed by a singular `--workspace` is
+ * therefore just as broken as the flag-after-script-name shape.
  */
-const RECURSION_PRONE_FANOUT = /npm run\s+(?!-)[\w:.@/-]+\s+[^&|]*--workspaces?\b/;
+const FLAG_AFTER_SCRIPT_NAME = /npm run\s+(?!-)[\w:.@/-]+\s+[^&|]*--workspaces?\b/;
+const NPM_RUN_WITH_SINGULAR_WORKSPACE = /npm run\s+[^&|]*--workspace(?![s\w])/;
 
-test("root workspace fan-out scripts keep --workspaces before the script name", () => {
+function recursionRisk(body) {
+	if (FLAG_AFTER_SCRIPT_NAME.test(body)) return "workspace flag after the script name";
+	if (NPM_RUN_WITH_SINGULAR_WORKSPACE.test(body)) return "singular --workspace on an `npm run` call (bun ignores it and re-enters the root script)";
+	return undefined;
+}
+
+test("root workspace fan-out scripts cannot recurse under bun", () => {
 	const offenders = Object.entries(rootManifest.scripts ?? {})
-		.filter(([, body]) => RECURSION_PRONE_FANOUT.test(body))
-		.map(([name, body]) => `${name}: ${body}`);
+		.map(([name, body]) => ({ name, body, risk: recursionRisk(body) }))
+		.filter((entry) => entry.risk !== undefined)
+		.map((entry) => `${entry.name}: ${entry.body}  <-- ${entry.risk}`);
 
 	assert.deepEqual(
 		offenders,
 		[],
-		`These root scripts pass workspace flags after the script name, which recurses under bun.\nMove the flags before the script name (npm run --workspaces --if-present <script>):\n${offenders.join("\n")}`,
+		`These root scripts recurse under bun.\nUse \`npm run --workspaces --if-present <script>\` for all-workspace fan-out, or \`npm --workspace=<name> run <script>\` for a single workspace:\n${offenders.join("\n")}`,
 	);
 });

@@ -5,7 +5,7 @@
 ### What changed
 
 - `package.json`: the three root scripts that fan out to workspaces stop passing workspace flags after the script name. `test` and `clean` move the flags before the script name (`npm run --workspaces --if-present <script>`), and `eval` moves its flag before `run` (`npm --workspace=@code-yeongyu/senpi-evals run eval --`). npm behavior is unchanged in all three cases.
-- `scripts/root-workspace-scripts.test.mjs` (new): parses the root manifest and fails if any root script passes `--workspace`/`--workspaces` after the script name, so the shape cannot regress.
+- `scripts/root-workspace-scripts.test.mjs` (new): parses the root manifest and fails a root script for either recursion-prone shape — a workspace flag after the script name, or a singular `--workspace` on an `npm run` call (which bun ignores, re-entering the root script). Both shipped shapes are covered; a mutation check confirms reverting `eval` to `npm run --workspace=<name> eval` fails the guard.
 
 ### Why
 
