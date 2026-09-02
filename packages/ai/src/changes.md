@@ -34,6 +34,25 @@
 
 - LOW: `utils/retry.ts` provider timeout pattern.
 
+## 2026-09-02 - Anthropic OAuth callback bind fallback
+
+### What changed
+
+- Anthropic OAuth now falls back to manual redirect URL entry when local callback port 53692 cannot bind with EACCES, EADDRINUSE, or EPERM, while preserving the registered localhost redirect URI.
+
+### Why
+
+- Fixed or restricted callback ports can be unavailable on Windows, sandboxed hosts, or when another senpi/Claude process is already listening, so login must not fail before presenting its existing manual-code path.
+
+### Why an extension could not handle it
+
+- The callback listener is created and owned inside the Anthropic provider OAuth implementation before auth interaction events are emitted; an extension cannot intercept its bind failure or preserve the provider's registered redirect URI.
+
+### Expected merge conflict zones
+
+- MEDIUM: `src/auth/oauth/anthropic.ts` callback listener startup, auth URL instructions, and cleanup.
+- LOW: `test/anthropic-oauth.test.ts` OAuth interaction coverage.
+
 ## Cursor conversation cache eviction cannot break a live request (2026-08-31)
 
 ### What changed
