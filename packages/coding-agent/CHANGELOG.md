@@ -6,6 +6,7 @@
 
 ### Changed
 
+- The universal fallback system prompt (models without a dedicated preset) is rewritten to the contracts proven by the dieted per-model presets: the routing line now declares an observable stop condition, the Surface Form table and request-classification taxonomy are compressed into three intent-family decision rules, parallel-tool and exploration guidance merge into one Working the Task section with a one-plan commitment rule, verification adopts the claim-audit rule, policies collapse into four hard blocks, and the style section gains end-of-turn, blocked-part, surgical-edit, and context-continuation rules — at a net cost of +6 tokens.
 - The terminal monitor footer now labels paused monitors as `muted` or `N muted` while preserving the `paused` wire field.
 
 ### Fixed
