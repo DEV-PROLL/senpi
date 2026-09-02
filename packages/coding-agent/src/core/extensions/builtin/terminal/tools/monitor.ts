@@ -31,12 +31,21 @@ export const monitorSchema = Type.Object({
 	),
 	command: Type.Optional(
 		Type.String({
-			description: "Create (required): shell command to run and watch in a PTY-backed monitor session.",
+			description:
+				"Create, command branch (XOR path): shell command to run and watch in a PTY-backed monitor session.",
 		}),
 	),
-	path: Type.Optional(Type.String({ minLength: 1, description: "File path to watch for a native event." })),
+	path: Type.Optional(
+		Type.String({
+			minLength: 1,
+			description:
+				"Create, file branch (XOR command): one regular file to watch natively, whose parent directory must already exist; takes no filter and no persistent.",
+		}),
+	),
 	event: Type.Optional(
-		StringEnum(["create", "modify"] as const, { description: "Native file event (defaults to create)." }),
+		StringEnum(["create", "modify"] as const, {
+			description: "File branch only: which file event fires the watch (defaults to create).",
+		}),
 	),
 	filter: Type.Optional(
 		Type.String({ description: "Only PTY output lines matching this regex become monitor events." }),
@@ -131,10 +140,12 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 		name: TERMINAL_MONITOR_TOOL,
 		label: "monitor",
 		description:
-			"Subscribe to a command's output instead of polling: newline-terminated PTY output lines (stderr merged) that match filter arrive as injected events while you keep working; command exit always delivers a summary event. Identical consecutive line-only update batches are deduped, so a watcher reprinting unchanged status does not re-wake the session. Returns a bash_id immediately; peek with bash_output, stop with kill_bash.",
-		promptSnippet: "Subscribe to a command's PTY output lines as injected events instead of polling",
+			"Subscribe to a change instead of polling. Pass command XOR path, never both: command watches a PTY session, where newline-terminated output lines (stderr merged) that match filter arrive as injected events while you keep working and command exit always delivers a summary event; path natively watches one file and fires once: create (the default) fires only when the file appears after registration, so watch a file that already exists with event modify. The path branch takes no filter and no persistent. Identical consecutive line-only update batches are deduped, so a watcher reprinting unchanged status does not re-wake the session. Returns a bash_id immediately; peek with bash_output, stop with kill_bash.",
+		promptSnippet:
+			"Subscribe to a command's output or a file's create/modify event as injected events instead of polling",
 		promptGuidelines: [
-			"Waiting on observable state (CI checks, builds, log patterns, deploys) means a monitor, never a foreground sleep/poll loop.",
+			"Waiting on observable state (CI checks, builds, log patterns, deploys, a file landing) means a monitor, never a foreground sleep/poll loop.",
+			'Waiting for one file to appear or change is the path branch: `monitor({ description, path, event? })` beats wrapping `test -f` in a shell poll loop; a file that already exists needs `event: "modify"`, since `create` only fires on appearance, and registration needs the parent directory to exist already — when the run creates that directory too, use the `command` branch instead.',
 			"Shape the command for the events you need: one-shot gate = `until <cond>; do sleep 1; done; printf 'READY\\n'` with filter ^READY$; stream = `tail -n 0 -F <log> | grep --line-buffered <pat>` with persistent: true, then kill_bash.",
 			"Sleep loops belong INSIDE the monitor command, never in your turn: about to sleep, re-poll bash_output, or foreground-block on a long command means register a monitor and keep working.",
 		],
