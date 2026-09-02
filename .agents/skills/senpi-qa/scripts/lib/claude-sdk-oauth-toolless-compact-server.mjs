@@ -73,18 +73,33 @@ export function startToollessCompactServer(input) {
 		const server = track(
 			createServer((request, response) => {
 				const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
-				if (request.method !== "POST" || !pathname.endsWith("/v1/messages")) {
+				if (request.method !== "POST" || pathname !== "/v1/messages") {
 					rejected.push({ method: request.method, pathname, reason: "route" });
 					response.writeHead(404);
 					response.end();
 					return;
 				}
 				let raw = "";
+				let failed = false;
 				request.setEncoding("utf8");
 				request.on("data", (chunk) => {
 					raw += chunk;
 				});
+				// A client that drops mid-body must fail closed as a recorded rejection,
+				// never as silence the probe would wait on.
+				request.on("error", (error) => {
+					failed = true;
+					rejected.push({ method: request.method, pathname, reason: `request-error:${error?.code ?? error?.message ?? "unknown"}` });
+					if (!response.headersSent) response.writeHead(400);
+					response.end();
+				});
+				request.on("aborted", () => {
+					if (failed) return;
+					failed = true;
+					rejected.push({ method: request.method, pathname, reason: "aborted" });
+				});
 				request.on("end", () => {
+					if (failed) return;
 					const body = parseMessagesBody(raw);
 					if (!body) {
 						rejected.push({ method: request.method, pathname, reason: "body" });
