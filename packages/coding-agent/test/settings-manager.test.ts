@@ -428,13 +428,13 @@ describe("SettingsManager", () => {
 			expect(whenManager.getAgentStreamIdleTimeoutMs()).toBe(5_000);
 		});
 
-		it("should default the agent stream start timeout to 90s", () => {
+		it("should default the agent stream start timeout to 300s", () => {
 			const givenSettingsPath = join(agentDir, "settings.json");
 			writeFileSync(givenSettingsPath, JSON.stringify({ theme: "dark" }));
 
 			const whenManager = SettingsManager.create(projectDir, agentDir);
 
-			expect(whenManager.getAgentStreamStartTimeoutMs()).toBe(90_000);
+			expect(whenManager.getAgentStreamStartTimeoutMs()).toBe(300_000);
 		});
 
 		it("should prefer retry.provider.streamStartTimeoutMs for the agent stream start timeout", () => {

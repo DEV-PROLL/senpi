@@ -1,5 +1,24 @@
 # changes
 
+## 2026-09-02 - Provider stream-start default raised to 300s for slow thinking models
+
+### What changed
+
+- `packages/coding-agent/src/core/settings-manager.ts`: `DEFAULT_STREAM_START_TIMEOUT_MS` goes from 90_000 to 300_000, so the default provider stream-start watchdog grants 300s for the first SSE event. The effective value is still `min(default, idle timeout)`, explicit `retry.provider.streamStartTimeoutMs` overrides win unchanged, and `0` still disables the watchdog.
+- `packages/coding-agent/docs/settings.md`: the defaults table and the JSON example track the new default.
+
+### Why
+
+- Opus/Fable-class models with xhigh thinking routinely take longer than 90s to emit the first stream event, so the old default aborted healthy requests (`Provider stream start timed out after 90000ms`) and support had to tell users to raise the timeout by hand. Every comparable harness already grants 300s here (opencode's header timeout, codex's stream idle timeout, oh-my-pi's first-event timeout), and senpi's own stream idle default is already 300s.
+
+### Why an extension could not handle it
+
+- The value is a shipped core constant that applies only when no explicit setting exists; extensions can set `retry.provider.streamStartTimeoutMs` per session but cannot change the unset default every session inherits.
+
+### Expected merge conflict zones
+
+- LOW: the single constant line in `settings-manager.ts` plus the two matching rows in `docs/settings.md`.
+
 ## 2026-09-02 - Inherit extension provider settings for models.json custom models
 
 ### What changed

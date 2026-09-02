@@ -46,6 +46,8 @@
 
 ### Changed
 
+- The default provider stream-start timeout rises from 90s to 300s (`retry.provider.streamStartTimeoutMs` overrides are unchanged, and the default still never exceeds the idle timeout), so Opus/Fable-class models with long thinking no longer fail healthy requests with `Provider stream start timed out after 90000ms` before the first stream event; every comparable harness (opencode, codex, oh-my-pi) already grants 300s here. The `senpi-default` retry profile also gets more patient: the turn-stage retry budget rises from 3 to 5 attempts and the provider-stage server-hint ceiling from 60s to 300s, so long server-requested `Retry-After` waits are honored instead of failing the turn instantly.
+
 ### Fixed
 
 - Provider retry continuation watchdog messages now name `retry.provider.streamStartTimeoutMs`; claude-sdk-oauth regression coverage pins SDK `api_retry` as stream liveness on query and resident paths.

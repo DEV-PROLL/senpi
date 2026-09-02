@@ -50,7 +50,7 @@ import type { BranchSummarySettings, TerminalSettings } from "./terminal-setting
 
 export type * from "./settings-public-types.ts";
 
-export const DEFAULT_STREAM_START_TIMEOUT_MS = 90_000;
+export const DEFAULT_STREAM_START_TIMEOUT_MS = 300_000;
 export const DEFAULT_PROVIDER_STREAM_RETRY_TIMEOUT_MS = 30_000;
 
 export type TuiMode = RendererTuiMode;
@@ -1503,7 +1503,7 @@ export class SettingsManager {
 	 * accepts the request but never answers is otherwise bounded only by the
 	 * idle timeout (default 5 minutes) — long enough to make a session feel
 	 * permanently stuck. `retry.provider.streamStartTimeoutMs` overrides the
-	 * 90s default (0 disables). The default never exceeds the idle timeout and
+	 * 300s default (0 disables). The default never exceeds the idle timeout and
 	 * is disabled together with a disabled idle guard.
 	 */
 	getAgentStreamStartTimeoutMs(): number | undefined {
