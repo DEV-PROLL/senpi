@@ -21,6 +21,7 @@
 - Multi-session RPC `close_session` teardown is bounded by a 10-second grace period (configurable via `SENPI_RPC_CLOSE_GRACE_MS`), force-releasing the session and path reservation on expiry; a second close joins the in-flight teardown instead of returning `unknown_session`.
 - Monitor wake-budget pauses now use single-source, scoped state: only the noisy monitor is muted, quiet monitors are not left permanently paused, and `rearm` without a `bash_id` resumes all paused monitors.
 - Real interactive and RPC user input now resumes paused terminal monitors while extension-generated input and tool calls remain unable to unpause them.
+- Rearming a muted monitor now reports how many filter-matching output lines were dropped while it was muted; the count resets on resume.
 
 ### New Features
 

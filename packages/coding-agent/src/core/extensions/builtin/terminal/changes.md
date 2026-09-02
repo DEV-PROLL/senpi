@@ -1,5 +1,23 @@
 # terminal builtin extension — fork surface
 
+## Muted monitor dropped-line counts (2026-09-02)
+
+### What changed
+
+- Filter-matching complete lines received while a command monitor is muted are counted and reported when the monitor is re-armed; the count resets on resume.
+
+### Why
+
+- A re-arm report tells the agent how much matching output it missed without retaining or replaying dropped text.
+
+### Why an extension could not handle it
+
+- The monitor registry owns line consumption, pause state, and the re-arm lifecycle.
+
+### Expected merge conflict zones
+
+- LOW: `monitor-registry.ts`, `tools/monitor.ts`, and terminal monitor tests.
+
 ## Monitor footer muted label (2026-09-02)
 
 ### What changed

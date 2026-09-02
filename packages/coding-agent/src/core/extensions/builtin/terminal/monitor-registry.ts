@@ -23,6 +23,11 @@ export type MonitorEvent = MonitorLineEvent | MonitorSummaryEvent;
 
 export type MonitorRearmResult = "rearmed" | "not_paused" | "not_found";
 
+export interface MonitorResumeResult {
+	readonly id: string;
+	readonly mutedDropped: number;
+}
+
 export interface MonitorSnapshotEntry {
 	readonly id: string;
 	readonly description: string;
@@ -95,6 +100,7 @@ interface MonitorRecord {
 	readonly runtime: TerminalRuntimeSession;
 	readonly filter: RegExp | undefined;
 	lineBuffer: string;
+	mutedDropped: number;
 	paused: boolean;
 	settled: boolean;
 	unsubscribeOutput: (() => void) | undefined;
@@ -446,6 +452,7 @@ export class MonitorRegistry {
 			runtime: options.runtime,
 			filter: options.filter,
 			lineBuffer: "",
+			mutedDropped: 0,
 			paused: false,
 			settled: false,
 			unsubscribeOutput: undefined,
@@ -478,18 +485,24 @@ export class MonitorRegistry {
 		return this.pause([...this.#records.keys(), ...this.#files.keys()]);
 	}
 
-	resume(ids?: readonly string[]): string[] {
+	resume(ids?: readonly string[]): MonitorResumeResult[] {
 		const candidates = ids ?? [...this.#records.keys(), ...this.#files.keys()];
-		const resumed: string[] = [];
+		const resumed: MonitorResumeResult[] = [];
 		for (const id of candidates) {
 			const record = this.#records.get(id) ?? this.#files.get(id);
 			if (!record?.paused) continue;
 			record.paused = false;
-			resumed.push(record.id);
+			const mutedDropped = "mutedDropped" in record ? record.mutedDropped : 0;
+			if ("mutedDropped" in record) record.mutedDropped = 0;
+			resumed.push({ id: record.id, mutedDropped });
 			if ("pendingChange" in record && record.pendingChange) void this.#checkFile(record.id);
 		}
 		if (resumed.length > 0) this.#notifyChange();
 		return resumed;
+	}
+
+	mutedDropped(id: string): number {
+		return this.#records.get(id)?.mutedDropped ?? 0;
 	}
 
 	rearm(id: string): MonitorRearmResult {
@@ -592,7 +605,12 @@ export class MonitorRegistry {
 			const rawLine = remaining.slice(0, newline);
 			remaining = remaining.slice(newline + 1);
 			const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-			if (record.paused || (record.filter && !record.filter.test(line))) continue;
+			const matchesFilter = !record.filter || record.filter.test(line);
+			if (!matchesFilter) continue;
+			if (record.paused) {
+				record.mutedDropped += 1;
+				continue;
+			}
 			this.#emit({ type: "line", id: record.id, description: record.description, line });
 		}
 		record.lineBuffer = remaining;

@@ -240,7 +240,7 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 		if (event.source === "extension") return;
 		state.monitorNotifier?.noteActivity();
 		const resumed = state.bundle?.monitors.resume() ?? [];
-		if (resumed.length > 0) state.monitorNotifier?.resume(resumed);
+		if (resumed.length > 0) state.monitorNotifier?.resume(resumed.map((monitor) => monitor.id));
 	});
 
 	pi.on("tool_call", () => {
