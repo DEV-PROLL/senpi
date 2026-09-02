@@ -1,4 +1,5 @@
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "../../../dynamic-prompt/build.ts";
+import { buildExecutionToolingSection } from "./execution-tooling.ts";
 
 function buildClaudeOpus47Tuning(): string {
 	return `Apply instructions at the scope the user evidently intends: "every", "all", and "each" mean the full set rather than the first item, and a fix that plainly recurs covers every occurrence. State the scope you applied.
@@ -13,7 +14,12 @@ Do not wrap up early because the context window is running low; the harness auto
 export function buildClaudeOpus47Prompt(options: BuildDynamicSystemPromptOptions): string {
 	return buildDynamicSystemPrompt({
 		...options,
-		tuningSection: buildClaudeOpus47Tuning(),
+		tuningSection: [
+			buildExecutionToolingSection({ toolNames: options.selectedTools, dialect: "claude" }),
+			buildClaudeOpus47Tuning(),
+		]
+			.filter((section) => section.length > 0)
+			.join("\n\n"),
 		workstationDialect: "claude",
 	});
 }
