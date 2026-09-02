@@ -1,5 +1,23 @@
 # terminal builtin extension — fork surface
 
+## External user input resumes paused monitors (2026-09-02)
+
+### What changed
+
+- Interactive and RPC user input now resumes all paused monitors and clears their notifier delivery bookkeeping; extension-generated input and tool calls remain streak-reset-only and do not resume monitors.
+
+### Why
+
+- Real user input is an intentional re-engagement signal, while agent-owned activity must preserve wake-storm protection.
+
+### Why an extension could not handle it
+
+- The authoritative monitor registry and notifier delivery bookkeeping are private to the builtin terminal extension's session state.
+
+### Expected merge conflict zones
+
+- LOW: `extension.ts` input handling, `prompt.ts`, and the terminal monitor external-resume regression test.
+
 ## Scoped monitor wake-budget pauses (2026-09-02)
 
 ### What changed
