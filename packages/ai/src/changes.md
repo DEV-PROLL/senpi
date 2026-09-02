@@ -1,3 +1,21 @@
+## senpi-default retry profile is more patient with slow providers (2026-09-02)
+
+### What changed
+
+- `utils/retry-profile/profiles.ts`: `SENPI_DEFAULT_RETRY_PROFILE.turn.maxRetries` goes from 3 to 5. Backoff shapes, the server-hint policies, `providerRequest.maxRetries` (still 0, so no hidden second budget), and `KIMI_CODE_RETRY_PROFILE` are untouched.
+
+### Why
+
+- Opus/Fable-class models with xhigh thinking make transient provider failures more likely per turn, and the previous turn budget was the least tolerant of the harnesses we compared: opencode retries a session 5 times, codex defaults to `stream_max_retries` 5, and oh-my-pi allows up to 10 agent retries. The `providerRequest` server-hint ceiling was deliberately left alone: `planRetryDelay` has no production caller today, so changing that constant would have been an inert edit dressed up as a fix.
+
+### Why an extension could not handle it
+
+- Shipped profile constants are read by the provider-request and turn retry planners before any extension seam exists; an extension can only override them per provider through settings, not change what every session inherits.
+
+### Expected merge conflict zones
+
+- LOW: the two constant lines inside `SENPI_DEFAULT_RETRY_PROFILE` in `utils/retry-profile/profiles.ts`.
+
 ## Actionable provider stream-start timeout guidance (2026-09-02)
 
 ### What changed
