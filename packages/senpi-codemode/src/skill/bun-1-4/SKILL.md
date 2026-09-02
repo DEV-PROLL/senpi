@@ -1,6 +1,6 @@
 ---
 name: bun-1-4
-description: "MUST USE whenever writing or running JavaScript/TypeScript with Bun — including JS through the eval tool, bun -e one-liners, scratch scripts, servers, CLIs, tests, bundling, or package management. Bun 1.4 replaced 15+ npm deps with builtins: consult BEFORE npm-installing sharp, puppeteer/playwright (scraping), marked, node-cron, node-pty, concurrently, serve-static, tar, json5, fast-xml-parser, string-width — Bun ships it. Triggers: bun, Bun.serve, bun test, bun build, bun install, bun run, JS 스크립트, 번들링, 이미지 리사이즈, 헤드리스 브라우저, 크론, PTY, eval js."
+description: "MUST READ before your first js eval cell: this session's eval js kernel runs Bun 1.4+ (this skill is present only when it does). Also read before any bun -e, script, server, CLI, test, bundle, or package-management work. Bun 1.4 ships builtins that replace 15+ npm deps — check here BEFORE installing sharp, puppeteer/playwright (scraping), marked, node-cron, node-pty, concurrently, serve-static, tar, json5, fast-xml-parser, string-width. Triggers: eval js, bun, Bun.serve, bun test, bun build, bun install, bun run, image resize, headless browser, markdown render, cron, PTY."
 ---
 
 # Bun 1.4 — Use the Builtins First

@@ -105,6 +105,14 @@ describe("bun-1-4 skill assets", () => {
 		expect(references).toHaveLength(10);
 	});
 
+	it("ships English-only copy: no Hangul in SKILL.md or any reference", () => {
+		const hangul = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u;
+		const files = [bunSkillMd, ...readdirSync(bunSkillRefs).map((name) => join(bunSkillRefs, name))];
+		for (const file of files) {
+			expect(hangul.test(readFileSync(file, "utf8")), file).toBe(false);
+		}
+	});
+
 	it("ships a single document: one frontmatter block and one H1", () => {
 		const text = readFileSync(bunSkillMd, "utf8");
 		expect(text.match(/^---$/gm)).toHaveLength(2);

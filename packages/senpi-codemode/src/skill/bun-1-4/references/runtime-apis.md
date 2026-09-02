@@ -139,7 +139,7 @@ Blog: [#also-built-in](https://bun.com/blog/bun-v1.4#also-built-in)
 Docs: <https://bun.com/docs/runtime/utils>
 
 ```ts
-Bun.stringWidth("한글 text");     // terminal columns, ANSI + grapheme aware
+Bun.stringWidth("\x1b[32mgreen\x1b[0m e\u0301"); // terminal columns, ANSI + grapheme aware
 Bun.sliceAnsi(str, 0, 20);        // slice by columns, preserving ANSI codes
 Bun.wrapAnsi(str, 80);            // wrap by columns
 ```
