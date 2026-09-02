@@ -7,6 +7,25 @@ Shared socket clients now register `rendered_components` through additive `set_c
 Root tracker for repository-level divergence from upstream `badlogic/pi-mono`.
 Owns every audited production path whose nearest tracker is the repository root.
 
+## CodeGraph reference cleanup (2026-09-02)
+
+### What changed
+
+- `biome.json` drops the `!!**/.codegraph` ignore entry.
+- `packages/coding-agent/src/beta/omo-local-update-fingerprint.ts` drops `.codegraph` from `EXCLUDED_ROOT_PATHS`.
+
+### Why
+
+- The omo product removed its CodeGraph integration, so nothing writes a `.codegraph` directory anymore. An ignore entry and a fingerprint exclusion for a directory that is never created are dead configuration that imply the integration still exists.
+
+### Why this lives in the fork
+
+- Both paths are fork-owned: the biome ignore list and the omo local-update fingerprint are omo-specific surfaces that upstream `badlogic/pi-mono` does not carry.
+
+### Expected merge conflict zones
+
+- LOW: `biome.json` ignore list ordering during upstream syncs.
+
 ## @anthropic-ai/sdk peer alignment (2026-08-26)
 
 ### What changed

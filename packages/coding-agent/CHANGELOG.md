@@ -8,6 +8,8 @@
 
 ### Changed
 
+- Dropped `.codegraph` from the omo local-update fingerprint's excluded roots; the omo product removed its CodeGraph integration, so that directory is never created.
+
 ### Fixed
 
 ### New Features
