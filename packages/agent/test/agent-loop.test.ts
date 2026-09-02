@@ -660,7 +660,8 @@ describe("agentLoop with AgentMessage", () => {
 			const { events, messages } = await collectAgentEvents(stream, 500);
 			const assistantMessage = messages.find((message): message is AssistantMessage => message.role === "assistant");
 			expect(assistantMessage?.stopReason).toBe("error");
-			expect(assistantMessage?.errorMessage).toBe("Provider stream start timed out after 20ms");
+			expect(assistantMessage?.errorMessage).toContain("Provider stream start timed out after 20ms");
+			expect(assistantMessage?.errorMessage).toContain("retry.provider.streamStartTimeoutMs");
 			expect(events.map((event) => event.type)).toEqual([
 				"agent_start",
 				"turn_start",

@@ -1,5 +1,23 @@
 # Changes
 
+## 2026-09-02 - Name the stream-start timeout setting
+
+### What changed
+
+- `StreamStartTimeoutError` now names `retry.provider.streamStartTimeoutMs` and explains that `0` disables the guard.
+
+### Why
+
+- A provider stream-start timeout must tell users which setting to raise when the configured bound is too aggressive.
+
+### Why an extension could not handle it
+
+- The error is constructed inside the core provider stream loop before extension code can alter its user-visible message.
+
+### Expected merge conflict zones
+
+- LOW: `agent-loop.ts` stream-start timeout error wording.
+
 ## 2026-08-29 - Propagate asynchronous shell capture callbacks
 
 ### What changed
@@ -764,7 +782,7 @@ Conflict zone: `agent-loop.ts` `streamAssistantResponse` catch.
   session for 300s with zero events, zero usage, and nothing persisted. Observed in a donated
   5h session log where the same session hung deterministically on reopen while new sessions
   worked. After the first event arrives the idle bound governs as before.
-- The failure message `Provider stream start timed out after <ms>ms` deliberately contains
+- The failure message `Provider stream start timed out after <ms>ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)` deliberately contains
   "timed out" so the existing retryable-error classifier (`isRetryableErrorMessage`) retries
   it instead of dead-ending the session; the request-local abort controller tears the dead
   request down exactly like an idle timeout.

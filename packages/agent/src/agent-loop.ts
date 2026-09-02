@@ -172,9 +172,11 @@ class StreamIdleTimeoutError extends Error {
 // The wording must keep matching the retryable-error classifier
 // ("timed out" in packages/ai/src/utils/retry.ts) so a dead stream start is
 // retried instead of dead-ending the session.
-class StreamStartTimeoutError extends Error {
+export class StreamStartTimeoutError extends Error {
 	constructor(timeoutMs: number) {
-		super(`Provider stream start timed out after ${timeoutMs}ms`);
+		super(
+			`Provider stream start timed out after ${timeoutMs}ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)`,
+		);
 		this.name = "StreamStartTimeoutError";
 	}
 }

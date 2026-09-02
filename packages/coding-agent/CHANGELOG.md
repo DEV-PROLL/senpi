@@ -46,6 +46,8 @@
 
 ### Fixed
 
+- Provider retry continuation watchdog messages now name `retry.provider.streamStartTimeoutMs`; claude-sdk-oauth regression coverage pins SDK `api_retry` as stream liveness on query and resident paths.
+
 ### Removed
 
 ## [2026.9.2] - 2026-09-02
@@ -867,7 +869,7 @@
   ending the turn after a single attempt. The retry-continuation watchdog was bounded by
   `retry.provider.streamRetryTimeoutMs` (30s) while the same retry was granted the configured
   `streamStartTimeoutMs` (90s), so a slow-but-alive provider was aborted 60s before its own deadline and the
-  turn surfaced `Provider stream start timed out after 90000ms` followed by `Aborted after 1 retry attempt`.
+  turn surfaced `Provider stream start timed out after 90000ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)` followed by `Aborted after 1 retry attempt`.
   The watchdog is now reconciled to the guard it grants, while still cancelling a retry that outlives it.
 - Published Senpi tarballs now retain the lockfile-recorded Babel 8 dependency closure inside the bundled codemode sidecar, preventing `@babel/parser` resolution failures during extension startup ([#923](https://github.com/code-yeongyu/senpi/issues/923)).
 - Headless Claude SDK OAuth continuation now restores a bounded SDK lineage from a private sidecar only after its
@@ -1134,7 +1136,7 @@
   second full compaction the moment you send your next message
   ([#853](https://github.com/code-yeongyu/senpi/pull/853)).
 
-- Provider stream stalls (`Provider stream start timed out after <n>ms` and `Idle timeout waiting for
+- Provider stream stalls (`Provider stream start timed out after <n>ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)` and `Idle timeout waiting for
   provider stream after <n>ms`) now use the same bounded retry budget as every other transient provider
   error instead of giving up after a single same-model attempt, so a turn no longer ends with
   `Retry failed after 1 attempts` while `retry.maxRetries` is 3. Retries also keep the configured provider

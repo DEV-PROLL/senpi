@@ -18,6 +18,24 @@
 
 - LOW: models.json and extension composition in `packages/coding-agent/src/core/provider-composer.ts`.
 
+## 2026-09-02 - Name the retry stream-start setting
+
+### What changed
+
+- Provider retry continuation watchdog abort messages now name `retry.provider.streamStartTimeoutMs` and explain that `0` disables the guard.
+
+### Why
+
+- Users need an actionable setting name when a retry continuation watchdog reports a provider stream-start stall.
+
+### Why an extension could not handle it
+
+- The watchdog is owned by `AgentSession` and aborts the core agent directly, before extension hooks can rewrite the error.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` retry watchdog abort message builder.
+
 ## 2026-08-31 - Session activity contract for host occupancy decisions
 
 ### What changed
@@ -1336,7 +1354,7 @@ Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-sessio
   reproduced the identical defect one layer up: `runBoundedRetryContinuation` aborted the attempt at 30s while
   the request still had 60s of its configured 90s stream-start budget left.
 - No attempt could therefore finish, so the bounded `retry.maxRetries` budget (default 3) collapsed into the
-  single user-visible `Provider stream start timed out after 90000ms` / `Aborted after 1 retry attempt`
+  single user-visible `Provider stream start timed out after 90000ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)` / `Aborted after 1 retry attempt`
   outcome. A slow-but-alive provider was again judged dead on a deadline it was never given.
 - Raising the watchdog to the granted guard preserves the wedge protection it was added for: the provider
   guards still fail a dead upstream, and the watchdog still cancels a retry that outlives every guard it was
