@@ -31,6 +31,8 @@ export function createEvalTool(options: CreateEvalToolOptions): ToolDefinition<E
 		...(options.spawnDefaultAgent === undefined ? {} : { spawnDefaultAgent: options.spawnDefaultAgent }),
 		...(options.modelId === undefined ? {} : { modelId: options.modelId }),
 		...(options.hostLine === undefined ? {} : { hostLine: options.hostLine }),
+		...(options.runtimes?.js === undefined ? {} : { jsRuntime: options.runtimes.js }),
+		...(options.bunSkillPath === undefined ? {} : { bunSkillPath: options.bunSkillPath }),
 	});
 	const languages = enabledLanguageList(options.enabledLanguages);
 	const cellManager =

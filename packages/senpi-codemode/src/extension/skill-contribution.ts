@@ -39,17 +39,25 @@ export function bundledBunSkillPath(baseDir: string = BUN_SKILL_BASE_DIR): strin
 }
 
 /**
- * Builds the `resources_discover` handler that contributes the bundled bun-1-4 skill
- * only when the in-process js eval kernel itself runs bun >= 1.4 (`process.versions.bun`).
- * A node kernel never receives the skill, regardless of any bun binary on PATH.
+ * Absolute path of the bundled bun-1-4 SKILL.md when it is active for this process:
+ * the in-process js eval kernel itself runs bun >= 1.4 (`process.versions.bun`) and the
+ * asset is shipped. A node kernel never activates it, regardless of any bun binary on PATH.
  */
+export function activeBunSkillPath(
+	getKernelBunVersion: BunKernelVersionSource = kernelBunVersion,
+	baseDir?: string,
+): string | undefined {
+	if (!bunVersionSupportsSkill(getKernelBunVersion())) return undefined;
+	return bundledBunSkillPath(baseDir);
+}
+
+/** Builds the `resources_discover` handler that contributes the active bun-1-4 skill, if any. */
 export function createBunSkillDiscoverHandler(
 	getKernelBunVersion: BunKernelVersionSource = kernelBunVersion,
 	baseDir?: string,
 ): () => { skillPaths: string[] } | undefined {
 	return () => {
-		if (!bunVersionSupportsSkill(getKernelBunVersion())) return undefined;
-		const skillPath = bundledBunSkillPath(baseDir);
+		const skillPath = activeBunSkillPath(getKernelBunVersion, baseDir);
 		return skillPath === undefined ? undefined : { skillPaths: [skillPath] };
 	};
 }

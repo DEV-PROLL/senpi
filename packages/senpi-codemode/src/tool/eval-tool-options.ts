@@ -39,8 +39,10 @@ export interface CreateEvalToolOptions {
 	readonly spawnDefaultAgent?: string;
 	readonly modelId?: string;
 	readonly hostLine?: string;
-	/** Display identity of each language's runtime, shown in headers and details. */
+	/** Display identity of each language's runtime, shown in headers and details; `js` also selects the prompt's runtime line. */
 	readonly runtimes?: EvalRuntimes;
+	/** Absolute path of the active bun-1-4 skill; the prompt names it as MUST READ on a bun kernel. */
+	readonly bunSkillPath?: string;
 }
 
 export interface EvalCellInvocation {

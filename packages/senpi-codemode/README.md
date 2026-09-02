@@ -36,7 +36,9 @@ task-tool names are known.
   resolves absolute executable paths, and the eval prompt host line names the
   JS runtime (`node`/`bun`).
 - JavaScript import rewriting for supported local modules and package imports
-  in the persistent Node.js worker.
+  in the persistent JS worker (Bun when senpi runs on bun, Node.js otherwise).
+- On a Bun >= 1.4 kernel the eval prompt names the bundled `bun-1-4` skill as
+  MUST READ before the first js cell; node kernels keep the Node.js wording.
 - GPT models receive a terse `eval` prompt dialect that prioritizes composing
   active tools through `tool.<name>(args)` and documents detach-on-timeout.
 
@@ -44,7 +46,7 @@ task-tool names are known.
 
 | Language | Default | Runtime | Notes |
 | --- | --- | --- | --- |
-| `js` | enabled | Node.js worker | Requires Node.js 24 or newer; supports top-level `await` and `return`. |
+| `js` | enabled | In-process worker on senpi's own runtime (Bun or Node.js 24+) | Supports top-level `await` and `return`; the eval prompt's runtime line follows the kernel. |
 | `py` | enabled | `python3` or `python` | Optional interpreter detected at session start. |
 | `rb` | disabled | `ruby` | Optional interpreter detected at session start. |
 | `jl` | disabled | `julia` | Optional interpreter detected at session start. |

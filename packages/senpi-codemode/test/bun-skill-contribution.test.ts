@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	activeBunSkillPath,
 	bundledBunSkillPath,
 	bunVersionSupportsSkill,
 	createBunSkillDiscoverHandler,
@@ -31,6 +32,19 @@ describe("bundledBunSkillPath", () => {
 		expect(result).toBe(bunSkillMd);
 		expect(result !== undefined && existsSync(result)).toBe(true);
 	});
+});
+
+describe("activeBunSkillPath", () => {
+	it("returns the bundled SKILL.md path on a bun >= 1.4 kernel", () => {
+		expect(activeBunSkillPath(() => "1.4.2")).toBe(bunSkillMd);
+	});
+
+	it.each([{ version: "1.3.0" }, { version: undefined }, { version: "not-a-version" }])(
+		"returns undefined for kernel version $version",
+		({ version }) => {
+			expect(activeBunSkillPath(() => version)).toBeUndefined();
+		},
+	);
 });
 
 describe("createBunSkillDiscoverHandler", () => {

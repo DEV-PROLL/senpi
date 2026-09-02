@@ -8,6 +8,10 @@
 
 ### Changed
 
+- The eval prompt's JS runtime line is now runtime-aware: on a bun kernel it names `Bun <version>` and
+  `Bun.*` builtins, and only while the bundled `bun-1-4` skill is active it adds a MUST READ pointer to
+  that skill's absolute path before the first js cell; node kernels keep the Node.js worker wording.
+  `activeBunSkillPath()` exposes the same gate the `resources_discover` contribution uses.
 ### Fixed
 
 ### Removed
