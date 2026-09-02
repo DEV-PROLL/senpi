@@ -9,6 +9,7 @@
 ### Changed
 
 ### Fixed
+- Claude SDK OAuth restart continuity now persists from the compaction-aware active context, survives goal-continuation metadata and a resident entry closing before `message_end`, and therefore avoids flattening and re-sending an oversized full transcript after restart.
 
 - `/gpt-account remove` (and every other account-removal path) now leaves the remaining account actually in use. Removing the account the stored credential's top-level fields projected used to keep those fields pointing at the deleted account's tokens, and a provider left with one account does not enter credential rotation, so requests kept authenticating as the removed account; the surviving account's material is now projected onto those fields.
 - Claude SDK OAuth classifies Fable-style "requires usage credits" failures as a non-retryable entitlement instead of a rate limit, so the account is not blocked for 60s and AgentSession can fall through to the next model ([#709](https://github.com/code-yeongyu/senpi/issues/709)).
