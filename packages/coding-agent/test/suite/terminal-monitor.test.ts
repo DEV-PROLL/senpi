@@ -31,6 +31,8 @@ import {
 	MonitorRegistry,
 	type MonitorSummaryEvent,
 } from "../../src/core/extensions/builtin/terminal/monitor-registry.ts";
+import { createPtyBashTool } from "../../src/core/extensions/builtin/terminal/tools/bash.ts";
+import { createBashOutputTool } from "../../src/core/extensions/builtin/terminal/tools/bash-output.ts";
 import type { TerminalToolContext } from "../../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createKillBashTool } from "../../src/core/extensions/builtin/terminal/tools/kill-bash.ts";
 import {
@@ -286,6 +288,89 @@ describe("terminal monitor tool", () => {
 		});
 		expect(firstText(secondRearm)).toBe(`Monitor ${bashId} re-armed.`);
 		await createKillBashTool(ctx).execute("kill-dropped-count", { bash_id: bashId });
+	});
+
+	describe("bash_output muted monitor metadata", () => {
+		it("returns monitorMuted details and a muted note while preserving runtime history", async () => {
+			const registry = new MonitorRegistry((event) => sink.push(event));
+			const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
+			const outputTool = createBashOutputTool({ ...ctx, monitorRegistry: registry });
+			const started = await tool.execute("monitor-bash-output-muted", {
+				description: "muted peek",
+				command: "read _; printf 'KEEP_ONE\\nDROP\\nKEEP_TWO\\n'; sleep 30",
+				filter: "^KEEP",
+				persistent: true,
+			});
+			const bashId = /ID: (bash_\d+)/.exec(firstText(started))?.[1];
+			if (!bashId) throw new Error("Monitor did not return a bash_id");
+			const output = manager.get(bashId);
+			if (!output) throw new Error("Monitor runtime was not retained");
+			expect(registry.pause([bashId])).toEqual([bashId]);
+			const outputSeen = new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error("KEEP_TWO never arrived")), 5000);
+				const unsubscribe = output.onOutput((chunk) => {
+					if (!chunk.includes("KEEP_TWO")) return;
+					clearTimeout(timer);
+					unsubscribe();
+					resolve();
+				});
+			});
+			output.session.write("\n");
+			await outputSeen;
+
+			const screen = await outputTool.execute("peek-muted-screen", { bash_id: bashId, view: "screen" });
+			expect(screen.details).toEqual({ monitorMuted: true, mutedDropped: 2 });
+			expect(firstText(screen)).toMatch(/muted/i);
+			expect(firstText(screen)).toContain("status:");
+
+			const peeked = await outputTool.execute("peek-muted-log", { bash_id: bashId });
+			expect(peeked.details).toEqual({ monitorMuted: true, mutedDropped: 2 });
+			const text = firstText(peeked);
+			expect(text).toMatch(/muted/i);
+			expect(text).toContain("status:");
+			expect(text).toContain("KEEP_ONE");
+			expect(text).toContain("KEEP_TWO");
+			await createKillBashTool(ctx).execute("kill-bash-output-muted", { bash_id: bashId });
+		});
+
+		it("clears muted metadata on bash_output after resume", async () => {
+			const registry = new MonitorRegistry((event) => sink.push(event));
+			const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
+			const outputTool = createBashOutputTool({ ...ctx, monitorRegistry: registry });
+			const started = await tool.execute("monitor-bash-output-resume", {
+				description: "resume peek",
+				command: "sleep 30",
+			});
+			const bashId = /ID: (bash_\d+)/.exec(firstText(started))?.[1];
+			if (!bashId) throw new Error("Monitor did not return a bash_id");
+			expect(registry.pause([bashId])).toEqual([bashId]);
+			expect(registry.resume([bashId])).toEqual([{ id: bashId, mutedDropped: 0 }]);
+
+			const peeked = await outputTool.execute("peek-resumed", { bash_id: bashId });
+			expect(peeked.details).toEqual({ monitorMuted: false, mutedDropped: 0 });
+			expect(firstText(peeked)).not.toMatch(/muted/i);
+			expect(firstText(peeked)).toContain("status:");
+			await createKillBashTool(ctx).execute("kill-bash-output-resume", { bash_id: bashId });
+		});
+
+		it("leaves non-monitor bash_output results unchanged", async () => {
+			const registry = new MonitorRegistry((event) => sink.push(event));
+			const bash = createPtyBashTool({ ...ctx, monitorRegistry: registry });
+			const outputTool = createBashOutputTool({ ...ctx, monitorRegistry: registry });
+			const started = await bash.execute("plain-bg", {
+				command: "sleep 30",
+				run_in_background: true,
+			});
+			const bashId = /ID: (bash_\d+)/.exec(firstText(started))?.[1];
+			if (!bashId) throw new Error("Background bash did not return a bash_id");
+
+			const peeked = await outputTool.execute("peek-plain", { bash_id: bashId });
+			expect(peeked.isError).not.toBe(true);
+			expect(peeked.details).toBeUndefined();
+			expect(firstText(peeked)).toContain("status:");
+			expect(firstText(peeked)).not.toMatch(/muted/i);
+			await createKillBashTool(ctx).execute("kill-plain", { bash_id: bashId });
+		});
 	});
 
 	it("rearms a wake-budget-paused monitor and notifies the session delivery controller", async () => {
