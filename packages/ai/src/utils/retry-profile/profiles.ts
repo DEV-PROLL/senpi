@@ -22,13 +22,17 @@ export const SENPI_DEFAULT_RETRY_PROFILE: RetryPolicyProfile = {
 		serverHint: {
 			mode: "override",
 			acceptZero: true,
-			ceiling: { maxDelayMs: 60_000, onExceeded: "error-with-marker" },
+			// 300s matches the turn stage's hinted-wait cap and the 300s ceilings
+			// opencode/codex/oh-my-pi grant slow providers (opus/fable-class).
+			ceiling: { maxDelayMs: 300_000, onExceeded: "error-with-marker" },
 		},
 		classify: classifySenpiAssistantFailure,
 	},
 	turn: {
 		enabled: true,
-		maxRetries: 3,
+		// 5 attempts matches opencode's session retry budget and codex's
+		// stream_max_retries default for slow long-thinking providers.
+		maxRetries: 5,
 		backoff: {
 			baseDelayMs: 2_000,
 			growthFactor: 2,
