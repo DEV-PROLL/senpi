@@ -4,6 +4,12 @@
 
 ### Added
 
+- Claude Mythos 5 and Mythos 5.1 model ids now route to the matching Claude Fable prompt presets (Anthropic ships one prompting guide per Fable/Mythos release pair), instead of falling back to the default dynamic prompt.
+
+### Changed
+
+- The `claude-fable-5-1` prompt preset was dieted per the full Anthropic guide set: duplicated scope/stop/evidence rules are stated once (scope now has its own section), model-default style traits are removed, and the Fable 5 delegation guidance plus the 5.1 ask-after-independent-work clause are added. The rendered static core shrinks about 16%.
+
 ### Fixed
 
 - models.json custom models under extension-registered providers now inherit the extension's provider-level `api` and `baseUrl`, while extension catalog models remain available alongside new custom models.
