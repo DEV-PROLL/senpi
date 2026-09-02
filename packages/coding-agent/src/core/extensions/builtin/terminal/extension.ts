@@ -237,7 +237,10 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("input", (event) => {
-		if (event.source !== "extension") state.monitorNotifier?.noteActivity();
+		if (event.source === "extension") return;
+		state.monitorNotifier?.noteActivity();
+		const resumed = state.bundle?.monitors.resume() ?? [];
+		if (resumed.length > 0) state.monitorNotifier?.resume(resumed);
 	});
 
 	pi.on("tool_call", () => {

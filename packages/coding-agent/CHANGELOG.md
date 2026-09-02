@@ -16,6 +16,7 @@
 - `/reload` and hot-reload no longer stall for seconds on macOS/Linux: config-reload's per-directory `fs.watch` subscriptions are created and torn down on the watch worker thread instead of the interactive main thread (measured lifecycle phase 2.0-3.2s → ~150ms idle, 12s+ → ~150ms under load).
 - Multi-session RPC `close_session` teardown is bounded by a 10-second grace period (configurable via `SENPI_RPC_CLOSE_GRACE_MS`), force-releasing the session and path reservation on expiry; a second close joins the in-flight teardown instead of returning `unknown_session`.
 - Monitor wake-budget pauses now use single-source, scoped state: only the noisy monitor is muted, quiet monitors are not left permanently paused, and `rearm` without a `bash_id` resumes all paused monitors.
+- Real interactive and RPC user input now resumes paused terminal monitors while extension-generated input and tool calls remain unable to unpause them.
 
 ### New Features
 
