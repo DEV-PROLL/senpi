@@ -1277,7 +1277,9 @@ export class SettingsManager {
 	} {
 		return {
 			enabled: this.getRetryEnabled(),
-			maxRetries: this.settings.retry?.maxRetries ?? 3,
+			// Matches SENPI_DEFAULT_RETRY_PROFILE.turn.maxRetries so the one
+			// `retry.maxRetries` key means the same budget on every consumer.
+			maxRetries: this.settings.retry?.maxRetries ?? 5,
 			baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,
 		};
 	}

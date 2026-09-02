@@ -5,6 +5,7 @@
 ### What changed
 
 - `packages/coding-agent/src/core/settings-manager.ts`: `DEFAULT_STREAM_START_TIMEOUT_MS` goes from 90_000 to 300_000, so the default provider stream-start watchdog grants 300s for the first SSE event. The effective value is still `min(default, idle timeout)`, explicit `retry.provider.streamStartTimeoutMs` overrides win unchanged, and `0` still disables the watchdog.
+- `packages/coding-agent/src/core/settings-manager.ts`: `getRetrySettings()` now defaults `maxRetries` to 5 instead of 3, matching `SENPI_DEFAULT_RETRY_PROFILE.turn.maxRetries`. Without this the one `retry.maxRetries` key meant 5 on the turn stage but 3 on every `getRetrySettings()` consumer (session-title retry, compaction summarization retry, the agent-session retry gate), and the documented default could only be true for one of them.
 - `packages/coding-agent/docs/settings.md`: the defaults table and the JSON example track the new default.
 
 ### Why
@@ -17,7 +18,7 @@
 
 ### Expected merge conflict zones
 
-- LOW: the single constant line in `settings-manager.ts` plus the two matching rows in `docs/settings.md`.
+- LOW: the two default lines in `settings-manager.ts` (`DEFAULT_STREAM_START_TIMEOUT_MS`, the `getRetrySettings()` fallback) plus the matching rows in `docs/settings.md`.
 
 ## 2026-09-02 - Inherit extension provider settings for models.json custom models
 
