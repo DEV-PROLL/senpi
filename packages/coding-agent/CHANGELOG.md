@@ -12,6 +12,8 @@
 - The Windows RPC host supervisor no longer dies when its baseline process-identity probe times out; a failed baseline read is treated as unknown instead of throwing past the startup guard and taking the internal host down with it.
 - The Windows shared RPC host is no longer shut down by its own identity watchdog when the PowerShell process probe merely times out; an absent identity is confirmed with `kill(pid, 0)` before the host is treated as exited.
 - Shared RPC host startup no longer runs its orphaned-directory cleanup while holding the endpoint lock, so a concurrent `senpi` start on a busy machine no longer fails with a raw `database is locked` when the cleanup's temp-directory scan and per-candidate process probes outlast the lock budget.
+
+- `/reload` and hot-reload no longer stall for seconds on macOS/Linux: config-reload's per-directory `fs.watch` subscriptions are created and torn down on the watch worker thread instead of the interactive main thread (measured lifecycle phase 2.0-3.2s → ~150ms idle, 12s+ → ~150ms under load).
 - Multi-session RPC `close_session` teardown is bounded by a 10-second grace period (configurable via `SENPI_RPC_CLOSE_GRACE_MS`), force-releasing the session and path reservation on expiry; a second close joins the in-flight teardown instead of returning `unknown_session`.
 - Monitor wake-budget pauses now use single-source, scoped state: only the noisy monitor is muted, quiet monitors are not left permanently paused, and `rearm` without a `bash_id` resumes all paused monitors.
 
