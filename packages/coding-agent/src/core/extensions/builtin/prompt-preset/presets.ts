@@ -155,13 +155,20 @@ function isGrok46Model(model: ModelWithPromptPresetMetadata): boolean {
 	return hasGrok46Signal(model.id) || (model.name !== undefined && hasGrok46Signal(model.name));
 }
 
+// Claude Mythos shares each Fable release's prompting guide ("Prompting Claude
+// Fable 5.1" covers Fable 5.1 and Mythos 5.1; "Prompting Claude Fable 5"
+// covers Fable 5 and Mythos 5), so Mythos ids route to the matching Fable preset.
+const CLAUDE_FABLE_51_MARKERS = ["fable-5-1", "fable-5.1", "mythos-5-1", "mythos-5.1"] as const;
+const CLAUDE_FABLE_5_MARKERS = ["fable-5", "mythos-5"] as const;
+
 function isClaudeFable51Model(modelId: string): boolean {
 	const normalized = normalizeModelId(modelId);
-	return normalized.includes("fable-5-1") || normalized.includes("fable-5.1");
+	return CLAUDE_FABLE_51_MARKERS.some((marker) => normalized.includes(marker));
 }
 
 function isClaudeFable5Model(modelId: string): boolean {
-	return normalizeModelId(modelId).includes("fable-5");
+	const normalized = normalizeModelId(modelId);
+	return CLAUDE_FABLE_5_MARKERS.some((marker) => normalized.includes(marker));
 }
 
 function isClaudeOpus5Model(modelId: string): boolean {
