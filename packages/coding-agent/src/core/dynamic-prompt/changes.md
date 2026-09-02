@@ -1,5 +1,28 @@
 # changes.md — dynamic-prompt
 
+## Universal-fallback diet: dieted core sections aligned with per-model preset lessons (2026-09-02)
+
+### What changed
+
+- `intent-gate.ts`: the routing line now carries a declared observable stop condition ("I'll stop when …"), matching the binding stop contract already proven in the claude-fable-5 / claude-opus-5 / gpt-5.6 / kimi-k3 / grok-4.6 presets — stated calmly, without all-caps emphasis (Kimi guidance: caps directives cause overthinking). The six-row Surface Form table and five-bullet request-classification list are compressed into the three intent-family decision rules the dieted presets converged on (information / judgment / change). Scope-fidelity ("never quietly narrow, widen, or swap") and routine-judgment-call rules moved here from nowhere — they existed only in presets before. `### Turn-Local Intent Reset` and `### Context-Completion Gate` subheadings folded into one closing paragraph.
+- `working-task.ts` (new): merges `parallel-tools.ts` + `exploration.ts` into one `## Working the Task` section (both files deleted) and adds the one-plan commitment rule ("make one reasonable plan and execute it; reopen only on contradictory evidence") — the highest-value cross-family convergence point from the K2.6/K3 overthinking guidance that the fallback lacked entirely.
+- `verification.ts`: the closing paragraph adopts the claim-audit rule from the fable-5 preset ("audit each claim against a tool result from this session") — replaces the weaker "Reporting clean output without running the validator is a violation" sentence.
+- `policies.ts`: `### Anti-Patterns` merged into `### Hard Blocks` — the split duplicated one concern across two headings ("never suppress" vs "do not delete failing tests"); each pair is now one line, matching the presets' `## Hard Limits` shape. The "never speculate" line merged into "never present unread code as verified fact".
+- `style.ts`: rules the dieted presets all carry but the fallback lacked: end-of-turn last-paragraph check (promise-about-undone-work means do it now), blocked-part handling (finish independent parts, name the blocker), surgical-edit preference, reader-grounded final summary (complete sentences, outcome first), and context-limit continuation. "Bullets only for genuinely list-shaped content" reframed positively; "match the user's tone, profanity included" dropped the trailing clause (tone-matching already covers it).
+
+### Why
+
+The fallback serves genuinely unknown/new models — every named family routes to a preset. Study of all per-model prompting guides (claude.md, fable-5/5.1, opus-4.7/4.8, gpt-5.2–5.6, kimi.md) plus the five dieted presets showed the fallback carried structures every diet had removed (routing table, classification taxonomy, split subsections, duplicated policies) while missing the behaviors every preset restated (stop condition, one-plan commitment, claim audit, last-paragraph check, blocked-part handling, context continuation). Guides agree on the direction: minimal outcome-first prompts beat process-heavy stacks (GPT-5.6 evals: 10–15% score gain at 41–66% fewer tokens); positive decision rules beat prohibition stacks (Kimi/Claude); tables and label taxonomies are scaffolding that does not route. Net token cost of the rewrite: +6 tokens (1,484 → 1,490 o200k tokens on the rendered default core) for eleven added behaviors and four removed redundancies.
+
+### Why extension system couldn't handle this
+
+Core prompt assembly; presets override it per-model but the fallback text itself is core-owned.
+
+### Expected merge conflict zones
+
+- `build.ts` section list (exploration/parallel-tools imports removed, working-task added). Resolution: keep the merged `working-task.ts` section; re-apply upstream section additions on top.
+- `intent-gate.ts` wording. Resolution: keep the three-family decision rules + stop-condition routing line.
+
 ## User overrides exposed on `_baseSystemPromptOptions` (2026-08-17)
 
 ### What changed
