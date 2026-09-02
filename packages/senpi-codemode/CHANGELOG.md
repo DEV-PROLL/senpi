@@ -17,6 +17,8 @@
 
 ### Fixed
 
+- Compiled binaries now contribute the bundled `bun-1-4` skill by resolving the codemode sidecar shipped next to the executable, and a missing skill is reported on stderr so it can no longer corrupt the RPC protocol stream on stdout.
+
 ### Removed
 
 ## [2026.9.2-2] - 2026-09-02

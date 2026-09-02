@@ -1,6 +1,7 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	activeBunSkillPath,
 	bundledBunSkillPath,
@@ -45,6 +46,84 @@ describe("activeBunSkillPath", () => {
 			expect(activeBunSkillPath(() => version)).toBeUndefined();
 		},
 	);
+});
+
+describe("bundledBunSkillPath in a compiled-binary layout", () => {
+	let tempDir: string | undefined;
+
+	afterEach(() => {
+		if (tempDir !== undefined) {
+			rmSync(tempDir, { recursive: true, force: true });
+			tempDir = undefined;
+		}
+	});
+
+	it("resolves the sidecar skill next to the executable when the embedded path is absent", () => {
+		tempDir = mkdtempSync(join(tmpdir(), "codemode-skill-sidecar-"));
+		const binaryDir = join(tempDir, "bin");
+		const sidecarSkill = join(
+			binaryDir,
+			"node_modules",
+			"@code-yeongyu",
+			"senpi-codemode",
+			"src",
+			"skill",
+			"bun-1-4",
+			"SKILL.md",
+		);
+		mkdirSync(dirname(sidecarSkill), { recursive: true });
+		writeFileSync(sidecarSkill, "---\nname: bun-1-4\n---\n# Bun 1.4\n");
+
+		const result = bundledBunSkillPath(join(tempDir, "embedded", "extension"), {
+			bunVersion: "1.4.0",
+			executablePath: join(binaryDir, "pi"),
+		});
+
+		expect(result).toBe(sidecarSkill);
+	});
+
+	it("reports a missing skill on stderr so RPC stdout stays protocol-clean", async () => {
+		vi.resetModules();
+		const fresh = await import("../src/extension/skill-contribution.ts");
+		tempDir = mkdtempSync(join(tmpdir(), "codemode-skill-missing-"));
+		const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		try {
+			const result = fresh.bundledBunSkillPath(join(tempDir, "embedded", "extension"), {
+				bunVersion: "1.4.0",
+				executablePath: join(tempDir, "bin", "pi"),
+			});
+
+			expect(result).toBeUndefined();
+			expect(errorSpy).toHaveBeenCalledTimes(1);
+			expect(debugSpy).not.toHaveBeenCalled();
+			expect(logSpy).not.toHaveBeenCalled();
+
+			// The notice names BOTH probed locations: a compiled binary never has the
+			// module-relative asset, so the sidecar path is the actionable one.
+			const notice = String(errorSpy.mock.calls[0]?.[0] ?? "");
+			expect(notice).toContain(join(tempDir, "embedded", "skill", "bun-1-4", "SKILL.md"));
+			expect(notice).toContain(
+				join(
+					tempDir,
+					"bin",
+					"node_modules",
+					"@code-yeongyu",
+					"senpi-codemode",
+					"src",
+					"skill",
+					"bun-1-4",
+					"SKILL.md",
+				),
+			);
+		} finally {
+			debugSpy.mockRestore();
+			logSpy.mockRestore();
+			errorSpy.mockRestore();
+		}
+	});
 });
 
 describe("createBunSkillDiscoverHandler", () => {

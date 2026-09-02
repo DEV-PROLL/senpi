@@ -1,5 +1,29 @@
 # senpi-codemode fork changes
 
+## Binary skill resolution and stdout-safe miss reporting (2026-09-02)
+
+### What changed
+
+- `packages/senpi-codemode/src/extension/skill-contribution.ts` resolves the bundled
+  `bun-1-4` SKILL.md through `resolveCodemodeRuntimeAsset`, so a compiled binary falls
+  back to the sidecar at
+  `node_modules/@code-yeongyu/senpi-codemode/src/skill/bun-1-4/SKILL.md` next to the
+  executable instead of only probing the embedded module-relative path.
+- The "skill not found" notice moves from `console.debug` to `console.error`.
+- `test/bun-skill-contribution.test.ts` pins both contracts: sidecar resolution in a
+  compiled-binary layout, and stderr-only reporting with stdout untouched.
+
+### Why
+
+- The compiled binary has no readable module-relative asset, so the skill was silently
+  skipped for every binary user, and the notice was written to stdout - the same stream
+  that carries the RPC JSONL protocol. `scripts/smoke-standalone-binary.mjs` parses that
+  stream and failed with `received malformed RPC output`, which failed the `Build binaries`
+  job of `build-binaries.yml` and skipped its final `Dispatch publish-npm.yml` job. Both
+  the v2026.9.2 and v2026.9.2-2 tag runs failed this way, so neither release reached npm.
+- The Ruby and Julia kernel runners already resolve their assets through the same sidecar
+  helper; this brings the skill asset onto that established path.
+
 ## Eval QA owns its temporary agent directory (2026-08-30)
 
 ### What changed
