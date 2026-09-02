@@ -18,9 +18,9 @@ manual \`&\` backgrounding — use the built-in session tools:
   injected events while you keep working; command exit always delivers a summary. One-shot
   gate: wait inside the command and print one sentinel (\`until <cond>; do sleep 1; done;
   printf 'READY\\n'\`). Stream: \`tail -n 0 -F | grep --line-buffered\`. Filter noise at the
-  source and stop with \`kill_bash\`. Identical updates are deduped; enough monitor-only wakes
-  pause ALL monitors - completion still wakes the session, and
-  \`monitor({ action: "rearm", bash_id })\` resumes intermediate events.
+  source and stop with \`kill_bash\`. Identical updates are deduped; repeated monitor-only wakes
+  pause the noisy monitor(s) that caused them, not all monitors. Completion still wakes the session, and
+  \`monitor({ action: "rearm", bash_id })\` resumes one while \`monitor({ action: "rearm" })\` resumes all paused monitors.
 - \`bash_input({ bash_id, input, keys, submit })\` sends stdin or named keys (e.g.
   \`["ctrl+c"]\`, \`["enter"]\`) to steer a REPL or interrupt a process.
 - \`bash_resize({ bash_id, cols, rows })\` resizes the PTY so full-screen programs reflow.

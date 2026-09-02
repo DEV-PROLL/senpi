@@ -30,6 +30,8 @@ export interface TerminalToolContext {
 	readonly onMonitorEvent?: (event: MonitorEvent) => void;
 	/** Resets session-global wake-budget delivery for a fresh or explicitly rearmed monitor. */
 	readonly onMonitorRearmed?: (id: string) => void;
+	/** Clears notifier bookkeeping when multiple paused monitors are resumed. */
+	readonly onMonitorsResumed?: (ids: readonly string[]) => void;
 }
 
 /** Minimal tool-result shape returned by the terminal tools. */

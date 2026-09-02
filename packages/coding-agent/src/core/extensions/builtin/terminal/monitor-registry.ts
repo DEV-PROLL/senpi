@@ -462,10 +462,11 @@ export class MonitorRegistry {
 		if (record.runtime.exited) this.#settle(record);
 	}
 
-	pauseAll(): string[] {
+	pause(ids: readonly string[]): string[] {
 		const paused: string[] = [];
-		for (const record of [...this.#records.values(), ...this.#files.values()]) {
-			if (record.paused) continue;
+		for (const id of ids) {
+			const record = this.#records.get(id) ?? this.#files.get(id);
+			if (!record || record.paused) continue;
 			record.paused = true;
 			paused.push(record.id);
 		}
@@ -473,13 +474,29 @@ export class MonitorRegistry {
 		return paused;
 	}
 
+	pauseAll(): string[] {
+		return this.pause([...this.#records.keys(), ...this.#files.keys()]);
+	}
+
+	resume(ids?: readonly string[]): string[] {
+		const candidates = ids ?? [...this.#records.keys(), ...this.#files.keys()];
+		const resumed: string[] = [];
+		for (const id of candidates) {
+			const record = this.#records.get(id) ?? this.#files.get(id);
+			if (!record?.paused) continue;
+			record.paused = false;
+			resumed.push(record.id);
+			if ("pendingChange" in record && record.pendingChange) void this.#checkFile(record.id);
+		}
+		if (resumed.length > 0) this.#notifyChange();
+		return resumed;
+	}
+
 	rearm(id: string): MonitorRearmResult {
 		const record = this.#records.get(id) ?? this.#files.get(id);
 		if (!record) return "not_found";
 		if (!record.paused) return "not_paused";
-		record.paused = false;
-		this.#notifyChange();
-		if ("pendingChange" in record && record.pendingChange) void this.#checkFile(record.id);
+		this.resume([id]);
 		return "rearmed";
 	}
 

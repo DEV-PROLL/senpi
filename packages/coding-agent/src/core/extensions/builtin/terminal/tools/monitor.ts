@@ -51,7 +51,9 @@ export const monitorSchema = Type.Object({
 	persistent: Type.Optional(
 		Type.Boolean({ description: "Keep watching until the command exits or kill_bash stops its bash_id." }),
 	),
-	bash_id: Type.Optional(Type.String({ description: "Rearm (required): paused monitor bash_id to resume." })),
+	bash_id: Type.Optional(
+		Type.String({ description: "Rearm: paused monitor bash_id to resume; omit to resume all paused monitors." }),
+	),
 });
 export type MonitorInput = Static<typeof monitorSchema>;
 
@@ -148,7 +150,12 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 			const registry = getRegistry();
 			if (input.action === "rearm") {
 				const bashId = input.bash_id;
-				if (bashId === undefined || bashId.length === 0) return errorResult("monitor rearm requires bash_id.");
+				if (bashId === undefined || bashId.length === 0) {
+					const resumed = registry.resume();
+					if (resumed.length === 0) return textResult("No paused monitors to re-arm.");
+					ctx.onMonitorsResumed?.(resumed);
+					return textResult(`Re-armed ${resumed.length} paused monitor(s).`);
+				}
 				const outcome = registry.rearm(bashId);
 				if (outcome === "not_found") return errorResult(`No active monitor found with id: ${bashId}`);
 				if (outcome === "not_paused") return textResult(`Monitor ${bashId} is not paused; no action taken.`);

@@ -1,5 +1,24 @@
 # terminal builtin extension — fork surface
 
+## Scoped monitor wake-budget pauses (2026-09-02)
+
+### What changed
+
+- Monitor pause state is authoritative in the registry; wake-budget exhaustion pauses only the noisy monitor(s) that contributed to that injection. Rearming one monitor or all paused monitors clears delivery bookkeeping so intermediate events resume correctly.
+
+### Why
+
+- A global notifier pause could mute quiet monitors permanently after a noisy monitor exhausted the shared wake budget.
+
+### Why an extension could not handle it
+
+- The registry owns monitor lifecycle and pause state, while the notifier owns wake-budget batching and deduplication; only the builtin terminal extension coordinates both.
+
+### Expected merge conflict zones
+
+- LOW: `monitor-registry.ts`, `monitor-notify.ts`, `tools/monitor.ts`, `extension.ts`, and terminal monitor tests.
+
+
 ## Add native one-shot file monitors (2026-08-29)
 
 ### What changed

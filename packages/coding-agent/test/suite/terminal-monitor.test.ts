@@ -127,11 +127,28 @@ describe("terminal monitor tool", () => {
 		expect(firstText(result)).toContain("command");
 	});
 
-	it("rejects rearm without bash_id", async () => {
-		const tool = createMonitorTool(ctx);
-		const result = await tool.execute("monitor-rearm-missing", { action: "rearm" } as MonitorInput);
-		expect(result.isError).toBe(true);
-		expect(firstText(result)).toContain("bash_id");
+	it("rearms all paused monitors without bash_id", async () => {
+		let resumedIds: readonly string[] | undefined;
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		const tool = createMonitorTool({
+			...ctx,
+			monitorRegistry: registry,
+			onMonitorsResumed: (ids) => (resumedIds = ids),
+		});
+		const first = await tool.execute("monitor-rearm-all-a", { description: "paused a", command: "sleep 30" });
+		const second = await tool.execute("monitor-rearm-all-b", { description: "paused b", command: "sleep 30" });
+		const firstId = /ID: (bash_\d+)/.exec(firstText(first))?.[1];
+		const secondId = /ID: (bash_\d+)/.exec(firstText(second))?.[1];
+		if (!firstId || !secondId) throw new Error("Monitors did not return bash_ids");
+
+		expect(registry.pause([firstId, secondId])).toEqual([firstId, secondId]);
+		expect(registry.resume()).toEqual([firstId, secondId]);
+		expect(registry.pause([firstId, secondId])).toEqual([firstId, secondId]);
+		const result = await tool.execute("monitor-rearm-all", { action: "rearm" } as MonitorInput);
+		expect(result.isError).not.toBe(true);
+		expect(firstText(result)).toContain("Re-armed 2 paused monitor(s).");
+		expect(resumedIds).toEqual([firstId, secondId]);
+		expect(registry.snapshot().every((entry) => !entry.paused)).toBe(true);
 	});
 
 	it("returns a bash_id immediately and emits complete stdout lines in order before its summary", async () => {
@@ -214,17 +231,23 @@ describe("terminal monitor tool", () => {
 		expect(summaryEvent(await ended).summary).toContain("killed");
 	});
 
-	it("emits a final summary when a wake-budget-paused monitor exits", async () => {
+	it("emits a final summary for one muted monitor without resuming another", async () => {
 		const registry = new MonitorRegistry((event) => sink.push(event));
 		const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
-		const ended = sink.waitFor((event) => event.type === "summary", "paused monitor completion");
-		const started = await tool.execute("monitor-paused-exit", { description: "paused exit", command: "sleep 30" });
-		const bashId = /ID: (bash_\d+)/.exec(firstText(started))?.[1];
-		if (!bashId) throw new Error("Monitor did not return a bash_id");
+		const first = await tool.execute("monitor-paused-exit-a", { description: "paused a", command: "sleep 30" });
+		const second = await tool.execute("monitor-paused-exit-b", { description: "paused b", command: "sleep 30" });
+		const firstId = /ID: (bash_\d+)/.exec(firstText(first))?.[1];
+		const secondId = /ID: (bash_\d+)/.exec(firstText(second))?.[1];
+		if (!firstId || !secondId) throw new Error("Monitors did not return bash_ids");
+		const ended = sink.waitFor(
+			(event) => event.type === "summary" && event.id === firstId,
+			"muted monitor completion",
+		);
 
-		registry.pauseAll();
-		await createKillBashTool(ctx).execute("kill-paused", { bash_id: bashId });
+		expect(registry.pause([firstId, secondId])).toEqual([firstId, secondId]);
+		await createKillBashTool(ctx).execute("kill-paused", { bash_id: firstId });
 		expect(summaryEvent(await ended).summary).toContain("killed");
+		expect(registry.snapshot()).toEqual([expect.objectContaining({ id: secondId, paused: true })]);
 	});
 
 	it("rearms a wake-budget-paused monitor and notifies the session delivery controller", async () => {
