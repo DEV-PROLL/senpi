@@ -131,7 +131,7 @@ describe("required compaction deterministic fallback", () => {
 		});
 	});
 
-	it("does not recover manual, aborted, or unrelated failures", async () => {
+	it("does not recover aborted or unrelated failures", async () => {
 		for (const testCase of [
 			{ reason: "threshold" as const, message: "upstream_stream_truncated", aborted: true, refusal: false },
 			{ reason: "threshold" as const, message: "unrelated provider refusal", aborted: false, refusal: false },
