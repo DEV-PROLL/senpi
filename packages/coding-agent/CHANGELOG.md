@@ -28,6 +28,8 @@
 
 ### Changed
 
+- Dropped `.codegraph` from the omo local-update fingerprint's excluded roots; the omo product removed its CodeGraph integration, so that directory is never created.
+
 ### Fixed
 
 - Two concurrent shared-host starts for one socket no longer fail with a raw `database is locked`: the ensure-lock wait now covers the whole host startup critical section (probe, incompatible-host stop, spawned-host readiness) instead of ten seconds.
