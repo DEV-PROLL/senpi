@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { anthropicOAuth } from "../src/auth/oauth/anthropic.ts";
+import {
+	__setAnthropicOAuthNodeApisForTests,
+	anthropicOAuth,
+} from "../src/auth/oauth/anthropic.ts";
 import type { AuthEvent, AuthPrompt } from "../src/auth/types.ts";
 
 const neverAbortedSignal = new AbortController().signal;
@@ -36,6 +39,74 @@ function getJsonBody(init?: RequestInit): Record<string, string> {
 describe.sequential("Anthropic OAuth", () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
+		__setAnthropicOAuthNodeApisForTests(null);
+	});
+
+	it("falls back to manual redirect URL entry when the callback port is unavailable", async () => {
+		const error = Object.assign(new Error("listen EACCES: permission denied 127.0.0.1:53692"), { code: "EACCES" });
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const close = vi.fn();
+		__setAnthropicOAuthNodeApisForTests({
+			createServer: (() => ({
+				on: (event: string, listener: (...args: unknown[]) => void) => {
+					listeners.set(event, listener);
+					return this;
+				},
+				listen: (_port: number, _host: string, callback: () => void) => {
+					queueMicrotask(() => listeners.get("error")?.(error));
+					return this;
+				},
+				close,
+			})) as never,
+		});
+		const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit): Promise<Response> => {
+			const body = getJsonBody(init);
+			expect(body.redirect_uri).toBe("http://localhost:53692/callback");
+			expect(body.code).toBe("manual-code");
+			return jsonResponse({ access_token: "access", refresh_token: "refresh", expires_in: 3600 });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const events: AuthEvent[] = [];
+		const credential = await anthropicOAuth.login({
+			signal: neverAbortedSignal,
+			notify: (event) => events.push(event),
+			prompt: async (prompt) => {
+				if (prompt.type !== "manual_code") throw new Error(`Unexpected prompt: ${prompt.type}`);
+				const authUrl = events.find((event) => event.type === "auth_url");
+				if (!authUrl || authUrl.type !== "auth_url") throw new Error("Missing auth URL");
+				const url = new URL(authUrl.url);
+				return `http://localhost:53692/callback?code=manual-code&state=${url.searchParams.get("state")}`;
+			},
+		});
+		const authUrl = events.find((event) => event.type === "auth_url");
+		expect(authUrl?.type).toBe("auth_url");
+		expect(authUrl && authUrl.type === "auth_url" ? authUrl.instructions : "").toMatch(/53692|redirect URL/i);
+		expect(credential.access).toBe("access");
+		expect(close).not.toHaveBeenCalled();
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it("rejects non-bind callback errors with the callback host and port", async () => {
+		const error = Object.assign(new Error("unexpected failure"), { code: "EUNKNOWN" });
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		__setAnthropicOAuthNodeApisForTests({
+			createServer: (() => ({
+				on: (event: string, listener: (...args: unknown[]) => void) => {
+					listeners.set(event, listener);
+					return this;
+				},
+				listen: () => {
+					queueMicrotask(() => listeners.get("error")?.(error));
+					return this;
+				},
+				close: vi.fn(),
+			})) as never,
+		});
+		await expect(anthropicOAuth.login({
+			signal: neverAbortedSignal,
+			notify: vi.fn(),
+			prompt: vi.fn(),
+		})).rejects.toThrow(/127\.0\.0\.1:53692/);
 	});
 
 	it("keeps the localhost redirect_uri for manual callback login", async () => {
