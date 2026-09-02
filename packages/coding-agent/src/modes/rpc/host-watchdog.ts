@@ -95,6 +95,9 @@ export function armHostWatchdog(
 ): () => void {
 	if (!config) return () => {};
 	const fire = (reason: string): void => {
+		writeWin32Diagnostic(
+			`host watchdog termination dispatch reason=${reason} pid=${String(process.pid)} path=${config.scratchDir ?? "unknown"}`,
+		);
 		disarm();
 		if (process.platform === "win32") {
 			// Arm the host shutdown fallback before attempting metadata cleanup. The
@@ -191,6 +194,13 @@ function watchPpid(supervisorPid: number, fire: (reason: string) => void): () =>
 	}, HOST_WATCH_PPID_INTERVAL_MS);
 	timer.unref?.();
 	return () => clearInterval(timer);
+}
+
+function writeWin32Diagnostic(text: string): void {
+	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
+	try {
+		process.stderr.write(`RPC_WIN32_DIAGNOSTIC ${text}\n`);
+	} catch {}
 }
 
 function processAlive(pid: number): boolean {

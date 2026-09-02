@@ -131,7 +131,7 @@ async function ensureHostLocked(
 		throw new Error(`RPC socket ${socket} is owned by an unmanaged host`);
 	}
 	if (pidFile && pidMatches) {
-		await stopManagedHost(pidFile, testOptions?.stopTimeoutMs ?? 10_000);
+		await stopManagedHost(paths, pidFile, testOptions?.stopTimeoutMs ?? 10_000, "replace incompatible managed host");
 	}
 	await cleanupState(paths);
 	return startHost(paths, socket, agentDir, policy, testOptions);
@@ -178,6 +178,9 @@ async function startHost(
 		childExit = new Promise((resolveExit) => {
 			child!.once("exit", (code, signal) => {
 				exitedEarly = { code, signal };
+				writeWin32Diagnostic(
+					`ensure observed child exit code=${String(code)} signal=${String(signal)} pid=${String(child?.pid)} path=${paths.dir}`,
+				);
 				resolveExit(exitedEarly);
 			});
 		});
@@ -196,11 +199,17 @@ async function startHost(
 		// fails before the pidfile is written, terminate this exact child through
 		// its still-attached handle rather than leaving an unmanaged daemon behind.
 		if (!exitedEarly && child && child.exitCode === null && child.signalCode === null) {
+			writeWin32Diagnostic(
+				`ensure child termination dispatch reason=registration-failure signal=SIGTERM pid=${String(child.pid)} path=${paths.dir}`,
+			);
 			try {
 				child.kill("SIGTERM");
 			} catch {}
 			if (childExit) await Promise.race([childExit, delay(2_000)]);
 			if (child.exitCode === null && child.signalCode === null) {
+				writeWin32Diagnostic(
+					`ensure child termination dispatch reason=registration-failure signal=SIGKILL pid=${String(child.pid)} path=${paths.dir}`,
+				);
 				try {
 					child.kill("SIGKILL");
 				} catch {}
@@ -222,7 +231,7 @@ async function startHost(
 	const readinessTimeoutMs = testOptions?.readinessTimeoutMs ?? 10_000;
 	const result = await pollProtocolInfo(socket, readinessTimeoutMs, childExit);
 	if (isCompatible(result.protocol)) return { pid: pidFile.pid, socket, reused: false };
-	await stopManagedHost(pidFile, testOptions?.stopTimeoutMs ?? 10_000);
+	await stopManagedHost(paths, pidFile, testOptions?.stopTimeoutMs ?? 10_000, "stop incompatible spawned host");
 	const message = result.protocol
 		? `RPC socket host answered get_protocol_info with serverVersion ${result.protocol.serverVersion} and capabilities ${JSON.stringify(result.protocol.capabilities)}, but is incompatible with serverVersion ${VERSION} and required capabilities ${JSON.stringify(REQUIRED_CAPABILITIES)}`
 		: result.exited
@@ -236,17 +245,30 @@ async function startHost(
 	throw new Error(diagnostic);
 }
 
-async function stopManagedHost(pidFile: DaemonPidFile, termTimeoutMs: number): Promise<void> {
-	await signalValidated(pidFile, "SIGTERM");
+async function stopManagedHost(
+	paths: HostDaemonPaths,
+	pidFile: DaemonPidFile,
+	termTimeoutMs: number,
+	reason: string,
+): Promise<void> {
+	await signalValidated(paths, pidFile, "SIGTERM", reason);
 	if (await waitForGone(pidFile, termTimeoutMs)) return;
-	await signalValidated(pidFile, "SIGKILL");
+	await signalValidated(paths, pidFile, "SIGKILL", `${reason} after SIGTERM timeout`);
 	if (!(await waitForGone(pidFile, 2_000))) {
 		throw new Error(`RPC socket host pid ${pidFile.pid} remained alive after SIGKILL`);
 	}
 }
 
-async function signalValidated(pidFile: DaemonPidFile, signal: NodeJS.Signals): Promise<void> {
+async function signalValidated(
+	paths: HostDaemonPaths,
+	pidFile: DaemonPidFile,
+	signal: NodeJS.Signals,
+	reason: string,
+): Promise<void> {
 	if (!(await processMatchesPidFile(pidFile))) return;
+	writeWin32Diagnostic(
+		`ensure validated termination dispatch reason=${reason} signal=${signal} pid=${String(pidFile.pid)} path=${paths.dir}`,
+	);
 	try {
 		process.kill(pidFile.pid, signal);
 	} catch (error: unknown) {
@@ -475,6 +497,13 @@ function delay(ms: number): Promise<void> {
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function writeWin32Diagnostic(text: string): void {
+	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
+	try {
+		process.stderr.write(`RPC_WIN32_DIAGNOSTIC ${text}\n`);
+	} catch {}
 }
 
 function isNodeErrorCode(error: unknown, code: string): boolean {

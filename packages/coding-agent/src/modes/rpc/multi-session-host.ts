@@ -291,6 +291,9 @@ async function runSocketHost(options: MultiSessionHostOptions, socketPath: strin
 	// Arm before listen: a supervisor death during the listen transition must
 	// still close the child and clean its private endpoint.
 	armHostWatchdog(readHostWatchdogConfigFromBrandEnv(), (reason, cleanup) => {
+		writeWin32Diagnostic(
+			`socket host watchdog shutdown dispatch reason=${reason} pid=${String(process.pid)} path=${socketPath}`,
+		);
 		process.stderr.write(`senpi rpc host: ${reason}; shutting down\n`);
 		// Enter shutdown before killing session-owned child processes. The Windows
 		// tree killer is synchronous, while the shutdown fallback must be armed
@@ -415,6 +418,13 @@ async function removeSocketPath(socketPath: string): Promise<void> {
 	}
 }
 
+function writeWin32Diagnostic(text: string): void {
+	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
+	try {
+		process.stderr.write(`RPC_WIN32_DIAGNOSTIC ${text}\n`);
+	} catch {}
+}
+
 function isNodeErrorCode(cause: unknown, code: string): boolean {
 	return cause instanceof Error && "code" in cause && cause.code === code;
 }
@@ -422,6 +432,7 @@ function isNodeErrorCode(cause: unknown, code: string): boolean {
 function registerShutdownSignals(shutdown: (exitCode?: number) => Promise<never>): void {
 	for (const signal of process.platform === "win32" ? (["SIGTERM"] as const) : (["SIGTERM", "SIGHUP"] as const)) {
 		process.on(signal, () => {
+			writeWin32Diagnostic(`socket host signal termination dispatch signal=${signal} pid=${String(process.pid)}`);
 			killTrackedDetachedChildren();
 			void shutdown(signal === "SIGHUP" ? 129 : 143);
 		});
