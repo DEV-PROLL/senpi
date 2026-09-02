@@ -4,6 +4,8 @@
 
 ### Added
 
+- Claude Fable 5.1 gets its own system prompt preset (`claude-fable-5-1`): the dieted Fable 5 core plus surgical deltas from the Fable 5.1 prompting guide (scope-is-the-deliverable, per-response tool-call batching, surgical-edit preference, test-scope discipline, and formatting/narration recalibration). The dotted release resolves before the generic `fable-5` matcher, `promptPreset: "claude-fable-5-1"` can force it, and the fable default lanes now point at 5.1: the recommended default model, the shipped fallback chain (the `claude-fable-5` chain stays for sessions still on it), the startup tip, and doc examples.
+
 ### Fixed
 
 - `/quit` and `/exit` submitted while startup is still finishing (managed-tool downloads) now quit instead of being parked back in the editor behind a "Startup is still in progress" notice. Parking the text also disabled the Ctrl+D quit escape, which only fires on an empty editor, so the usual way out was a dead end until the line was cleared by hand.
