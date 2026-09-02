@@ -1,5 +1,6 @@
-import type { Api, Context, Model, Tool } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type Api, type AssistantMessageEventStream, type Context, type Model, type Tool } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import { generateSummaryMessage } from "../src/core/extensions/builtin/compaction/speculative-summary.ts";
 import {
 	BUILTIN_SDK_TOOLS,
 	CUSTOM_TOOLS_MCP_SERVER_NAME,
@@ -97,5 +98,55 @@ describe("claude-sdk-oauth tool-less requests", () => {
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.tools).toEqual([]);
 		expect(calls[0]?.mcpServers).toBeUndefined();
+	});
+
+	it("carries the summarizer retry through a claude-sdk-oauth runtime boundary", async () => {
+		const calls: Options[] = [];
+		const runtime = {
+			stream: (_selectedModel: Model<Api>, requestContext: Context, streamOptions: Record<string, unknown>) => {
+				const queryOptions = buildClaudeSdkOauthQueryOptions({
+					model,
+					context: requestContext,
+					streamOptions: streamOptions as never,
+					tools: requestContext.tools?.map((tool) => `mcp__custom-tools__${tool.name}`),
+				});
+				calls.push(queryOptions);
+				const response = createAssistantMessageEventStream();
+				const message = {
+					role: "assistant",
+					content: [{ type: "text", text: "recovered summary" }],
+					api: "claude-sdk-oauth",
+					provider: "claude-sdk-oauth",
+					model: model.id,
+					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+					stopReason: "stop",
+					timestamp: Date.now(),
+				};
+				response.push({ type: "done", reason: "stop", message } as never);
+				response.end();
+				return response as AssistantMessageEventStream;
+			},
+		};
+		const summaryContext = {
+			modelRegistry: { modelRuntime: runtime },
+		} as never;
+		const snapshot = {
+			model,
+			contextWindow: 200_000,
+			systemPrompt: "system",
+			tools: [customTool],
+		} as never;
+		const result = await generateSummaryMessage({
+			context: summaryContext,
+			snapshot,
+			messages: [],
+			prompt: { system: "system", user: "summarize" },
+			auth: {},
+			forbidToolCalls: true,
+		});
+
+		expect(result && "content" in result ? result.content : result).toEqual([{ type: "text", text: "recovered summary" }]);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.tools).toEqual([]);
 	});
 });

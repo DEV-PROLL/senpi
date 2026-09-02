@@ -68,7 +68,8 @@ export function streamClaudeSdkOauth(
 			if (sessionKey) toolWatch.reconcileWithContext(sessionKey, context);
 			const toolWatchNote = toolWatch.buildPromptNote(sessionKey, context, resolvedTools.customToolNameToSdk);
 			const providerSettings = loadClaudeSdkOauthProviderSettingsFromDisk(process.cwd());
-			const mcpServers = await buildCustomToolServers(resolvedTools.customTools);
+			const toolLessRequest = options?.toolChoice === "none";
+			const mcpServers = toolLessRequest ? undefined : await buildCustomToolServers(resolvedTools.customTools);
 			const executable = resolveClaudeCodeExecutable(defaultExecutableDeps());
 			const buildOptions = (authLane: Parameters<typeof buildClaudeSdkOauthQueryOptions>[0]["authLane"]) => {
 				const queryOptions = buildClaudeSdkOauthQueryOptions({
