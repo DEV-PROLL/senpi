@@ -38,6 +38,8 @@
 
 - Claude SDK OAuth compaction retries that forbid tool calls now send a genuinely tool-less request, preventing host-denied tool calls from producing an empty summary.
 
+- Manual `/compact` now recovers through the deterministic no-LLM fallback for classified summarizer failures, while unclassified failures remain fail-closed.
+
 ### New Features
 
 ### Breaking Changes
