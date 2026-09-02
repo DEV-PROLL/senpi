@@ -98,10 +98,10 @@ interface Connection {
 }
 
 /**
- * Socket event visibility is an all-sessions broadcast: every connected client
- * receives every session lifecycle/agent event, tagged with its routing
- * sessionId. Responses and extension UI requests remain requester-only. This
- * keeps observers stateless while preventing correlated replies from leaking.
+ * Socket agent events are delivered only to connections attached to their
+ * session, tagged with its routing sessionId. Content-free session lifecycle
+ * events remain visible to every connection. Responses and extension UI
+ * requests remain requester-only; foreign observation uses attach-on-open.
  */
 export async function runMultiSessionHost(options: MultiSessionHostOptions): Promise<never> {
 	if (options.listen === undefined || options.listen === "stdio://") return runStdioHost(options);

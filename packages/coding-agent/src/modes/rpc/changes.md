@@ -48,6 +48,24 @@
 
 - LOW: the net transport calls and filesystem cleanup guards in `host-lifecycle.ts` and `multi-session-host.ts`; one import and one `createConnection` expression each in `host-ensure.ts` and `rpc-client.ts`.
 
+## [Unreleased] - Isolate multi-session socket events by attachment
+
+### What changed
+
+- Files: `multi-session-host.ts`, `rpc-client.ts`, `session-event-fanout.ts`, `session-event-writer.ts`; the `RpcClientOpenInFlightError` re-exports in `packages/coding-agent/src/index.ts` and `packages/coding-agent/src/modes/index.ts`.
+- Session agent events are delivered only to connections attached to that session; newly registered sockets no longer replay every session's in-flight snapshot.
+- Attaching a connection replays that session's unrendered snapshot, plus rendered records when `rendered_components` is advertised.
+- `session_closed` remains broadcast because it carries no content and observers rely on roster visibility.
+- Lease-less `RpcClient` instances drop all session-tagged events until they open a session; during an in-flight `open_session`, matching startup events are buffered up to 512 records and 1 MiB of serialized JSONL, evicting oldest records first when either bound is exceeded.
+
+### Why
+
+- Shared multi-session socket hosts must not leak one session's assistant output into another session's client during normal operation or reconnect.
+
+### Why an extension could not handle it
+
+- Socket fan-out and client lease filtering are transport behavior below the extension API.
+
 ## [Unreleased] - Preserve launch capabilities for undeclared multi-session clients
 
 - `session-command-router.ts`: connection-owned session bindings now fall back to the host launch capabilities when the client has not sent `set_client_info`; an explicit empty capability declaration still wins.
