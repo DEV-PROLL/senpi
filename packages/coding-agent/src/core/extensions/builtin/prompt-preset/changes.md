@@ -1,5 +1,25 @@
 # prompt-preset Extension Changes
 
+## Mythos routing + Fable 5.1 preset diet (2026-09-02)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/prompt-preset/presets.ts`: `CLAUDE_FABLE_51_MARKERS`/`CLAUDE_FABLE_5_MARKERS` gain `mythos-5-1`/`mythos-5.1` and `mythos-5`, so Claude Mythos ids resolve to the matching Fable preset; the 5.1 marker set still resolves before the generic 5 set.
+- `packages/coding-agent/src/core/extensions/builtin/prompt-preset/claude-fable-5-1.ts`: dieted full-core rewrite. Duplicated rules (scope, stop contract, evidence audit, user's-call-final) stated once each; new `## Scope` section carries the 5.1 "Delivering work" + "changes and tests" blocks with the Fable 5 anti-over-engineering rule; model-default style traits and rationale flourishes removed; Fable 5 delegation guidance and the 5.1 ask-after-independent-work clause added. Rendered static core ~8.1k -> ~6.7k chars (-16.5%) through the real builder.
+- `packages/coding-agent/test/suite/prompt-presets-claude-fable-5-1.test.ts` / `prompt-presets-claude-fable-5.test.ts`: mythos id-shape cases (5.1-before-5 precedence both ways) and a TEST_DISCIPLINE_RULES sweep on the 5.1 preset.
+
+### Why
+
+- Anthropic publishes one prompting guide per Fable/Mythos release pair; Mythos ids previously fell through to the default dynamic prompt. The 5.1 preset carried rules two or three times and restated model-default behavior, which costs attention and tokens on every turn.
+
+### Why extension system couldn't handle this differently
+
+- Content-only change inside this builtin; follows the established corePrompt preset architecture.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: `claude-fable-5-1.ts` is fork-only; `presets.ts` matcher block may conflict trivially if upstream adds presets.
+
 ## Claude Fable 5.1 preset (2026-09-02)
 
 ### What changed
