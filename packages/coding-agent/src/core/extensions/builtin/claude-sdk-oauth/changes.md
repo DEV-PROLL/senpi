@@ -1,5 +1,25 @@
 # claude-sdk-oauth
 
+## 2026-09-02 - Honor tool-less summarization requests
+
+### What changed
+
+- The non-resident Claude SDK OAuth lane maps explicit `toolChoice: "none"` requests to `tools: []`, strict MCP configuration, and `maxTurns: 1`, and skips the custom-tools MCP server. Empty tool contexts also send `tools: []` without changing strict MCP, turn limits, or normal MCP behavior.
+
+### Why
+
+- Compaction's tool-use-hijack retry forbids tool calls with `toolChoice: "none"`. The lane previously ignored that option and still offered host-denied built-in and custom tools, causing an empty summary instead of allowing the retry to produce text.
+
+### Why an extension could not handle it
+
+- The SDK query options and custom MCP server are assembled inside this builtin provider lane before the SDK boundary. An external extension cannot alter those request-scoped options after provider dispatch.
+
+### Expected merge conflict zones
+
+- LOW in `options.ts` around `buildClaudeSdkOauthQueryOptions` tool selection and strict MCP configuration.
+- LOW in `stream.ts` around non-resident custom MCP server construction.
+
+
 ## 2026-08-21 - Cache provider settings loads by mtime+size to cut lock convoy
 
 ### What changed
