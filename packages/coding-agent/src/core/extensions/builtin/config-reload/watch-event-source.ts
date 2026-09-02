@@ -98,7 +98,10 @@ export function createFsWatchEventSource(
 	onError: (error: unknown, path: string) => void = () => {},
 	options: FsWatchEventSourceOptions = {},
 ): WatchEventSource {
-	const recursiveSubscriptions = new Map<number, { readonly path: string; readonly listener: WatchEventListener }>();
+	const recursiveSubscriptions = new Map<
+		number,
+		{ readonly path: string; readonly listener: WatchEventListener; readonly recursive: boolean }
+	>();
 	let recursiveWorker: RecursiveWatchWorker | undefined;
 	let nextSubscriptionId = 1;
 
@@ -117,6 +120,15 @@ export function createFsWatchEventSource(
 		});
 		worker.on("error", (error) => {
 			for (const subscription of recursiveSubscriptions.values()) onError(error, subscription.path);
+			// A worker that raised an uncaught error is dead; keeping it would leave every
+			// live subscription silent. Drop it and move the survivors to a fresh worker.
+			if (recursiveWorker !== worker) return;
+			recursiveWorker = undefined;
+			if (recursiveSubscriptions.size === 0) return;
+			const replacement = ensureRecursiveWorker();
+			for (const [id, subscription] of recursiveSubscriptions) {
+				replacement.postMessage({ kind: "watch", id, path: subscription.path, recursive: subscription.recursive });
+			}
 		});
 		recursiveWorker = worker;
 		return worker;
@@ -125,11 +137,14 @@ export function createFsWatchEventSource(
 	return (path, listener, watchOptions) => {
 		if (WORKER_OFFLOADED_WATCH_PLATFORMS.has(options.platform ?? process.platform)) {
 			const id = nextSubscriptionId++;
-			const worker = ensureRecursiveWorker();
-			recursiveSubscriptions.set(id, { path, listener });
-			worker.postMessage({ kind: "watch", id, path, recursive: watchOptions?.recursive ?? false });
+			const recursive = watchOptions?.recursive ?? false;
+			ensureRecursiveWorker().postMessage({ kind: "watch", id, path, recursive });
+			recursiveSubscriptions.set(id, { path, listener, recursive });
 			return () => {
 				if (!recursiveSubscriptions.delete(id)) return;
+				// Resolve at unsubscribe time: the worker may have been replaced after a crash.
+				const worker = recursiveWorker;
+				if (!worker) return;
 				if (recursiveSubscriptions.size > 0) {
 					worker.postMessage({ kind: "unwatch", id });
 					return;

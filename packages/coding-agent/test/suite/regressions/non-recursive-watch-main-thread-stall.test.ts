@@ -55,6 +55,39 @@ describe("non-recursive watch main-thread stall", () => {
 		expect(worker.terminate).toHaveBeenCalledTimes(1);
 	});
 
+	it("recreates the worker and re-watches live subscriptions after the worker dies", () => {
+		const workers: WorkerProbe[] = [];
+		const createRecursiveWorker = vi.fn(() => {
+			const worker = new WorkerProbe();
+			workers.push(worker);
+			return worker;
+		});
+		const onError = vi.fn();
+		const listener = vi.fn<WatchEventListener>();
+		const source = createFsWatchEventSource(onError, { platform: "darwin", createRecursiveWorker });
+
+		source("/agent/extensions", listener, { recursive: false });
+		workers[0]?.emit("error", new Error("worker crashed"));
+
+		// The dead worker is dropped and live subscriptions land on a fresh one.
+		expect(onError).toHaveBeenCalledWith(expect.any(Error), "/agent/extensions");
+		expect(createRecursiveWorker).toHaveBeenCalledTimes(2);
+		expect(workers[1]?.postMessage).toHaveBeenCalledWith({
+			kind: "watch",
+			id: 1,
+			path: "/agent/extensions",
+			recursive: false,
+		});
+
+		// Events from the replacement worker still reach the original listener.
+		workers[1]?.emit("message", { kind: "event", id: 1, eventType: "change", filename: "ext.ts" });
+		expect(listener).toHaveBeenCalledWith("change", "ext.ts");
+
+		// A later subscription reuses the replacement, not a third worker.
+		source("/agent/skills", vi.fn(), { recursive: false });
+		expect(createRecursiveWorker).toHaveBeenCalledTimes(2);
+	});
+
 	it("keeps every watch on direct fs.watch on windows", () => {
 		const watcher = new WatcherProbe();
 		mocks.fsWatch.mockReturnValue(watcher);
