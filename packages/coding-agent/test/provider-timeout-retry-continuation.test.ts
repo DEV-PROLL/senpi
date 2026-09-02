@@ -42,8 +42,16 @@ async function runRetryAttempt(watchdogTimeoutMs: number | undefined, respondsAf
 }
 
 describe("bounded retry continuation", () => {
-	it("names the setting that controls the retry stream-start guard", () => {
-		expect(providerRetryWatchdogAbortMessage(12_345, 6_789)).toContain("retry.provider.streamStartTimeoutMs");
+	it("pins the enabled watchdog guidance", () => {
+		expect(providerRetryWatchdogAbortMessage(12_345, 6_789)).toBe(
+			"Provider retry continuation watchdog timed out after 12345ms (stream-start guard: 6789ms; raise retry.provider.streamStartTimeoutMs, 0 disables)",
+		);
+	});
+
+	it("pins the disabled stream-start watchdog guidance", () => {
+		expect(providerRetryWatchdogAbortMessage(12_345, undefined)).toBe(
+			"Provider retry continuation watchdog timed out after 12345ms (stream-start guard disabled; raise retry.provider.streamStartTimeoutMs, 0 disables)",
+		);
 	});
 	beforeEach(() => {
 		vi.useFakeTimers();

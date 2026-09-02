@@ -1354,7 +1354,7 @@ Conflict zone: `cursor-exec-bridge.ts` `executeTool`, `cursor-exec-bridge-sessio
   reproduced the identical defect one layer up: `runBoundedRetryContinuation` aborted the attempt at 30s while
   the request still had 60s of its configured 90s stream-start budget left.
 - No attempt could therefore finish, so the bounded `retry.maxRetries` budget (default 3) collapsed into the
-  single user-visible `Provider stream start timed out after 90000ms` / `Aborted after 1 retry attempt`
+  single user-visible `Provider stream start timed out after 90000ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)` / `Aborted after 1 retry attempt`
   outcome. A slow-but-alive provider was again judged dead on a deadline it was never given.
 - Raising the watchdog to the granted guard preserves the wedge protection it was added for: the provider
   guards still fail a dead upstream, and the watchdog still cancels a retry that outlives every guard it was
