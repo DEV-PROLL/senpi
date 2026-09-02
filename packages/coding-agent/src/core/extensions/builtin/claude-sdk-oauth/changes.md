@@ -20,6 +20,24 @@
 - LOW in `stream.ts` around non-resident custom MCP server construction.
 
 
+## 2026-09-02 - Count SDK api_retry as stream liveness
+
+### What changed
+
+- Regression coverage pins that `system/api_retry` is the first stream event on both query and resident-pump paths.
+
+### Why
+
+- SDK retry notices prove the provider stream is alive and must prevent a false stream-start timeout before assistant content arrives.
+
+### Why an extension could not handle it
+
+- The SDK message-to-stream event boundary is internal to the builtin claude-sdk-oauth lane.
+
+### Expected merge conflict zones
+
+- LOW: claude-sdk-oauth stream regression tests.
+
 ## 2026-08-21 - Cache provider settings loads by mtime+size to cut lock convoy
 
 ### What changed
