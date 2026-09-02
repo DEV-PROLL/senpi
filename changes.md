@@ -12,15 +12,15 @@ Owns every audited production path whose nearest tracker is the repository root.
 ### What changed
 
 - `biome.json` drops the `!!**/.codegraph` ignore entry.
-- `packages/coding-agent/src/beta/omo-local-update-fingerprint.ts` drops `.codegraph` from `EXCLUDED_ROOT_PATHS`.
 
 ### Why
 
-- The omo product removed its CodeGraph integration, so nothing writes a `.codegraph` directory anymore. An ignore entry and a fingerprint exclusion for a directory that is never created are dead configuration that imply the integration still exists.
+- The omo product removed its CodeGraph integration, so nothing writes a `.codegraph` directory anymore. An ignore entry for a directory that is never created is dead configuration that implies the integration still exists.
+- The matching `EXCLUDED_ROOT_PATHS` change in `packages/coding-agent/src/beta/omo-local-update-fingerprint.ts` is recorded in `packages/coding-agent/src/changes.md`, that path's nearest ancestor tracker.
 
 ### Why this lives in the fork
 
-- Both paths are fork-owned: the biome ignore list and the omo local-update fingerprint are omo-specific surfaces that upstream `badlogic/pi-mono` does not carry.
+- The biome ignore list is fork-owned: it is an omo-specific surface that upstream `badlogic/pi-mono` does not carry.
 
 ### Expected merge conflict zones
 
