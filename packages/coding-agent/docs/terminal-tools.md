@@ -12,7 +12,7 @@ platform/runtime).
 |------|---------|
 | `bash` | Run a command in a PTY. `run_in_background: true` starts a persistent session and returns a `bash_id` immediately. Foreground `timeout` (seconds) is a kill deadline. |
 | `bash_output` | Peek at a session without blocking: new output since the last read, or the status line. `filter` regex-filters lines; `view: "screen"` returns the rendered xterm grid. |
-| `monitor` | Watch a long-running command (`description`, `command`, `filter?`, `timeout_ms?`, `persistent?`) and inject matching PTY output lines as coalesced events. While watches are live, the interactive footer shows a brief `watching …` status (descriptions, count, paused markers). |
+| `monitor` | Watch a change and inject it as coalesced events, passing `command` XOR `path`: a long-running command (`description`, `command`, `filter?`, `timeout_ms?`, `persistent?`) injects matching PTY output lines, while a file (`description`, `path`, `event?`) fires once natively. While watches are live, the interactive footer shows a brief `watching …` status (descriptions, count, paused markers). |
 | `bash_input` | Send stdin (`input`) or named keys (`keys: ["ctrl+c"]`, `["enter"]`, `["up"]`) to steer a REPL or interrupt a process. |
 | `bash_resize` | Resize a session's PTY (`cols`, `rows`) so full-screen TUIs reflow. |
 | `kill_bash` | Tree-kill one session (`bash_id`) or all (`all: true`), leaving no orphans. |
@@ -80,17 +80,33 @@ monitor({ description: "PR checks",
 Expected event: the verdict line when checks settle, then the summary. Merge on
 pass, pull the failing job's log on fail. The command exits by itself.
 
-### File or port transition
+### File transition (native file branch)
 
 ```js
 monitor({ description: "artifact written",
-  command: "until test -f dist/app.tar.gz; do sleep 2; done; printf 'READY\n'",
+  path: "dist/app.tar.gz",
+  event: "create" })
+```
+
+One file, watched natively — no shell, no poll loop. `create` (the default)
+fires only when the file appears after registration; to watch a file that
+already exists, pass `event: "modify"`. Registration needs the parent directory
+(`dist/` here) to exist already, and the target must be a regular file, not a
+symlink — when the build creates the directory too, keep a command poll loop
+like the port recipe below. This branch is XOR with `command` and takes no
+`filter` and no `persistent`. Expected event: one hit when the file lands, then
+the watch is done. Consume the artifact.
+
+### Port transition
+
+```js
+monitor({ description: "postgres up",
+  command: "until nc -z localhost 5432; do sleep 1; done; printf 'READY\n'",
   filter: "^READY$" })
 ```
 
-Same shape works for ports: `until nc -z localhost 5432; do sleep 1; done;
-printf 'READY\n'`. Expected event: `READY`, then exit. Consume the artifact
-or connect.
+A port has no native watch, so the sleep loop belongs inside the command.
+Expected event: `READY`, then exit. Connect.
 
 ### Child-agent sentinel watch
 
@@ -113,6 +129,10 @@ results and integrate. Exits on its own; no cleanup.
 | Expecting `filter` to stop the command | `filter` gates events only; make the command exit on the condition |
 | `persistent: true` with `timeout_ms` | The timeout is ignored when persistent; pick one |
 | Sentinel printed without a trailing newline | Sentinels must be newline-terminated: `printf 'READY\n'` |
+| Polling `test -f` in a command to await one file | Use the file branch: `monitor({ description, path, event? })` |
+| `event: "create"` on a file that already exists | `create` fires only on appearance; use `event: "modify"` |
+| `path` whose parent directory the build has yet to create | Registration fails; poll for it with a `command` watch instead |
+| Passing `command` and `path` in one call | They are XOR; pick the branch that matches what you await |
 | Monitoring sub-minute deterministic work | Run it directly in the foreground |
 | Rearming a monitor that was never paused | Rearm only a `bash_id` named in a pause notice |
 

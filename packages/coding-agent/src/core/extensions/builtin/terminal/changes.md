@@ -56,6 +56,63 @@
 - LOW: `monitor-registry.ts`, `monitor-notify.ts`, `tools/monitor.ts`, `extension.ts`, and terminal monitor tests.
 
 
+## Teach the monitor file branch on every prompt surface (2026-09-02)
+
+### What changed
+
+- `prompt.ts`: the monitor bullet now states `command` XOR `path` and documents both branches.
+  It previously published the signature as
+  `monitor({ description, command, filter?, timeout_ms?, persistent? })`, which omitted the file
+  branch added on 2026-08-29 and presented `command` as unconditionally required.
+- `tools/monitor.ts`: the tool `description` and `promptSnippet` no longer scope the tool to a
+  command's output, and the schema branch labels are symmetric — `command` reads
+  "Create, command branch (XOR path)" and `path` reads "Create, file branch (XOR command)".
+  Previously `command` claimed "Create (required)" while `path` carried no branch label at all,
+  so the prose asserted a requirement that `execute` does not enforce.
+- `docs/terminal-tools.md`: the "File or port transition" recipe is split. Awaiting a file is now
+  the native `path` branch; the sleep loop survives only in the port recipe, which has no native
+  watch. The summary Tools table row now shows `command` XOR `path` instead of a command-only
+  signature, and anti-pattern rows cover polling `test -f`, passing both branches, and using the
+  default `create` event on a file that already exists.
+- Every file-branch surface states that `create` fires only when the file appears after
+  registration. `registerFile` records `present: initial !== null` and the create predicate is
+  `!record.present && present`, so a `create` watch on an already-existing file can never fire and
+  silently waits out its timeout; that surface needs `event: "modify"`.
+- The same surfaces state the branch's registration preconditions, because `registerFile` rejects
+  a missing parent directory, a symlink, and a non-regular file outright. Recommending it as a
+  drop-in for `test -f` polling was wrong for the common case of awaiting a build artifact whose
+  directory the build itself creates; that case keeps a `command` poll loop.
+- Deleted the trailing "Typical flow" paragraph in `prompt.ts`: it restated the bullets above it
+  and duplicated the bash_output completion-notification sentence verbatim.
+
+### Why
+
+- The 2026-08-29 feature landed in the schema and in `execute` but in no narrative surface. Models
+  following the prompt literally do not generalize a documented `command` signature into an
+  undocumented `path` branch, and the XOR rule existed only in a runtime error string. An agent
+  reading these surfaces concluded that the schema forced both `command` and `path`, declared
+  monitor impossible to register, and fell back to a background bash session — losing event
+  injection, dedup, and rearm for no reason. Nothing in the schema marks any field required:
+  every property is `Type.Optional` and no provider conversion adds `required`
+  (`tool-schema-compat.ts` only narrows it to the intersection of branches).
+- `test/monitor-branch-prompt-surface.test.ts` locks the gap class: every create-branch schema
+  property must appear on the shipped prompt surfaces, each branch must show its own
+  `monitor({ ... })` call shape, and the file branch's `modify` caveat must accompany it wherever
+  it is taught. Bare name presence alone is too weak — deleting the file-branch bullet still
+  leaves `path` in the XOR sentence and `filter`/`persistent` in its negation — so the call-shape
+  assertion is what actually detects a dropped branch. It keys on schema properties and call
+  shapes, never on prose wording.
+
+### Why this cannot be expressed externally
+
+- These are the builtin's own tool description, prompt section, and shipped docs.
+
+### Expected merge conflict zones
+
+- LOW: the monitor bullet in `prompt.ts`, the `description`/`promptSnippet`/schema labels in
+  `tools/monitor.ts`, and the monitor recipe list in `docs/terminal-tools.md`.
+
+
 ## Add native one-shot file monitors (2026-08-29)
 
 ### What changed
