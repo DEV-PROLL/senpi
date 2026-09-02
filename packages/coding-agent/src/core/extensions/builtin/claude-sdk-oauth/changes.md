@@ -4,7 +4,7 @@
 
 ### What changed
 
-- The non-resident Claude SDK OAuth lane now maps `toolChoice: "none"` to `tools: []`, enables strict MCP configuration and `maxTurns: 1` for that request, and skips the custom-tools MCP server.
+- The non-resident Claude SDK OAuth lane maps explicit `toolChoice: "none"` requests to `tools: []`, strict MCP configuration, and `maxTurns: 1`, and skips the custom-tools MCP server. Empty tool contexts also send `tools: []` without changing strict MCP, turn limits, or normal MCP behavior.
 
 ### Why
 
