@@ -782,7 +782,7 @@ Conflict zone: `agent-loop.ts` `streamAssistantResponse` catch.
   session for 300s with zero events, zero usage, and nothing persisted. Observed in a donated
   5h session log where the same session hung deterministically on reopen while new sessions
   worked. After the first event arrives the idle bound governs as before.
-- The failure message `Provider stream start timed out after <ms>ms` deliberately contains
+- The failure message `Provider stream start timed out after <ms>ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)` deliberately contains
   "timed out" so the existing retryable-error classifier (`isRetryableErrorMessage`) retries
   it instead of dead-ending the session; the request-local abort controller tears the dead
   request down exactly like an idle timeout.
