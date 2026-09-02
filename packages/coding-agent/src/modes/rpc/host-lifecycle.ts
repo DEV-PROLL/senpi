@@ -407,9 +407,6 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 	// death notification. Errors on it must not crash the supervisor.
 	child.stdio[CHILD_WATCH_FD]?.on("error", () => {});
 	child.once("exit", (code, signal) => {
-		writeWin32Diagnostic(
-			`supervisor observed child exit code=${String(code)} signal=${String(signal)} pid=${String(child.pid)} path=${paths.dir} shuttingDown=${String(shuttingDown)}`,
-		);
 		if (shuttingDown) return;
 		const { reason, exitCode } = classifyChildExit(code, signal);
 		void shutdown(reason, exitCode);
@@ -500,9 +497,6 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 				: undefined;
 		try {
 			writeStderrLine(`senpi rpc host supervisor: ${reason} shutdown`);
-			writeWin32Diagnostic(
-				`supervisor shutdown dispatch reason=${reason} exitCode=${String(exitCode)} childPid=${String(child.pid)} path=${paths.dir}`,
-			);
 			for (const client of clientSockets) client.destroy();
 			await closeServer(server);
 			// Unlink the private directory BEFORE the child stop, which can take seconds:
@@ -511,7 +505,7 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 			// keeps serving through its already-open socket fd until it exits, and its
 			// own watchdog cleanup makes the removal idempotent.
 			if (internal.dir) await rm(internal.dir, { recursive: true, force: true });
-			await stopChild(child, paths.dir);
+			await stopChild(child);
 			observer?.destroy();
 			if (publicSocketOwned && process.platform !== "win32") await rm(publicSocket, { force: true });
 			// Mirror ensureHost's cleanupState: the pidfile and settings describe a
@@ -581,9 +575,6 @@ export async function runHostSupervisor(launch: SupervisorLaunch): Promise<void>
 					const identityChanged =
 						childStartTime !== undefined && currentStartTime !== undefined && currentStartTime !== childStartTime;
 					if (identityChanged || missingIdentityChecks >= 2) {
-						writeWin32Diagnostic(
-							`supervisor identity watchdog dispatch reason=child-identity-changed pid=${String(child.pid)} path=${paths.dir} current=${String(currentStartTime)} recorded=${String(childStartTime)} missing=${String(missingIdentityChecks)}`,
-						);
 						void shutdown("rpc host child exit observed by identity watchdog", 0);
 					}
 				})
@@ -620,21 +611,15 @@ async function readSettingsFile(settingsFile: string): Promise<unknown> {
 	}
 }
 
-async function stopChild(child: ChildProcess, path?: string): Promise<void> {
+async function stopChild(child: ChildProcess): Promise<void> {
 	if (child.exitCode !== null || child.signalCode !== null) return;
 	try {
-		writeWin32Diagnostic(
-			`supervisor child termination dispatch reason=shutdown signal=SIGTERM pid=${String(child.pid)} path=${path ?? "unknown"}`,
-		);
 		child.kill("SIGTERM");
 	} catch {
 		return;
 	}
 	if (await waitForChildExit(child, CHILD_STOP_TIMEOUT_MS)) return;
 	try {
-		writeWin32Diagnostic(
-			`supervisor child termination dispatch reason=shutdown signal=SIGKILL pid=${String(child.pid)} path=${path ?? "unknown"}`,
-		);
 		child.kill("SIGKILL");
 	} catch {
 		return;
@@ -742,11 +727,6 @@ function closeServer(server: Server): Promise<void> {
 	return new Promise((resolve) => {
 		server.close(() => resolve());
 	});
-}
-
-function writeWin32Diagnostic(text: string): void {
-	if (process.platform !== "win32" || process.env.SENPI_RPC_WIN32_DIAGNOSTIC !== "1") return;
-	writeStderrLine(`RPC_WIN32_DIAGNOSTIC ${text}`);
 }
 
 function writeStderrLine(text: string): void {

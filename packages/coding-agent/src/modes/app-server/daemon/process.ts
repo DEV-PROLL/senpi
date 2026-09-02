@@ -116,10 +116,21 @@ export function processIsLive(pid: number): boolean {
 	}
 }
 
-export async function waitForStartTime(pid: number, timeoutMs: number): Promise<string> {
+export async function waitForStartTime(
+	pid: number,
+	timeoutMs: number,
+	readStartTime: (pid: number) => Promise<string | undefined> = readProcessStartTime,
+): Promise<string> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() <= deadline) {
-		const startTime = await readProcessStartTime(pid);
+		let startTime: string | undefined;
+		try {
+			startTime = await readStartTime(pid);
+		} catch {
+			// Process identity queries can fail transiently while a Windows process is
+			// entering the CIM table. Keep the bounded startup wait alive so callers do
+			// not mistake an observability failure for a child startup failure.
+		}
 		if (startTime) return startTime;
 		await delay(20);
 	}

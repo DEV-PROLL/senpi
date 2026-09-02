@@ -4,7 +4,7 @@ import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	parseDaemonPidFile,
 	processMatchesPidFile,
@@ -39,6 +39,23 @@ describe("app-server daemon state", () => {
 		expect(malformed).toBeUndefined();
 		expect(matches).toBe(true);
 		expect(stale).toBe(false);
+	});
+
+	it("retries transient process identity errors while waiting for startup", async () => {
+		vi.useFakeTimers();
+		try {
+			let attempts = 0;
+			const result = waitForStartTime(42, 1_000, async () => {
+				attempts++;
+				if (attempts === 1) throw new Error("process identity temporarily unavailable");
+				return "stable-process-identity";
+			});
+			await vi.advanceTimersByTimeAsync(20);
+			await expect(result).resolves.toBe("stable-process-identity");
+			expect(attempts).toBe(2);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("reads a stable identity for a live process and none for an exited process", async () => {
