@@ -419,8 +419,7 @@ describe("prompt preset resolver", () => {
 		const activePrompt = fallbackPrompt();
 		expect(activePrompt).toContain("You are senpi");
 		expect(activePrompt).toContain("## Intent Gate");
-		expect(activePrompt).toContain("## Parallel Tool Calls");
-		expect(activePrompt).toContain("## Exploration");
+		expect(activePrompt).toContain("## Working the Task");
 		expect(activePrompt).toContain("## Verification");
 		expect(activePrompt).toContain("## Available Tools");
 		expect(activePrompt).toContain("Current working directory: /repo");
