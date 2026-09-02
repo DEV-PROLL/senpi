@@ -73,6 +73,7 @@ type ProtocolInfo = {
 
 const lockOptions = { retries: { retries: 100, minTimeout: 20, maxTimeout: 100 } } as const;
 const REQUIRED_CAPABILITIES = ["multi_session", EXTENSION_EVENTS_CAPABILITY] as const;
+const SPAWNED_HOST_PROBE_TIMEOUT_MS = 10_000;
 const EXISTING_HOST_PROBE_TIMEOUT_MS = 10_000;
 /**
  * Every ensured host starts with this installation-wide profile, independent of
@@ -274,7 +275,10 @@ async function pollProtocolInfo(
 	const deadline = Date.now() + timeoutMs;
 	let lastProtocol: ProtocolInfo | undefined;
 	while (Date.now() <= deadline) {
-		const probe = probeProtocolInfo(socket, Math.min(500, Math.max(1, deadline - Date.now())));
+		const probe = probeProtocolInfo(
+			socket,
+			Math.min(SPAWNED_HOST_PROBE_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
+		);
 		const raced = childExit ? await Promise.race([probe, childExit]) : await probe;
 		if (isChildExit(raced)) {
 			// A supervisor exit can be triggered by the Windows identity watchdog

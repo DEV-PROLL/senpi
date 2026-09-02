@@ -165,14 +165,14 @@ describe("ensureHost", () => {
 		const qa = await scratch("incompatible-answer");
 		await expect(
 			ensureFixtureHost(qa, {
-				readinessTimeoutMs: 500,
+				readinessTimeoutMs: 10_000,
 				spawn: {
 					command: process.execPath,
 					args: ["--import", "tsx", incompatibleProtocolFixture, qa.socket],
 				},
 			}),
 		).rejects.toThrow(/incompatible|0\\.0\\.0-wrong/);
-	}, 10_000);
+	}, 30_000);
 });
 
 describe("defaultHostLaunch", () => {
