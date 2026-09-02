@@ -98,6 +98,12 @@ describe("claude-sdk-oauth tool-less requests", () => {
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.tools).toEqual([]);
 		expect(calls[0]?.mcpServers).toBeUndefined();
+
+		const normalStream = streamClaudeSdkOauth(model, context([customTool]), { streamKind: "auxiliary" });
+		await collect(normalStream);
+		await normalStream.result();
+		expect(calls[1]?.tools).toEqual([]);
+		expect(calls[1]?.mcpServers).toEqual({ "custom-tools": {} });
 	});
 
 	it("carries the summarizer retry through a claude-sdk-oauth runtime boundary", async () => {
