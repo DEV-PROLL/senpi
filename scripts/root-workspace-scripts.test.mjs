@@ -31,9 +31,25 @@ const rootManifest = JSON.parse(readFileSync(join(repoRoot, "package.json"), "ut
 const FLAG_AFTER_SCRIPT_NAME = /npm run\s+(?!-)[\w:.@/-]+\s+[^&|]*--workspaces?\b/;
 const NPM_RUN_WITH_SINGULAR_WORKSPACE = /npm run\s+[^&|]*--workspace(?![s\w])/;
 
+/**
+ * Tokens after a standalone `--` are forwarded to the script as arguments, not
+ * parsed as package-manager flags: `npm run build -- --workspace=foo` becomes
+ * `bun run build -- --workspace=foo` and passes the token through without
+ * re-entering the root script. Only the pre-`--` portion of each command can
+ * carry a recursion hazard, so that is all we inspect.
+ */
+function beforeForwardedArgs(command) {
+	return command.split(/\s--(?:\s|$)/, 1)[0];
+}
+
 function recursionRisk(body) {
-	if (FLAG_AFTER_SCRIPT_NAME.test(body)) return "workspace flag after the script name";
-	if (NPM_RUN_WITH_SINGULAR_WORKSPACE.test(body)) return "singular --workspace on an `npm run` call (bun ignores it and re-enters the root script)";
+	const inspected = body
+		.split(/&&|\|\|/)
+		.map(beforeForwardedArgs)
+		.join(" && ");
+	if (FLAG_AFTER_SCRIPT_NAME.test(inspected)) return "workspace flag after the script name";
+	if (NPM_RUN_WITH_SINGULAR_WORKSPACE.test(inspected))
+		return "singular --workspace on an `npm run` call (bun ignores it and re-enters the root script)";
 	return undefined;
 }
 
