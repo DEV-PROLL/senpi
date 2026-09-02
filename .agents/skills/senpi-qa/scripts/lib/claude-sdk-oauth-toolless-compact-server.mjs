@@ -88,6 +88,7 @@ export function startToollessCompactServer(input) {
 				// A client that drops mid-body must fail closed as a recorded rejection,
 				// never as silence the probe would wait on.
 				request.on("error", (error) => {
+					if (failed) return;
 					failed = true;
 					rejected.push({ method: request.method, pathname, reason: `request-error:${error?.code ?? error?.message ?? "unknown"}` });
 					if (!response.headersSent) response.writeHead(400);
