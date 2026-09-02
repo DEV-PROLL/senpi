@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- A failing RPC socket host startup now reports its own cause instead of the signal `ensureHost` sent while cleaning up. `startHost()` kills the just-spawned child when registration fails before the pidfile is written, and that kill recorded the same early-exit result a genuine self-exit produces, so the catch block dropped the real error and always reported `exited with code null (SIGTERM) before answering get_protocol_info`. On the `windows-latest` runner this made every transient startup failure unobservable and surfaced as the flaky `RPC named pipes (Windows)` job ([#1290](https://github.com/code-yeongyu/senpi/issues/1290)).
+
 - The shared RPC supervisor's observer receives content-free session and agent lifecycle records even without a session attachment, so it no longer exits the host during an active turn.
 - The Windows RPC host supervisor no longer dies when its baseline process-identity probe times out; a failed baseline read is treated as unknown instead of throwing past the startup guard and taking the internal host down with it.
 - The Windows shared RPC host is no longer shut down by its own identity watchdog when the PowerShell process probe merely times out; an absent identity is confirmed with `kill(pid, 0)` before the host is treated as exited.

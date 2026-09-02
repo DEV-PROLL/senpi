@@ -1,5 +1,26 @@
 # changes
 
+## Startup failures keep their own diagnostic (2026-09-02)
+
+### What changed
+
+- `host-ensure.ts` `startHost()` latches whether the child had already exited (`exitedBeforeCleanup`) BEFORE the cleanup kill runs, and both the rethrow guard and the `exited ... before answering get_protocol_info` diagnostic now read that latch instead of the live `exitedEarly`.
+
+### Why
+
+- The cleanup kill is indistinguishable from a real self-exit at the observation point: `child.kill("SIGTERM")` makes the `exit` listener assign `exitedEarly = { code: null, signal: "SIGTERM" }`, so by the time the catch re-checked it the `!exitedEarly` rethrow was skipped and the original startup error was discarded forever. Every genuine startup failure was therefore reported as the host dying unprompted, with the host's stderr empty because it never got far enough to write any.
+- That is the root of the `RPC named pipes (Windows)` flake tracked in #1290 variant 1: the 4-vCPU runner produces the transient startup failure, and this code path replaced the evidence with a misleading self-inflicted message. Four separate sessions read those CI logs without being able to find a cause, because the cause had been thrown away.
+- Reproduced deterministically on macOS via the new `_test.beforePidFileWrite` hook, which fails registration while the child stays healthy — the same shape a loaded runner produces. The flake was never Windows-specific; Windows only made the triggering failure frequent.
+
+### Why this cannot be expressed externally
+
+- It is the mode's own spawn/registration error path.
+
+### Expected merge conflict zones
+
+- LOW: the `startHost()` catch block in `host-ensure.ts` and the `_test` option shape.
+
+
 ## [Unreleased] - Feed the supervisor's observer lifecycle records
 
 ### What changed

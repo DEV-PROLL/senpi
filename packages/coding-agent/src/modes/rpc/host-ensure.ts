@@ -57,6 +57,12 @@ export interface EnsureHostOptions {
 		readonly hostArgs?: readonly string[];
 		/** Runs after endpoint ownership is locked; deterministic concurrency-test gate. */
 		readonly afterLockAcquired?: () => Promise<void>;
+		/**
+		 * Runs after the child is spawned but before its pidfile is registered, so a
+		 * test can force the startup failure a loaded runner produces without having
+		 * to stall the real process-identity probe.
+		 */
+		readonly beforePidFileWrite?: () => Promise<void>;
 	};
 }
 
@@ -211,13 +217,19 @@ async function startHost(
 			}),
 		]);
 		pidFile = { pid: child.pid, processStartTime };
+		await testOptions?.beforePidFileWrite?.();
 		await writeFile(paths.pidFile, `${JSON.stringify(pidFile)}\n`, { mode: 0o600 });
 		child.unref();
 	} catch (error: unknown) {
+		// Whether the child died on its own decides which diagnostic is true, and the
+		// cleanup kill below records an `exitedEarly` indistinguishable from a real
+		// self-exit. Latch it before killing, or the catch reports the SIGTERM it is
+		// about to send and discards the actual startup failure.
+		const exitedBeforeCleanup = exitedEarly;
 		// Keep the ChildProcess handle owned until registration succeeds. If startup
 		// fails before the pidfile is written, terminate this exact child through
 		// its still-attached handle rather than leaving an unmanaged daemon behind.
-		if (!exitedEarly && child && child.exitCode === null && child.signalCode === null) {
+		if (!exitedBeforeCleanup && child && child.exitCode === null && child.signalCode === null) {
 			try {
 				child.kill("SIGTERM");
 			} catch {}
@@ -228,13 +240,13 @@ async function startHost(
 				} catch {}
 			}
 		}
-		if (!exitedEarly) {
+		if (!exitedBeforeCleanup) {
 			await cleanupState(paths);
 			throw error;
 		}
 		const diagnostic = await appendStderr(
 			paths,
-			`RPC socket host exited with code ${exitedEarly.code ?? "null"}${exitedEarly.signal ? ` (${exitedEarly.signal})` : ""} before answering get_protocol_info`,
+			`RPC socket host exited with code ${exitedBeforeCleanup.code ?? "null"}${exitedBeforeCleanup.signal ? ` (${exitedBeforeCleanup.signal})` : ""} before answering get_protocol_info`,
 		);
 		await cleanupState(paths);
 		throw new Error(diagnostic);
