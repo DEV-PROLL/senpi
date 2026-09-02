@@ -72,6 +72,9 @@ describe("claude-sdk-oauth tool-less requests", () => {
 		expect(toolLess).not.toHaveProperty(CUSTOM_TOOLS_MCP_SERVER_NAME);
 		expect(
 			buildClaudeSdkOauthQueryOptions({ model, context: context(), providerSettings: {} }).tools,
+		).toEqual([]);
+		expect(
+			buildClaudeSdkOauthQueryOptions({ model, context: context([customTool]), providerSettings: {} }).tools,
 		).toEqual([...BUILTIN_SDK_TOOLS]);
 	});
 
