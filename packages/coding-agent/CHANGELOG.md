@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- The shared RPC supervisor's observer receives content-free session and agent lifecycle records even without a session attachment, so it no longer exits the host during an active turn.
 - Multi-session RPC `close_session` teardown is bounded by a 10-second grace period (configurable via `SENPI_RPC_CLOSE_GRACE_MS`), force-releasing the session and path reservation on expiry; a second close joins the in-flight teardown instead of returning `unknown_session`.
 
 ### New Features
