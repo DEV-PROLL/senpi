@@ -68,11 +68,12 @@ describe("claude-sdk-oauth tool-less requests", () => {
 
 		expect(normal.tools).toEqual(["mcp__custom-tools__lookup"]);
 		expect(toolLess.tools).toEqual([]);
+		expect(toolLess.maxTurns).toBe(1);
 		expect(toolLess.mcpServers).toBeUndefined();
 		expect(toolLess).not.toHaveProperty(CUSTOM_TOOLS_MCP_SERVER_NAME);
-		expect(
-			buildClaudeSdkOauthQueryOptions({ model, context: context(), providerSettings: {} }).tools,
-		).toEqual([]);
+		const emptyContext = buildClaudeSdkOauthQueryOptions({ model, context: context(), providerSettings: {} });
+		expect(emptyContext.tools).toEqual([]);
+		expect(emptyContext.maxTurns).toBe(1);
 		expect(
 			buildClaudeSdkOauthQueryOptions({ model, context: context([customTool]), providerSettings: {} }).tools,
 		).toEqual([...BUILTIN_SDK_TOOLS]);
@@ -106,6 +107,7 @@ describe("claude-sdk-oauth tool-less requests", () => {
 		await collect(normalStream);
 		await normalStream.result();
 		expect(calls[1]?.tools).toEqual([]);
+		expect(calls[1]?.maxTurns).toBeUndefined();
 		expect(calls[1]?.mcpServers).toEqual({ "custom-tools": {} });
 	});
 
