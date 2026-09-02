@@ -24,6 +24,7 @@
 - Monitor wake-budget pauses now use single-source, scoped state: only the noisy monitor is muted, quiet monitors are not left permanently paused, and `rearm` without a `bash_id` resumes all paused monitors.
 - Real interactive and RPC user input now resumes paused terminal monitors while extension-generated input and tool calls remain unable to unpause them.
 - Rearming a muted monitor now reports how many filter-matching output lines were dropped while it was muted; the count resets on resume.
+- `bash_output` now reports when the peeked session is a muted monitor (`details.monitorMuted`, plus `mutedDropped` and a short note) so the muted state remains in the model's textual context; non-monitor sessions are unchanged.
 
 ### New Features
 

@@ -1,5 +1,23 @@
 # terminal builtin extension — fork surface
 
+## bash_output muted-monitor metadata (2026-09-02)
+
+### What changed
+
+- `bash_output` looks up the peeked `bash_id` in `monitorRegistry.snapshot()`. When that monitor is paused, it prepends a concise muted note (including `mutedDropped` when lines were dropped) to both log and screen results and attaches `{ monitorMuted, mutedDropped }` details. Non-monitor sessions are unchanged: no note, no monitor details.
+
+### Why
+
+- The one-shot pause notice can scroll away or disappear after compaction, and the footer is not in the model's textual context. `bash_output` is a surface the model reads directly, so muted state and the dropped-line count need to stay legible there without altering runtime history.
+
+### Why an extension could not handle it
+
+- `bash_output` is the builtin peek surface over the terminal manager and monitor registry; only it can prepend the note onto the result the model reads.
+
+### Expected merge conflict zones
+
+- LOW: `tools/bash-output.ts` and `test/suite/terminal-monitor.test.ts`.
+
 ## Muted monitor dropped-line counts (2026-09-02)
 
 ### What changed

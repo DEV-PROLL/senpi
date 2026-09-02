@@ -53,14 +53,27 @@ export function createBashOutputTool(ctx: TerminalToolContext) {
 			const runtime = ctx.manager.get(input.bash_id);
 			if (!runtime) return errorResult(`No terminal session found with id: ${input.bash_id}`);
 
+			const monitorEntry = ctx.monitorRegistry?.snapshot().find((entry) => entry.id === input.bash_id);
+			const muted = monitorEntry?.paused === true;
+			const mutedDropped = muted ? (ctx.monitorRegistry?.mutedDropped(input.bash_id) ?? 0) : 0;
+			let mutedNote = "";
+			if (muted) {
+				mutedNote =
+					mutedDropped > 0
+						? `monitor muted — ${mutedDropped} line(s) dropped while muted; run monitor({ action: "rearm", bash_id: "${input.bash_id}" }) to resume.`
+						: `monitor muted; run monitor({ action: "rearm", bash_id: "${input.bash_id}" }) to resume.`;
+			}
+			const extra = monitorEntry ? { details: { monitorMuted: muted, mutedDropped } } : undefined;
+			const prefix = mutedNote.length > 0 ? `${mutedNote}\n` : "";
+
 			if (input.view === "screen") {
-				return textResult(`${statusLine(runtime)}\n${screenView(runtime)}`);
+				return textResult(`${prefix}${statusLine(runtime)}\n${screenView(runtime)}`, extra);
 			}
 
 			const delta = runtime.readDelta();
 			const formatted = formatTerminalToolOutput(applyFilter(delta.text, input.filter));
 			const dropped = delta.droppedChars > 0 ? `[${delta.droppedChars} earlier chars dropped]\n` : "";
-			return textResult(`${statusLine(runtime)}\n${dropped}${formatted.text || "(no new output)"}`);
+			return textResult(`${prefix}${statusLine(runtime)}\n${dropped}${formatted.text || "(no new output)"}`, extra);
 		},
 		renderCall: renderBashOutputCall,
 		renderResult: renderBashOutputResult,
