@@ -18,6 +18,24 @@
 
 - LOW: models.json and extension composition in `packages/coding-agent/src/core/provider-composer.ts`.
 
+## 2026-09-02 - Name the retry stream-start setting
+
+### What changed
+
+- Provider retry continuation watchdog abort messages now name `retry.provider.streamStartTimeoutMs` and explain that `0` disables the guard.
+
+### Why
+
+- Users need an actionable setting name when a retry continuation watchdog reports a provider stream-start stall.
+
+### Why an extension could not handle it
+
+- The watchdog is owned by `AgentSession` and aborts the core agent directly, before extension hooks can rewrite the error.
+
+### Expected merge conflict zones
+
+- LOW: `agent-session.ts` retry watchdog abort message builder.
+
 ## 2026-08-31 - Session activity contract for host occupancy decisions
 
 ### What changed

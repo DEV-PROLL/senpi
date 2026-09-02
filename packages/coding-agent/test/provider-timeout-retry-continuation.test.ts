@@ -1,5 +1,6 @@
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { providerRetryWatchdogAbortMessage } from "../src/core/agent-session.ts";
 import { createProviderTimeoutRetryPlan, runBoundedRetryContinuation } from "../src/core/provider-timeout-retry.ts";
 
 const STREAM_START_TIMEOUT_MS = 90_000;
@@ -41,6 +42,9 @@ async function runRetryAttempt(watchdogTimeoutMs: number | undefined, respondsAf
 }
 
 describe("bounded retry continuation", () => {
+	it("names the setting that controls the retry stream-start guard", () => {
+		expect(providerRetryWatchdogAbortMessage(12_345, 6_789)).toContain("retry.provider.streamStartTimeoutMs");
+	});
 	beforeEach(() => {
 		vi.useFakeTimers();
 	});

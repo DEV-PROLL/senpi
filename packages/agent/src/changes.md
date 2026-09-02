@@ -1,5 +1,23 @@
 # Changes
 
+## 2026-09-02 - Name the stream-start timeout setting
+
+### What changed
+
+- `StreamStartTimeoutError` now names `retry.provider.streamStartTimeoutMs` and explains that `0` disables the guard.
+
+### Why
+
+- A provider stream-start timeout must tell users which setting to raise when the configured bound is too aggressive.
+
+### Why an extension could not handle it
+
+- The error is constructed inside the core provider stream loop before extension code can alter its user-visible message.
+
+### Expected merge conflict zones
+
+- LOW: `agent-loop.ts` stream-start timeout error wording.
+
 ## 2026-08-29 - Propagate asynchronous shell capture callbacks
 
 ### What changed

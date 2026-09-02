@@ -978,6 +978,18 @@ export function truncateToolResultBodies(
 // AgentSession Class
 // ============================================================================
 
+export function providerRetryWatchdogAbortMessage(
+	retryTimeoutMs: number | undefined,
+	streamStartTimeoutMs: number | undefined,
+): string {
+	return (
+		`Provider retry continuation watchdog timed out after ${retryTimeoutMs}ms` +
+		(streamStartTimeoutMs === undefined
+			? " (stream-start guard disabled; raise retry.provider.streamStartTimeoutMs, 0 disables)"
+			: ` (stream-start guard: ${streamStartTimeoutMs}ms; raise retry.provider.streamStartTimeoutMs, 0 disables)`)
+	);
+}
+
 export class AgentSession {
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
@@ -6328,10 +6340,7 @@ export class AgentSession {
 				abortActive: () =>
 					this.agent.abort(
 						new ProviderRetryWatchdogAbortError(
-							`Provider retry continuation watchdog timed out after ${retryTimeoutMs}ms` +
-								(this.agent.streamStartTimeoutMs === undefined
-									? " (stream-start guard disabled)"
-									: ` (stream-start guard: ${this.agent.streamStartTimeoutMs}ms)`),
+							providerRetryWatchdogAbortMessage(retryTimeoutMs, this.agent.streamStartTimeoutMs),
 						),
 					),
 				timeoutMs: retryTimeoutMs,

@@ -1,3 +1,21 @@
+## Actionable provider stream-start timeout guidance (2026-09-02)
+
+### What changed
+
+- `isProviderTimeoutError` accepts the actionable guidance suffix now appended to stream-start timeout messages while preserving strict matching of unrelated timeout text.
+
+### Why
+
+- Adding the setting name to a provider timeout must not disable retry classification.
+
+### Why an extension could not handle it
+
+- Timeout classification is centralized in the AI package and runs before coding-agent retry policy.
+
+### Expected merge conflict zones
+
+- LOW: `utils/retry.ts` provider timeout pattern.
+
 ## Cursor conversation cache eviction cannot break a live request (2026-08-31)
 
 ### What changed

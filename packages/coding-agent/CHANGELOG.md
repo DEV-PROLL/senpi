@@ -46,6 +46,8 @@
 
 ### Fixed
 
+- Provider retry continuation watchdog messages now name `retry.provider.streamStartTimeoutMs`; claude-sdk-oauth regression coverage pins SDK `api_retry` as stream liveness on query and resident paths.
+
 ### Removed
 
 ## [2026.9.2] - 2026-09-02
