@@ -1,10 +1,7 @@
 import { createAssistantMessageEventStream, type Api, type AssistantMessageEventStream, type Context, type Model, type Tool } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { generateSummaryMessage } from "../src/core/extensions/builtin/compaction/speculative-summary.ts";
-import {
-	BUILTIN_SDK_TOOLS,
-	CUSTOM_TOOLS_MCP_SERVER_NAME,
-} from "../src/core/extensions/builtin/claude-sdk-oauth/tools.ts";
+import { BUILTIN_SDK_TOOLS } from "../src/core/extensions/builtin/claude-sdk-oauth/tools.ts";
 import { buildClaudeSdkOauthQueryOptions } from "../src/core/extensions/builtin/claude-sdk-oauth/options.ts";
 import { resetSdkBoundary, overrideSdkBoundary, type Options, type SDKMessage } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import { streamClaudeSdkOauth } from "../src/core/extensions/builtin/claude-sdk-oauth/stream.ts";
@@ -69,8 +66,18 @@ describe("claude-sdk-oauth tool-less requests", () => {
 		expect(normal.tools).toEqual(["mcp__custom-tools__lookup"]);
 		expect(toolLess.tools).toEqual([]);
 		expect(toolLess.maxTurns).toBe(1);
-		expect(toolLess.mcpServers).toBeUndefined();
-		expect(toolLess).not.toHaveProperty(CUSTOM_TOOLS_MCP_SERVER_NAME);
+		// Strict MCP is forced for the request even when the operator opted out,
+		// so the CLI cannot re-expose configured MCP tools to the summarizer.
+		expect(toolLess.extraArgs).toEqual({ "strict-mcp-config": null });
+		const optedOut = buildClaudeSdkOauthQueryOptions({
+			model,
+			context: context([customTool]),
+			tools: ["mcp__custom-tools__lookup"],
+			providerSettings: { strictMcpConfig: false },
+			streamOptions: { toolChoice: "none" },
+		});
+		expect(optedOut.tools).toEqual([]);
+		expect(optedOut.extraArgs).toEqual({ "strict-mcp-config": null });
 		const emptyContext = buildClaudeSdkOauthQueryOptions({ model, context: context(), providerSettings: {} });
 		expect(emptyContext.tools).toEqual([]);
 		expect(emptyContext.maxTurns).toBeUndefined();

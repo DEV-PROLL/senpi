@@ -21,12 +21,12 @@
  * Usage: bun .agents/skills/senpi-qa/scripts/claude-sdk-oauth-toolless-compact-probe.mjs [--mode toolless|always-tool] [--evidence <dir>]
  */
 
-import { createServer } from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { guardRealAuth, installCleanupHooks, makeSandbox, repoRoot, track } from "./lib/common.mjs";
-import { loopbackSseBody, seedProbeAgentDir } from "./lib/claude-sdk-oauth-fullstack-support.mjs";
+import { seedProbeAgentDir } from "./lib/claude-sdk-oauth-fullstack-support.mjs";
+import { startToollessCompactServer } from "./lib/claude-sdk-oauth-toolless-compact-server.mjs";
 import { applyHermeticEnvironment, assertHermeticEnvironment } from "./lib/claude-sdk-oauth-hermetic-env.mjs";
 import { withTimeout } from "./lib/with-timeout.mjs";
 
@@ -49,93 +49,9 @@ if (mode !== "toolless" && mode !== "always-tool") {
 
 installCleanupHooks();
 
-function toolUseSseBody(toolName, sequence) {
-	const input = JSON.stringify({ file_path: "/dev/null" });
-	const events = [
-		[
-			"message_start",
-			{
-				type: "message_start",
-				message: {
-					id: `msg_toolless_probe_${sequence}`,
-					type: "message",
-					role: "assistant",
-					model: MODEL_ID,
-					content: [],
-					stop_reason: null,
-					stop_sequence: null,
-					usage: { input_tokens: 12, output_tokens: 1, cache_read_input_tokens: 0 },
-				},
-			},
-		],
-		[
-			"content_block_start",
-			{
-				type: "content_block_start",
-				index: 0,
-				content_block: { type: "tool_use", id: `toolu_probe_${sequence}`, name: toolName, input: {} },
-			},
-		],
-		["content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: input } }],
-		["content_block_stop", { type: "content_block_stop", index: 0 }],
-		["message_delta", { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null }, usage: { output_tokens: 8 } }],
-		["message_stop", { type: "message_stop" }],
-	];
-	return events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join("");
-}
-
-const requests = [];
 let phase = "seed";
-
-function startLoopbackServer() {
-	return new Promise((resolve, reject) => {
-		const server = track(
-			createServer((request, response) => {
-				if (request.method !== "POST") {
-					response.writeHead(200);
-					response.end();
-					return;
-				}
-				let raw = "";
-				request.setEncoding("utf8");
-				request.on("data", (chunk) => {
-					raw += chunk;
-				});
-				request.on("end", () => {
-					let body;
-					try {
-						body = JSON.parse(raw);
-					} catch {
-						body = {};
-					}
-					const tools = Array.isArray(body.tools) ? body.tools : [];
-					const sequence = requests.length + 1;
-					const toolNames = tools.map((tool) => tool?.name).filter((name) => typeof name === "string");
-					const entry = { sequence, phase, hasTools: tools.length > 0, toolCount: tools.length, toolNames: toolNames.slice(0, 12), bytes: raw.length, reply: "text" };
-					let sse;
-					if (phase === "compact" && (mode === "always-tool" || tools.length > 0)) {
-						// The hijack: a summarizer that is OFFERED tools calls one. Pick an
-						// offered tool when there is one so the CLI routes it through the
-						// host-denial hook exactly as production would.
-						const toolName = toolNames.find((name) => name === "Read") ?? toolNames[0] ?? "Read";
-						entry.reply = `tool_use:${toolName}`;
-						sse = toolUseSseBody(toolName, sequence);
-					} else {
-						sse = loopbackSseBody(phase === "compact" ? SUMMARY_TEXT : `TOKEN_T${sequence}`, sequence);
-					}
-					requests.push(entry);
-					response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-					response.end(sse);
-				});
-			}),
-		);
-		server.once("error", reject);
-		server.listen(0, "127.0.0.1", () => {
-			const address = server.address();
-			resolve({ server, baseUrl: `http://127.0.0.1:${address.port}` });
-		});
-	});
-}
+let requests = [];
+let rejected = [];
 
 const authGuard = guardRealAuth();
 const box = makeSandbox("claude-sdk-toolless-compact-probe");
@@ -145,7 +61,12 @@ let fatal;
 let outcome = { compacted: false };
 let closeSession;
 try {
-	({ server, baseUrl: box.baseUrl } = await startLoopbackServer());
+	({ server, baseUrl: box.baseUrl, requests, rejected } = await startToollessCompactServer({
+		mode,
+		modelId: MODEL_ID,
+		summaryText: SUMMARY_TEXT,
+		getPhase: () => phase,
+	}));
 	seedProbeAgentDir(box.agentDir);
 	// Keep the retained tail tiny so six short turns leave history to summarize.
 	writeFileSync(join(box.agentDir, "settings.json"), JSON.stringify({ compaction: { keepRecentTokens: 400, reserveTokens: 1024 } }));
@@ -228,6 +149,7 @@ try {
 		mode,
 		seedRequests,
 		compactRequests,
+		rejectedRequests: rejected,
 		compactError: compactError ?? null,
 		resultSummaryHead: typeof result?.summary === "string" ? result.summary.slice(0, 120) : null,
 		resultDetailsOrigin: result?.details?.origin ?? null,
@@ -267,17 +189,34 @@ if (infrastructureFailure) {
 	verdict = `FAIL signal=probe_error detail=${fatal.message}`;
 	process.exitCode = 1;
 } else if (mode === "toolless") {
-	const toolless = outcome.compactRequests.find((entry) => !entry.hasTools);
-	const ok = outcome.compacted && toolless !== undefined && (outcome.compactionEntry?.summaryHead ?? "").includes("PROBE_SUMMARY_OK");
+	// Non-vacuous: the offered-tools request must have been hijacked FIRST, and a
+	// LATER request must have reached the wire without tools and been answered in text.
+	const hijack = outcome.compactRequests.find((entry) => entry.reply.startsWith("tool_use:"));
+	const toolless = outcome.compactRequests.find((entry) => !entry.hasTools && entry.reply === "text");
+	const ok =
+		outcome.compacted &&
+		hijack !== undefined &&
+		toolless !== undefined &&
+		hijack.sequence < toolless.sequence &&
+		(outcome.rejectedRequests?.length ?? 0) === 0 &&
+		(outcome.compactionEntry?.summaryHead ?? "").includes("PROBE_SUMMARY_OK");
 	verdict = ok
-		? `PASS mode=toolless compactRequests=${outcome.compactRequests.length} toollessRequest=#${toolless.sequence} summary=${JSON.stringify(outcome.compactionEntry.summaryHead)}`
-		: `FAIL mode=toolless compacted=${outcome.compacted} toollessRequest=${toolless ? `#${toolless.sequence}` : "none"} error=${JSON.stringify(outcome.compactError)} requests=${JSON.stringify(outcome.compactRequests.map((r) => `${r.sequence}:${r.hasTools ? `tools(${r.toolCount})` : "no-tools"}->${r.reply}`))}`;
+		? `PASS mode=toolless compactRequests=${outcome.compactRequests.length} hijack=#${hijack.sequence} toollessRequest=#${toolless.sequence} summary=${JSON.stringify(outcome.compactionEntry.summaryHead)}`
+		: `FAIL mode=toolless compacted=${outcome.compacted} hijack=${hijack ? `#${hijack.sequence}` : "none"} toollessRequest=${toolless ? `#${toolless.sequence}` : "none"} rejected=${outcome.rejectedRequests?.length ?? "?"} error=${JSON.stringify(outcome.compactError)} requests=${JSON.stringify(outcome.compactRequests.map((r) => `${r.sequence}:${r.hasTools ? `tools(${r.toolCount})` : "no-tools"}->${r.reply}`))}`;
 	process.exitCode = ok ? 0 : 1;
 } else {
-	const ok = outcome.compacted && outcome.compactionEntry?.detailsOrigin === "required-compaction-recovery";
+	// Non-vacuous: every compaction request must have been hijacked (no text reply
+	// ever reached the summarizer) and the entry must come from the deterministic fallback.
+	const hijacks = outcome.compactRequests.filter((entry) => entry.reply.startsWith("tool_use:"));
+	const ok =
+		outcome.compacted &&
+		hijacks.length > 0 &&
+		hijacks.length === outcome.compactRequests.length &&
+		(outcome.rejectedRequests?.length ?? 0) === 0 &&
+		outcome.compactionEntry?.detailsOrigin === "required-compaction-recovery";
 	verdict = ok
-		? `PASS mode=always-tool compactRequests=${outcome.compactRequests.length} origin=${outcome.compactionEntry.detailsOrigin} failureKind=${outcome.resultFailureKind}`
-		: `FAIL mode=always-tool compacted=${outcome.compacted} origin=${outcome.compactionEntry?.detailsOrigin ?? "none"} error=${JSON.stringify(outcome.compactError)} requests=${JSON.stringify(outcome.compactRequests.map((r) => `${r.sequence}:${r.hasTools ? `tools(${r.toolCount})` : "no-tools"}->${r.reply}`))}`;
+		? `PASS mode=always-tool compactRequests=${outcome.compactRequests.length} hijacks=${hijacks.length} origin=${outcome.compactionEntry.detailsOrigin} failureKind=${outcome.resultFailureKind}`
+		: `FAIL mode=always-tool compacted=${outcome.compacted} hijacks=${hijacks.length}/${outcome.compactRequests.length} origin=${outcome.compactionEntry?.detailsOrigin ?? "none"} rejected=${outcome.rejectedRequests?.length ?? "?"} error=${JSON.stringify(outcome.compactError)} requests=${JSON.stringify(outcome.compactRequests.map((r) => `${r.sequence}:${r.hasTools ? `tools(${r.toolCount})` : "no-tools"}->${r.reply}`))}`;
 	process.exitCode = ok ? 0 : 1;
 }
 process.stdout.write(`${verdict}\n`);
