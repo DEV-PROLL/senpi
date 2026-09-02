@@ -164,14 +164,24 @@ export function createMonitorTool(ctx: TerminalToolContext) {
 				if (bashId === undefined || bashId.length === 0) {
 					const resumed = registry.resume();
 					if (resumed.length === 0) return textResult("No paused monitors to re-arm.");
-					ctx.onMonitorsResumed?.(resumed);
-					return textResult(`Re-armed ${resumed.length} paused monitor(s).`);
+					ctx.onMonitorsResumed?.(resumed.map((monitor) => monitor.id));
+					const total = resumed.reduce((sum, monitor) => sum + monitor.mutedDropped, 0);
+					return textResult(
+						total > 0
+							? `Re-armed ${resumed.length} paused monitor(s) (${total} line(s) dropped while muted).`
+							: `Re-armed ${resumed.length} paused monitor(s).`,
+					);
 				}
+				const dropped = registry.mutedDropped(bashId);
 				const outcome = registry.rearm(bashId);
 				if (outcome === "not_found") return errorResult(`No active monitor found with id: ${bashId}`);
 				if (outcome === "not_paused") return textResult(`Monitor ${bashId} is not paused; no action taken.`);
 				ctx.onMonitorRearmed?.(bashId);
-				return textResult(`Monitor ${bashId} re-armed.`);
+				return textResult(
+					dropped > 0
+						? `Monitor ${bashId} re-armed (${dropped} line(s) dropped while muted).`
+						: `Monitor ${bashId} re-armed.`,
+				);
 			}
 			const fileInput = isFileCreateInput(input);
 			const commandInput = isCreateInput(input);

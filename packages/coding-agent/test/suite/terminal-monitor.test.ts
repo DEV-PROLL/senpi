@@ -142,7 +142,10 @@ describe("terminal monitor tool", () => {
 		if (!firstId || !secondId) throw new Error("Monitors did not return bash_ids");
 
 		expect(registry.pause([firstId, secondId])).toEqual([firstId, secondId]);
-		expect(registry.resume()).toEqual([firstId, secondId]);
+		expect(registry.resume()).toEqual([
+			{ id: firstId, mutedDropped: 0 },
+			{ id: secondId, mutedDropped: 0 },
+		]);
 		expect(registry.pause([firstId, secondId])).toEqual([firstId, secondId]);
 		const result = await tool.execute("monitor-rearm-all", { action: "rearm" } as MonitorInput);
 		expect(result.isError).not.toBe(true);
@@ -248,6 +251,41 @@ describe("terminal monitor tool", () => {
 		await createKillBashTool(ctx).execute("kill-paused", { bash_id: firstId });
 		expect(summaryEvent(await ended).summary).toContain("killed");
 		expect(registry.snapshot()).toEqual([expect.objectContaining({ id: secondId, paused: true })]);
+	});
+
+	it("reports filter-matching lines dropped while muted and resets the count on a second rearm", async () => {
+		const registry = new MonitorRegistry((event) => sink.push(event));
+		const tool = createMonitorTool({ ...ctx, monitorRegistry: registry });
+		const started = await tool.execute("monitor-dropped-count", {
+			description: "dropped count",
+			command: "read _; printf 'KEEP_ONE\\nDROP\\nKEEP_TWO\\n'; sleep 30",
+			filter: "^KEEP",
+			persistent: true,
+		});
+		const bashId = /ID: (bash_\d+)/.exec(firstText(started))?.[1];
+		if (!bashId) throw new Error("Monitor did not return a bash_id");
+		const output = manager.get(bashId);
+		if (!output) throw new Error("Monitor runtime was not retained");
+		expect(registry.pause([bashId])).toEqual([bashId]);
+		const outputSeen = new Promise<void>((resolve) => {
+			const unsubscribe = output.onOutput((chunk) => {
+				if (!chunk.includes("KEEP_TWO")) return;
+				unsubscribe();
+				resolve();
+			});
+		});
+		output.session.write("\n");
+		await outputSeen;
+
+		const rearmed = await tool.execute("monitor-dropped-count-rearm", { action: "rearm", bash_id: bashId });
+		expect(firstText(rearmed)).toContain("2 line(s) dropped while muted");
+		expect(registry.pause([bashId])).toEqual([bashId]);
+		const secondRearm = await tool.execute("monitor-dropped-count-rearm-again", {
+			action: "rearm",
+			bash_id: bashId,
+		});
+		expect(firstText(secondRearm)).toBe(`Monitor ${bashId} re-armed.`);
+		await createKillBashTool(ctx).execute("kill-dropped-count", { bash_id: bashId });
 	});
 
 	it("rearms a wake-budget-paused monitor and notifies the session delivery controller", async () => {
