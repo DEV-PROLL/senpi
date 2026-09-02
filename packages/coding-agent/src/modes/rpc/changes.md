@@ -48,6 +48,24 @@
 
 - LOW: the net transport calls and filesystem cleanup guards in `host-lifecycle.ts` and `multi-session-host.ts`; one import and one `createConnection` expression each in `host-ensure.ts` and `rpc-client.ts`.
 
+## [Unreleased] - Bound and join multi-session close_session teardown
+
+### What changed
+
+- `session-teardown.ts` bounds graceful `abort` -> idle -> dispose teardown by a 10-second default grace window (configurable with `SENPI_RPC_CLOSE_GRACE_MS`), then releases the entry and path reservation while detached cleanup continues and reports failures in the existing RPC stderr format.
+- `session-command-router.ts` makes explicit close, idle eviction, and router disposal share one binding-finalization owner, so normal idle eviction still disposes the binding once while concurrent lifecycle paths join it.
+- `session-event-writer.ts` preserves the first closer's terminal `session_closed` plus final response ordering and targets joined successful responses after that terminal sequence.
+- `rpc-mode.ts` documents the bounded close and join response contract in the protocol table.
+- A second `close_session` for an entry already `closing` joins the shared completion; the binding is disposed once, the first closer retains the terminal `session_closed` plus final response ordering, and joined callers receive targeted successful responses.
+
+### Why
+
+- A wedged abort previously retained the runtime and session-path reservation forever, while concurrent close requests incorrectly returned `unknown_session`.
+
+### Why an extension could not handle it
+
+- Session teardown deadlines, reservation ownership, and response ordering are host transport lifecycle behavior below the extension API.
+
 ## [Unreleased] - Isolate multi-session socket events by attachment
 
 ### What changed

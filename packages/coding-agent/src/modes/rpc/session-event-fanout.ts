@@ -121,6 +121,11 @@ export class SessionEventFanout {
 		return this.connections.values();
 	}
 
+	/** True when no socket connection is registered, i.e. records must fall back to the stdio lane. */
+	isEmpty(): boolean {
+		return this.connections.size === 0;
+	}
+
 	broadcast(line: string): void {
 		for (const { actor } of this.connections.values()) actor.enqueue(line);
 	}
