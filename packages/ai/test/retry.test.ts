@@ -118,6 +118,12 @@ describe("provider retry classification", () => {
 	it.each([
 		["Idle timeout waiting for provider stream after 300000ms", true, true],
 		["Provider stream start timed out after 90000ms", true, true],
+		[
+			"Provider stream start timed out after 90000ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)",
+			true,
+			true,
+		],
+		["Idle timeout waiting for provider stream after 5ms (x)", false, false],
 		["Request timed out.", false, true],
 		["Request timed out", false, true],
 		["Command timed out after 30000ms", false, false],
@@ -209,7 +215,8 @@ describe("provider retry classification", () => {
 			isProviderStreamStallError(
 				fauxAssistantMessage("", {
 					stopReason: "error",
-					errorMessage: "Provider stream start timed out after 90000ms",
+					errorMessage:
+						"Provider stream start timed out after 90000ms (raise streamStartTimeoutMs — retry.provider.streamStartTimeoutMs in senpi settings; 0 disables)",
 				}),
 			),
 		).toBe(true);

@@ -360,7 +360,7 @@ export function isRetryableAssistantError(message: AssistantMessage): boolean {
  * unrelated extension, command, or MCP timeout diagnostics.
  */
 const PROVIDER_STREAM_STALL_ERROR_PATTERN =
-	/^(?:Idle timeout waiting for provider stream after \d+ms|Provider stream start timed out after \d+ms)(?: \(|$)/i;
+	/^(?:Idle timeout waiting for provider stream after \d+ms|Provider stream start timed out after \d+ms(?: \([^)]*\))?)$/i;
 const PROVIDER_TRANSPORT_TIMEOUT_ERROR_PATTERN = /^Request timed out\.?$/i;
 
 export function isProviderStreamStallError(message: AssistantMessage): boolean {
