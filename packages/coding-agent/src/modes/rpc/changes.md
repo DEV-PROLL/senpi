@@ -14,7 +14,25 @@
 ### Why an extension could not handle it
 
 - Socket fan-out and supervisor lifecycle accounting are transport behavior below the extension API.
+## 2026-09-02 - Reap orphaned host dirs outside the endpoint lock
 
+### What changed
+
+- `packages/coding-agent/src/modes/rpc/host-ensure.ts` runs `reapOrphanedInternalHostDirs()` before `acquireOwnershipSafeLock()` instead of inside the locked section.
+- `packages/coding-agent/test/rpc-host-ensure-lock-scope.test.ts` pins that ordering at the seam.
+
+### Why
+
+- The reaper's cost is unbounded in the size of the whole temp directory: it `readdir`s `tmpdir()` (measured: 132,035 entries, 394-467ms on a fast local SSD), then per `senpi-rpc-host-internal-*` candidate reads `.owner`, re-reads the directory, and calls `processMatchesPidFile()`. On win32 that last call spawns `powershell.exe Get-CimInstance` per candidate with a 1s default timeout. Running that opportunistic GC inside the exclusive endpoint lock made hold time scale with temp-directory size and PowerShell latency, so on the 4-vCPU `windows-latest` runner a concurrent `ensureHost` waiter could exhaust even the 42s lock budget and surface a raw `database is locked`. Raising the budget cannot fix a critical section whose cost is unbounded; the GC simply does not belong inside the lock.
+- The reaper's own guards already make it safe unlocked: it only removes directories older than 60s whose owner pid is provably dead, so it never contends with the caller's own ensure.
+
+### Why an extension could not handle it
+
+- The reap runs inside the host handshake below the extension API.
+
+### Expected merge conflict zones
+
+- LOW: the `reapOrphanedInternalHostDirs()` / `acquireOwnershipSafeLock()` ordering at the top of `ensureHost`.
 ## 2026-09-02 - Size the ensure-host lock wait to the startup critical section
 
 ### What changed

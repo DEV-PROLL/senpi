@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { VERSION } from "../src/config.ts";
-import { processMatchesPidFile, readProcessStartTime } from "../src/modes/app-server/daemon/process.ts";
+import { processIsLive, processMatchesPidFile, readProcessStartTime } from "../src/modes/app-server/daemon/process.ts";
 import { createHostDaemonPaths, ensureHost, type HostLifecyclePolicyInput } from "../src/modes/rpc/host-ensure.ts";
 import {
 	DEFAULT_HOST_IDLE_EXIT_MS,
@@ -704,7 +704,10 @@ async function waitForHostExit(
 			// avoids the 50ms polling storm that caused every probe to time out.
 			const probe = probeWindowsProcessIdentity(entry.pidFile.pid, 10_000);
 			currentIdentity = probe.identity;
-			probeTimedOut = probe.timedOut;
+			// A probe that timed out reports UNKNOWN, not ALIVE. kill(pid, 0) answers
+			// liveness deterministically, so a host that really exited is recognized here
+			// instead of spinning until the deadline and failing with "did not exit".
+			probeTimedOut = probe.timedOut && processIsLive(entry.pidFile.pid);
 		} else {
 			currentIdentity = await readProcessStartTime(entry.pidFile.pid);
 		}
@@ -792,8 +795,12 @@ function terminateSupervisor(pid: number, signal: NodeJS.Signals): void {
 			// The supervisor idle-exits on its own timer, so it can vanish between the
 			// caller's liveness check and this Stop-Process: an already-gone pid is the
 			// outcome the caller wanted, not a failure.
-			const probe = probeWindowsProcessIdentity(pid, 10_000);
-			if (probe.identity === undefined && !probe.timedOut) return;
+			//
+			// Liveness is decided by kill(pid, 0), not by the PowerShell CIM probe: that
+			// probe has its own timeout, and a loaded runner hitting it reported
+			// `timedOut` for a process that had genuinely exited, which rethrew and made
+			// teardown fail on runner slowness alone. A timeout means UNKNOWN, never ALIVE.
+			if (!processIsLive(pid)) return;
 			throw cause;
 		}
 		return;
