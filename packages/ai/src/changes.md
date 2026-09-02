@@ -2,6 +2,7 @@
 
 ### What changed
 
+- The login abort handler now aborts the manual `manual_code` prompt as well as the callback wait, so cancelling a manual-only login (callback port unavailable) settles instead of leaving `loginAnthropic` pending.
 - `utils/retry-profile/profiles.ts`: `SENPI_DEFAULT_RETRY_PROFILE.turn.maxRetries` goes from 3 to 5. Backoff shapes, the server-hint policies, `providerRequest.maxRetries` (still 0, so no hidden second budget), and `KIMI_CODE_RETRY_PROFILE` are untouched.
 
 ### Why
