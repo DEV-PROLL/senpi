@@ -33,6 +33,7 @@
 ### Fixed
 
 - Two concurrent shared-host starts for one socket no longer fail with a raw `database is locked`: the ensure-lock wait now covers the whole host startup critical section (probe, incompatible-host stop, spawned-host readiness) instead of ten seconds.
+- Multi-session socket hosts deliver agent events only to connections attached to the session; targeted responses and dialog extension UI requests remain requester-only, while other extension UI state reaches attached connections. `RpcClient` drops foreign session events while lease-less and buffers own pre-lease startup events during `open_session`.
 
 ### New Features
 

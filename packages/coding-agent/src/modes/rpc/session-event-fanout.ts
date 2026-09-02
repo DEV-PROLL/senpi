@@ -36,8 +36,6 @@ export class SessionEventFanout {
 		this.connections.set(id, { connection, actor });
 		this.connectionCapabilities.set(id, new Set());
 		this.connectionSessions.set(id, new Set());
-		for (const snapshot of this.sessionSnapshots.values())
-			for (const record of snapshot) if (!record.rendered) actor.enqueue(record.line);
 	}
 
 	unregisterConnection(id: string): void {
@@ -53,9 +51,10 @@ export class SessionEventFanout {
 	attachConnectionToSession(id: string, sessionId: string): void {
 		if (!this.connections.has(id)) return;
 		const sessions = this.connectionSessions.get(id) ?? new Set<string>();
+		if (sessions.has(sessionId)) return;
 		sessions.add(sessionId);
 		this.connectionSessions.set(id, sessions);
-		if (this.connectionCapabilities.get(id)?.has("rendered_components")) this.replayRendered(id, sessionId);
+		this.replaySnapshot(id, sessionId);
 	}
 
 	detachConnectionFromSession(id: string, sessionId: string): void {
@@ -94,7 +93,12 @@ export class SessionEventFanout {
 		return false;
 	}
 
-	targets(sessionId: string, targetId: string | undefined, isTargeted: boolean, rendered: boolean): readonly (string | undefined)[] {
+	targets(
+		sessionId: string,
+		targetId: string | undefined,
+		isTargeted: boolean,
+		rendered: boolean,
+	): readonly (string | undefined)[] {
 		if (isTargeted) return [targetId];
 		if (rendered)
 			return this.connections.size > 0
@@ -104,15 +108,13 @@ export class SessionEventFanout {
 							this.connectionSessions.get(id)?.has(sessionId),
 					)
 				: [undefined];
-		return this.connections.size > 0 ? [...this.connections.keys()] : [undefined];
+		return this.connections.size > 0
+			? [...this.connections.keys()].filter((id) => this.connectionSessions.get(id)?.has(sessionId))
+			: [undefined];
 	}
 
 	get(id: string): RegisteredConnection | undefined {
 		return this.connections.get(id);
-	}
-
-	ids(): IterableIterator<string> {
-		return this.connections.keys();
 	}
 
 	values(): IterableIterator<RegisteredConnection> {
@@ -136,6 +138,14 @@ export class SessionEventFanout {
 
 	forgetSession(sessionId: string): void {
 		this.sessionSnapshots.delete(sessionId);
+	}
+
+	private replaySnapshot(id: string, sessionId: string): void {
+		const actor = this.connections.get(id)?.actor;
+		if (!actor) return;
+		const capable = this.connectionCapabilities.get(id)?.has("rendered_components") ?? false;
+		for (const record of this.sessionSnapshots.get(sessionId) ?? [])
+			if (!record.rendered || capable) actor.enqueue(record.line);
 	}
 
 	private replayRendered(id: string, sessionId: string): void {

@@ -178,13 +178,8 @@ export class SessionEventWriter {
 		const tagged = { ...value, sessionId } as RpcRecord;
 		const { [RENDERED_COMPONENT_RECORD]: _rendered, ...wireTagged } = tagged;
 		const line = serializeJsonLine(wireTagged);
-		this.fanout.rememberSnapshot(sessionId, tagged, line);
-		const targets = this.fanout.targets(
-			sessionId,
-			targetId,
-			isTargeted,
-			record[RENDERED_COMPONENT_RECORD] === true,
-		);
+		if (!isTargeted) this.fanout.rememberSnapshot(sessionId, tagged, line);
+		const targets = this.fanout.targets(sessionId, targetId, isTargeted, record[RENDERED_COMPONENT_RECORD] === true);
 		for (const target of targets) {
 			if (target !== undefined && !this.fanout.get(target)) continue;
 			const registered = target === undefined ? undefined : this.fanout.get(target);
