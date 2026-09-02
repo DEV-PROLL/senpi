@@ -37,7 +37,7 @@ parentPort.on("message", (message) => {
 	try {
 		const watcher = watch(
 			message.path,
-			{ recursive: true, encoding: "utf8" },
+			{ recursive: message.recursive !== false, encoding: "utf8" },
 			(eventType, filename) => {
 				parentPort.postMessage({
 					kind: "event",
@@ -85,12 +85,15 @@ function isRecursiveWatchMessage(message: unknown): message is RecursiveWatchMes
 }
 
 /**
- * Platforms whose recursive fs.watch handles are expensive to create and tear down on the
- * interactive main thread: inotify tree walks on Linux, FSEvents stream teardown on macOS.
+ * Platforms whose fs.watch handles are expensive to create and tear down on the
+ * interactive main thread: inotify tree walks on Linux, FSEvents stream rendezvous on
+ * macOS. Non-recursive per-directory watches pay the same FSEvents setup latency —
+ * measured 2.7-8.0s per watch-engine target under system load — so every watch is
+ * offloaded, not only recursive ones.
  */
-const WORKER_OFFLOADED_RECURSIVE_PLATFORMS: ReadonlySet<NodeJS.Platform> = new Set(["linux", "darwin"]);
+const WORKER_OFFLOADED_WATCH_PLATFORMS: ReadonlySet<NodeJS.Platform> = new Set(["linux", "darwin"]);
 
-/** Production event source. Recursive setup and teardown run off the interactive main thread. */
+/** Production event source. Watch setup and teardown run off the interactive main thread. */
 export function createFsWatchEventSource(
 	onError: (error: unknown, path: string) => void = () => {},
 	options: FsWatchEventSourceOptions = {},
@@ -120,11 +123,11 @@ export function createFsWatchEventSource(
 	};
 
 	return (path, listener, watchOptions) => {
-		if (WORKER_OFFLOADED_RECURSIVE_PLATFORMS.has(options.platform ?? process.platform) && watchOptions?.recursive) {
+		if (WORKER_OFFLOADED_WATCH_PLATFORMS.has(options.platform ?? process.platform)) {
 			const id = nextSubscriptionId++;
 			const worker = ensureRecursiveWorker();
 			recursiveSubscriptions.set(id, { path, listener });
-			worker.postMessage({ kind: "watch", id, path });
+			worker.postMessage({ kind: "watch", id, path, recursive: watchOptions?.recursive ?? false });
 			return () => {
 				if (!recursiveSubscriptions.delete(id)) return;
 				if (recursiveSubscriptions.size > 0) {

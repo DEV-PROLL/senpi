@@ -21,47 +21,41 @@ class WorkerProbe extends EventEmitter {
 	readonly terminate = vi.fn(async () => 0);
 }
 
-describe("issue #477 recursive watch main-thread stall", () => {
+describe("non-recursive watch main-thread stall", () => {
 	beforeEach(() => {
 		mocks.fsWatch.mockReset();
 	});
 
-	it("offloads Linux recursive watch setup instead of calling fs.watch on the main thread", () => {
+	it("offloads non-recursive watch creation to the worker on darwin", () => {
 		const worker = new WorkerProbe();
 		const createRecursiveWorker = vi.fn(() => worker);
 		const listener = vi.fn<WatchEventListener>();
 		const source = createFsWatchEventSource(vi.fn(), {
-			platform: "linux",
+			platform: "darwin",
 			createRecursiveWorker,
 		});
 
-		const unsubscribe = source("/large-workspace-mount", listener, { recursive: true });
-		const unsubscribeSecond = source("/another-config-root", vi.fn(), { recursive: true });
-		worker.emit("message", { kind: "event", id: 1, eventType: "change", filename: ".omo/omo.json" });
+		// The watch engine subscribes per-directory with { recursive: false } since the
+		// per-directory redesign; FSEvents stream creation blocks the main thread for
+		// seconds under load, so it must run on the worker like recursive watches.
+		const unsubscribe = source("/agent/extensions", listener, { recursive: false });
+		worker.emit("message", { kind: "event", id: 1, eventType: "change", filename: "ext.ts" });
 
 		expect(createRecursiveWorker).toHaveBeenCalledTimes(1);
 		expect(worker.postMessage).toHaveBeenCalledWith({
 			kind: "watch",
 			id: 1,
-			path: "/large-workspace-mount",
-			recursive: true,
-		});
-		expect(worker.postMessage).toHaveBeenCalledWith({
-			kind: "watch",
-			id: 2,
-			path: "/another-config-root",
-			recursive: true,
+			path: "/agent/extensions",
+			recursive: false,
 		});
 		expect(mocks.fsWatch).not.toHaveBeenCalled();
-		expect(listener).toHaveBeenCalledWith("change", ".omo/omo.json");
+		expect(listener).toHaveBeenCalledWith("change", "ext.ts");
 
 		unsubscribe();
-		expect(worker.terminate).not.toHaveBeenCalled();
-		unsubscribeSecond();
 		expect(worker.terminate).toHaveBeenCalledTimes(1);
 	});
 
-	it("keeps non-recursive config file watches on direct fs.watch on non-offloaded platforms", () => {
+	it("keeps every watch on direct fs.watch on windows", () => {
 		const watcher = new WatcherProbe();
 		mocks.fsWatch.mockReturnValue(watcher);
 		const createRecursiveWorker = vi.fn(() => new WorkerProbe());
