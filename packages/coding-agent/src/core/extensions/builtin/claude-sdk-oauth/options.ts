@@ -245,7 +245,7 @@ export function buildClaudeSdkOauthQueryOptions(input: ClaudeSdkOauthQueryOption
 			: mode === "override"
 				? loadOverrideSystemPrompt(providerSettings.systemPromptFile)
 				: resolveCustomSystemPrompt(input.context.systemPrompt);
-	const toolLessRequest = input.streamOptions?.toolChoice === "none";
+	const toolLessRequest = input.streamOptions?.toolChoice === "none" || (input.context.tools?.length ?? 0) === 0;
 	const strictMcpConfig = toolLessRequest || (providerSettings.strictMcpConfig ?? !appendSystemPrompt);
 	const queryOptions: Options = {
 		cwd,
