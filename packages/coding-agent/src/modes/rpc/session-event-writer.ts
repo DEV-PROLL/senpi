@@ -219,7 +219,18 @@ export class SessionEventWriter {
 		this.sealedSessions.add(sessionId);
 		const targetId = this.connectionContext.getStore();
 		const lifecycle = { type: "session_closed", sessionId };
-		this.fanout.broadcast(serializeJsonLine(lifecycle));
+		if (this.fanout.isEmpty()) this.appendSessionRecord(sessionId, lifecycle);
+		else this.fanout.broadcast(serializeJsonLine(lifecycle));
+		const taggedResponse = { ...response, sessionId };
+		const registered = targetId === undefined ? undefined : this.fanout.get(targetId);
+		if (registered) registered.actor.enqueue(serializeJsonLine(taggedResponse));
+		else this.appendSessionRecord(sessionId, taggedResponse, targetId);
+		this.requestFlush();
+	}
+
+	/** Queue a successful response for a joined close after the terminal lifecycle record. */
+	enqueueClosedResponse(sessionId: string, response: object): void {
+		const targetId = this.connectionContext.getStore();
 		const taggedResponse = { ...response, sessionId };
 		const registered = targetId === undefined ? undefined : this.fanout.get(targetId);
 		if (registered) registered.actor.enqueue(serializeJsonLine(taggedResponse));

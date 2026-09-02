@@ -509,8 +509,9 @@ describe("multi-session RPC event writer", () => {
 
 		expect(records(chunks)).toEqual([
 			{ type: "message_update", sessionId: "a" },
-			{ id: "close-a", type: "response", command: "close_session", success: true, sessionId: "a" },
+			{ type: "session_closed", sessionId: "a" },
 			{ type: "agent_settled", sessionId: "b" },
+			{ id: "close-a", type: "response", command: "close_session", success: true, sessionId: "a" },
 		]);
 	});
 

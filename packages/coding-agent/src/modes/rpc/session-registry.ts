@@ -43,6 +43,9 @@ export interface RpcSessionEntry {
 	/** Timestamp of the last routed command / observed activity; drives idle eviction. */
 	lastCommandAt: number;
 	lifecycleMutex: Promise<void>;
+	closeCompletion?: Promise<void>;
+	closeResolve?: () => void;
+	closeStarted?: boolean;
 }
 
 export class RpcSessionRegistryError extends Error {
@@ -68,6 +71,8 @@ export interface RpcSessionRegistryOptions {
 	now?: () => number;
 	/** Cap on concurrently opening/open sessions; attach-on-open is exempt. */
 	maxSessions?: number;
+	/** Maximum time to wait for graceful runtime teardown before forced release. */
+	closeGraceMs?: number;
 }
 
 export interface OpenRpcSession {
@@ -99,11 +104,14 @@ export class RpcSessionRegistry {
 	private nextHandle = 0;
 	private readonly options: RpcSessionRegistryOptions;
 	private readonly now: () => number;
+	readonly closeGraceMs: number;
 
 	constructor(options: RpcSessionRegistryOptions) {
 		this.options = options;
 		this.now = options.now ?? Date.now;
+		this.closeGraceMs = options.closeGraceMs ?? 10_000;
 		this.teardownHost = {
+			closeGraceMs: this.closeGraceMs,
 			get: (handle) => this.entries.get(handle),
 			delete: (handle) => this.entries.delete(handle),
 			releaseReservation: (key) => this.reservations.delete(key),
@@ -268,8 +276,8 @@ export class RpcSessionRegistry {
 	}
 
 	/** Starts a close synchronously and returns the live entry for routing decisions. */
-	beginClose(handle: string): RpcSessionEntry {
-		return beginSessionClose(this.teardownHost, handle);
+	beginClose(handle: string, onRole?: (finalizer: boolean) => void): RpcSessionEntry {
+		return beginSessionClose(this.teardownHost, handle, onRole);
 	}
 
 	async close(handle: string): Promise<void> {
