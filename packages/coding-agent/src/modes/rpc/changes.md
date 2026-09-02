@@ -1,5 +1,20 @@
 # changes
 
+## [Unreleased] - Feed the supervisor's observer lifecycle records
+
+### What changed
+
+- `session-event-fanout.ts` delivers content-free lifecycle records (`agent_start`, `agent_settled`, `agent_idle`, `session_opened`, and `session_closed`) to every registered socket connection, including unattached observer connections. Session content, rendered component records, responses, and dialog requests retain their attachment/requester scoping.
+- The lifecycle supervisor's always-on internal observer therefore receives the turn boundaries required to prevent idle shutdown during an active turn without reopening cross-session content delivery.
+
+### Why
+
+- The supervisor must observe active turns independently of client session attachments; otherwise attached-only delivery leaves it believing an active host is idle.
+
+### Why an extension could not handle it
+
+- Socket fan-out and supervisor lifecycle accounting are transport behavior below the extension API.
+
 ## 2026-09-02 - Size the ensure-host lock wait to the startup critical section
 
 ### What changed
