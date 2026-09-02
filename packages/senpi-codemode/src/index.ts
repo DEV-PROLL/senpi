@@ -16,7 +16,7 @@ import {
 import { jsRuntimeInfo, jsRuntimeLabel } from "./extension/runtime-info.ts";
 import type { CodemodeSessionManager, CreateCodemodeSessionManagerOptions } from "./extension/session-manager.ts";
 import { SessionManagerProxy } from "./extension/session-manager-proxy.ts";
-import { registerBunSkillContribution } from "./extension/skill-contribution.ts";
+import { activeBunSkillPath, registerBunSkillContribution } from "./extension/skill-contribution.ts";
 import { WAKE_SOURCE_STATE_EVENT, type WakeSourceState } from "./extension/wake-source-state.ts";
 import { EvalDetachedCellManager, type EvalDetachedCellStatusEntry } from "./tool/detached-cell-manager.ts";
 import {
@@ -68,6 +68,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 	const manager = new SessionManagerProxy();
 	const complete = options.complete ?? ((request, ctx) => createCompletionHandler()(ctx)(request));
 	const renderers = { renderCall: renderEvalCall, renderResult: renderEvalResult };
+	const bunSkillPath = activeBunSkillPath();
 	let activeRuntime: SessionRuntime | undefined;
 	let activeModelId: string | undefined;
 	let activeContext: ExtensionContext | undefined;
@@ -125,6 +126,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 				spawnDefaultAgent: runtime.settings.taskTools.task,
 				hostLine: hostLine(),
 				runtimes: runtime.runtimes,
+				...(bunSkillPath === undefined ? {} : { bunSkillPath }),
 				...(modelId === undefined ? {} : { modelId }),
 			}),
 		);
@@ -159,6 +161,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			renderers,
 			hostLine: hostLine(),
 			runtimes: { js: jsRuntimeInfo() },
+			...(bunSkillPath === undefined ? {} : { bunSkillPath }),
 		}),
 	);
 	pi.registerRemovedToolHint(

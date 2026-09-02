@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	activeBunSkillPath,
 	bundledBunSkillPath,
 	bunVersionSupportsSkill,
 	createBunSkillDiscoverHandler,
@@ -31,6 +32,19 @@ describe("bundledBunSkillPath", () => {
 		expect(result).toBe(bunSkillMd);
 		expect(result !== undefined && existsSync(result)).toBe(true);
 	});
+});
+
+describe("activeBunSkillPath", () => {
+	it("returns the bundled SKILL.md path on a bun >= 1.4 kernel", () => {
+		expect(activeBunSkillPath(() => "1.4.2")).toBe(bunSkillMd);
+	});
+
+	it.each([{ version: "1.3.0" }, { version: undefined }, { version: "not-a-version" }])(
+		"returns undefined for kernel version $version",
+		({ version }) => {
+			expect(activeBunSkillPath(() => version)).toBeUndefined();
+		},
+	);
 });
 
 describe("createBunSkillDiscoverHandler", () => {
@@ -89,6 +103,14 @@ describe("bun-1-4 skill assets", () => {
 		expect(readFileSync(bunSkillMd, "utf8")).toContain("name: bun-1-4");
 		const references = readdirSync(bunSkillRefs).filter((name) => name.endsWith(".md"));
 		expect(references).toHaveLength(10);
+	});
+
+	it("ships English-only copy: no Hangul in SKILL.md or any reference", () => {
+		const hangul = /[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]/u;
+		const files = [bunSkillMd, ...readdirSync(bunSkillRefs).map((name) => join(bunSkillRefs, name))];
+		for (const file of files) {
+			expect(hangul.test(readFileSync(file, "utf8")), file).toBe(false);
+		}
 	});
 
 	it("ships a single document: one frontmatter block and one H1", () => {

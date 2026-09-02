@@ -97,7 +97,7 @@ describe("buildEvalPrompt", () => {
 		expect(ruby).not.toContain("<examples>");
 	});
 
-	it("documents core helpers with Node wording and no excluded surface", () => {
+	it("documents core helpers with Node wording and no excluded surface when no js runtime is given", () => {
 		const prompt = fullPrompt({ py: true, js: true, rb: true, jl: true });
 
 		for (const helperName of coreHelperNames) {
@@ -218,6 +218,42 @@ describe("buildEvalPrompt", () => {
 		expect(withHost).toContain("Host: darwin arm64 \u00b7 Apple M5 Max \u00b7 18 cores — cells execute here.");
 		expect(withHost).toContain("Size `parallel(thunks)` pools to its cores");
 		expect(withoutHost).not.toContain("Host:");
+	});
+
+	it("describes the Bun kernel and names the bun-1-4 skill as MUST READ only while it is active", () => {
+		// Given: the same kernel set under a bun kernel with the skill, a bun kernel without it, and a node kernel.
+		const enabled = { py: true, js: true, rb: false, jl: false };
+		const bunSkillPath = "/opt/senpi/skill/bun-1-4/SKILL.md";
+		const bunWithSkill = buildEvalPrompt(enabled, {
+			spawns: false,
+			jsRuntime: { name: "bun", version: "1.4.0", path: "/usr/local/bin/bun" },
+			bunSkillPath,
+		}).description;
+		const bunWithoutSkill = buildEvalPrompt(enabled, {
+			spawns: false,
+			jsRuntime: { name: "bun", version: "1.3.9", path: "/usr/local/bin/bun" },
+		}).description;
+		const node = buildEvalPrompt(enabled, {
+			spawns: false,
+			jsRuntime: { name: "node", version: "26.7.0", path: "/usr/local/bin/node" },
+			bunSkillPath,
+		}).description;
+		const jsDisabled = buildEvalPrompt(
+			{ py: true, js: false, rb: false, jl: false },
+			{ spawns: false, jsRuntime: { name: "bun", version: "1.4.0" }, bunSkillPath },
+		).description;
+
+		// Then: only the bun kernel with an active skill carries the pointer; node keeps its wording.
+		expect(bunWithSkill).toContain("JS runs in-process on Bun 1.4.0");
+		expect(bunWithSkill).toContain(`MUST READ the bun-1-4 skill at ${bunSkillPath} before your first js cell`);
+		expect(bunWithSkill).not.toContain("Node.js worker");
+		expect(bunWithoutSkill).toContain("JS runs in-process on Bun 1.3.9");
+		expect(bunWithoutSkill).not.toContain("MUST READ");
+		expect(node).toContain("Node.js worker");
+		expect(node).not.toContain("MUST READ");
+		expect(node).not.toContain(bunSkillPath);
+		expect(jsDisabled).not.toContain("Bun");
+		expect(jsDisabled).not.toContain(bunSkillPath);
 	});
 
 	it("throws when no kernels are enabled", () => {

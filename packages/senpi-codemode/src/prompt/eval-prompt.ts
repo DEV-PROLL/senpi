@@ -1,3 +1,5 @@
+import type { EvalRuntimeInfo } from "../tool/types.ts";
+
 export interface EnabledLanguages {
 	readonly py: boolean;
 	readonly js: boolean;
@@ -18,6 +20,10 @@ export interface EvalPromptOptions {
 	readonly modelId?: string;
 	/** Preformatted host line (e.g. "darwin arm64 · Apple M5 Max · 18 cores"); enables the host-sizing note. */
 	readonly hostLine?: string;
+	/** Identity of the in-process js kernel; a bun runtime swaps the Node.js worker line for the Bun one. */
+	readonly jsRuntime?: EvalRuntimeInfo;
+	/** Absolute path of the active bun-1-4 skill; rendered as a MUST READ pointer only on a bun kernel. */
+	readonly bunSkillPath?: string;
 }
 
 /** Prompt dialect for the eval-first batching emphasis. */
@@ -132,7 +138,7 @@ Fields:
 A detached cell keeps its language kernel busy while it finishes; another language can continue. Do not re-run a detached cell: the same-language busy error names its cell id and output tail. Completion arrives as one notification with the final value/error and buffered output. Stopping a cell interrupts its kernel; the stop result states whether kernel state survived or the kernel was restarted and its variables lost.
 
 {{#if py}}Live event loop: use top-level \`await\` directly; \`asyncio.run(…)\` raises "cannot be called from a running event loop".{{/if}}
-{{#if js}}JS runs under Node.js worker: top-level \`await\`/\`return\` work; \`fetch\`/\`Buffer\` available.{{/if}}
+{{#if js}}{{#if jsBun}}JS runs in-process on Bun {{jsVersion}}: top-level \`await\`/\`return\` work; \`Bun.*\` builtins available.{{#if bunSkillPath}} MUST READ the bun-1-4 skill at {{bunSkillPath}} before your first js cell — its builtins replace the npm packages you would otherwise install.{{/if}}{{else}}JS runs under Node.js worker: top-level \`await\`/\`return\` work; \`fetch\`/\`Buffer\` available.{{/if}}{{/if}}
 {{#if rb}}Ruby: synchronous; helper options are keyword args{{#if spawns}} (e.g. \`output("id", limit: 2)\`){{/if}}; the last expression auto-displays unless it is \`nil\`, an assignment, or a definition (like IRB).{{/if}}
 {{#if jl}}Julia: synchronous; helper options are standard keyword args{{#if spawns}} (e.g. \`output("id", limit=2)\`){{/if}}; the last expression auto-displays unless it is an assignment or a definition (like the Julia REPL).{{/if}}
 On error, fix and re-run only the failing step. State usually survives a normal error, but a timeout or stop may have restarted the kernel — its message says which. Before rebuilding state, check a sentinel (a variable you defined earlier); only re-establish what is actually gone, since blind re-runs duplicate side effects.
@@ -212,6 +218,9 @@ export function buildEvalPrompt(
 		styleKimi: style === "kimi",
 		styleDefault: style === "default",
 		hostLine: options.hostLine ?? "",
+		jsBun: options.jsRuntime?.name === "bun",
+		jsVersion: options.jsRuntime?.version ?? "",
+		bunSkillPath: options.bunSkillPath ?? "",
 	};
 	const examples = REUSE_CHAIN_EXAMPLES.filter((example) => enabled[example.language])
 		.map((example) => {
