@@ -1,5 +1,24 @@
 # terminal builtin extension — fork surface
 
+## Monitor footer muted label (2026-09-02)
+
+### What changed
+
+- The monitor footer now renders paused monitors as `muted` or `N muted`.
+- The `paused` wire field remains unchanged.
+
+### Why
+
+- `muted` communicates temporary silencing without implying that the monitor is frozen or stuck.
+
+### Why an extension could not handle it
+
+- The footer formatter owns the human-readable monitor status label.
+
+### Expected merge conflict zones
+
+- LOW: `monitor-status.ts` and terminal monitor footer tests.
+
 ## External user input resumes paused monitors (2026-09-02)
 
 ### What changed

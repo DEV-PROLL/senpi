@@ -6,6 +6,8 @@
 
 ### Changed
 
+- The terminal monitor footer now labels paused monitors as `muted` or `N muted` while preserving the `paused` wire field.
+
 ### Fixed
 
 - The shared RPC supervisor's observer receives content-free session and agent lifecycle records even without a session attachment, so it no longer exits the host during an active turn.
