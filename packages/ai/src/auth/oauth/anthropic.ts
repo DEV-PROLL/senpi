@@ -167,7 +167,11 @@ async function startCallbackServer(expectedState: string): Promise<CallbackServe
 				});
 				return;
 			}
-			reject(new Error(`Could not open OAuth callback listener at ${CALLBACK_HOST}:${CALLBACK_PORT}: ${formatErrorDetails(err)}`));
+			reject(
+				new Error(
+					`Could not open OAuth callback listener at ${CALLBACK_HOST}:${CALLBACK_PORT}: ${formatErrorDetails(err)}`,
+				),
+			);
 		});
 
 		server.listen(CALLBACK_PORT, CALLBACK_HOST, () => {
@@ -251,7 +255,13 @@ async function loginAnthropic(interaction: ProviderAuthInteraction): Promise<OAu
 	const { verifier, challenge } = await generatePKCE();
 	const server = await startCallbackServer(verifier);
 	const manualAbort = new AbortController();
-	const onAbort = () => server.cancelWait();
+	// Cancelling the login must release BOTH waits: the callback listener and the
+	// manual prompt. In manual-only mode (callback port unavailable) the prompt is
+	// the only thing keeping the login alive, so leaving it open would hang cleanup.
+	const onAbort = () => {
+		server.cancelWait();
+		manualAbort.abort();
+	};
 	interaction.signal.addEventListener("abort", onAbort, { once: true });
 	if (interaction.signal.aborted) onAbort();
 	let code: string | undefined;
