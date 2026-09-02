@@ -12,11 +12,17 @@ import { oauthErrorHtml, oauthSuccessHtml } from "./oauth-page.ts";
 import { generatePKCE } from "./pkce.ts";
 
 type CallbackServerInfo = {
-	server: Server;
+	server?: Server;
 	redirectUri: string;
+	callbackUnavailable?: { code: string };
 	cancelWait: () => void;
 	waitForCode: () => Promise<{ code: string; state: string } | null>;
 };
+
+export function __setAnthropicOAuthNodeApisForTests(apis: NodeApis | null): void {
+	nodeApis = apis;
+	nodeApisPromise = null;
+}
 
 type NodeApis = {
 	createServer: typeof import("node:http").createServer;
@@ -151,7 +157,17 @@ async function startCallbackServer(expectedState: string): Promise<CallbackServe
 		});
 
 		server.on("error", (err) => {
-			reject(err);
+			const code = (err as NodeJS.ErrnoException).code;
+			if (code === "EACCES" || code === "EADDRINUSE" || code === "EPERM") {
+				resolve({
+					redirectUri: REDIRECT_URI,
+					callbackUnavailable: { code },
+					cancelWait: () => {},
+					waitForCode: async () => null,
+				});
+				return;
+			}
+			reject(new Error(`Could not open OAuth callback listener at ${CALLBACK_HOST}:${CALLBACK_PORT}: ${formatErrorDetails(err)}`));
 		});
 
 		server.listen(CALLBACK_PORT, CALLBACK_HOST, () => {
@@ -257,8 +273,9 @@ async function loginAnthropic(interaction: ProviderAuthInteraction): Promise<OAu
 		interaction.notify({
 			type: "auth_url",
 			url: `${AUTHORIZE_URL}?${authParams.toString()}`,
-			instructions:
-				"Complete login in your browser. If the browser is on another machine, paste the final redirect URL here.",
+			instructions: server.callbackUnavailable
+				? `The local OAuth callback port ${CALLBACK_PORT} could not be opened (${server.callbackUnavailable.code}). Complete login in your browser, then copy the final redirect URL from the address bar and paste it here.`
+				: "Complete login in your browser. If the browser is on another machine, paste the final redirect URL here.",
 		});
 
 		const manualPromise = interaction
@@ -307,7 +324,7 @@ async function loginAnthropic(interaction: ProviderAuthInteraction): Promise<OAu
 	} finally {
 		interaction.signal.removeEventListener("abort", onAbort);
 		manualAbort.abort();
-		server.server.close();
+		server.server?.close();
 	}
 }
 
