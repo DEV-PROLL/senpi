@@ -24,6 +24,8 @@
 
 ### Fixed
 
+- Anthropic OAuth now falls back to manual redirect URL entry when callback port 53692 cannot be opened.
+
 ### Removed
 
 ## [2026.9.2-2] - 2026-09-02
