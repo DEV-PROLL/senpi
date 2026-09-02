@@ -230,20 +230,13 @@ class StalledResidentQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> 
 	}
 }
 
-const residentApiRetryGate = (() => {
-	let release!: () => void;
-	const promise = new Promise<void>((resolve) => {
-		release = resolve;
-	});
-	return { promise, release };
-})();
-
 class ResidentQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 	readonly submitted: SDKUserMessage[] = [];
 	readonly options: Options;
 	closes = 0;
 	private readonly initializationError: Error | undefined;
 	private readonly includeApiRetry: boolean;
+	private readonly apiRetryGate: { promise: Promise<void>; release: () => void } | undefined;
 	private readonly queued: SDKMessage[] = [];
 	private readonly readers: Array<(value: IteratorResult<SDKMessage>) => void> = [];
 
@@ -252,10 +245,12 @@ class ResidentQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 		options: Options,
 		initializationError?: Error,
 		includeApiRetry = false,
+		apiRetryGate?: { promise: Promise<void>; release: () => void },
 	) {
 		this.options = options;
 		this.initializationError = initializationError;
 		this.includeApiRetry = includeApiRetry;
+		this.apiRetryGate = apiRetryGate;
 		void this.consume(prompt);
 	}
 
@@ -295,7 +290,7 @@ class ResidentQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 			this.emit(sdkMessage({ ...message, uuid, session_id: sessionId, isReplay: true }));
 			if (this.includeApiRetry) {
 				this.emit(apiRetryMessage);
-				if (textFrom(message) === "next") await residentApiRetryGate.promise;
+				if (textFrom(message) === "next") await this.apiRetryGate?.promise;
 				for (const streamMessage of assistantStreamMessages) this.emit(streamMessage);
 			}
 			this.emit(
@@ -322,12 +317,12 @@ class ResidentQuery implements SdkQueryHandle, AsyncIterator<SDKMessage> {
 }
 
 class ResidentQueryWithApiRetry extends ResidentQuery {
-	constructor(prompt: AsyncIterable<SDKUserMessage>, options: Options) {
-		super(prompt, options, undefined, true);
-	}
-
-	releaseAssistant(): void {
-		residentApiRetryGate.release();
+	constructor(
+		prompt: AsyncIterable<SDKUserMessage>,
+		options: Options,
+		apiRetryGate: { promise: Promise<void>; release: () => void },
+	) {
+		super(prompt, options, undefined, true, apiRetryGate);
 	}
 }
 
@@ -477,11 +472,14 @@ describe("Claude SDK OAuth stream events", () => {
 	});
 
 	it("counts api_retry as the first event on the resident pump path after replay claim", async () => {
-		let retryQuery: ResidentQueryWithApiRetry | undefined;
-		residentBoundary(new Set(), (prompt, options) => {
-			retryQuery = new ResidentQueryWithApiRetry(prompt, options);
-			return retryQuery;
-		});
+		let releaseApiRetry!: () => void;
+		const apiRetryGate = {
+			promise: new Promise<void>((resolve) => {
+				releaseApiRetry = resolve;
+			}),
+			release: () => releaseApiRetry(),
+		};
+		residentBoundary(new Set(), (prompt, options) => new ResidentQueryWithApiRetry(prompt, options, apiRetryGate));
 		const sessionId = "resident-api-retry-start";
 		const first = await streamClaudeSdkOauth(
 			model,
@@ -501,13 +499,18 @@ describe("Claude SDK OAuth stream events", () => {
 			mainOptions(sessionId),
 		);
 		const iterator = stream[Symbol.asyncIterator]();
-		const start = await iterator.next();
-		expect(start).toMatchObject({ value: { type: "start" }, done: false });
-		retryQuery?.releaseAssistant();
-		const events = [start.value!, ...(await collect({ [Symbol.asyncIterator]: () => iterator }))];
-		expect(events.findIndex((event) => event.type === "start")).toBeLessThan(
-			events.findIndex((event) => event.type === "text_delta"),
-		);
+		try {
+			const start = await iterator.next();
+			expect(start).toMatchObject({ value: { type: "start" }, done: false });
+			const eventsPromise = collect({ [Symbol.asyncIterator]: () => iterator });
+			releaseApiRetry();
+			const events = [start.value!, ...(await eventsPromise)];
+			expect(events.findIndex((event) => event.type === "start")).toBeLessThan(
+				events.findIndex((event) => event.type === "text_delta"),
+			);
+		} finally {
+			releaseApiRetry();
+		}
 	});
 
 	it("maps stream events, drains through the terminal result, and uses its usage and stop reason", async () => {
