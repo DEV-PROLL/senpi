@@ -754,7 +754,9 @@ describe("RPC Unix-socket multi-connection host", () => {
 				}),
 			).resolves.toMatchObject({ success: true, sessionId });
 			await settledA;
-			expect(b.peer.messages.some((value) => value.type === "agent_settled" && value.sessionId === sessionId)).toBe(false);
+			expect(b.peer.messages.some((value) => value.type === "agent_settled" && value.sessionId === sessionId)).toBe(
+				false,
+			);
 
 			const transcript = await b.peer.request({
 				id: "foreign-transcript",
@@ -811,10 +813,13 @@ describe("RPC Unix-socket multi-connection host", () => {
 			const openedA = await a.peer.request({ id: "open-p1", type: "open_session", cwd: qa.cwd });
 			const openedB = await b.peer.request({ id: "open-p2", type: "open_session", cwd: secondCwd });
 			const sessionB = openedSessionId(openedB);
-			const turnStarted = b.peer.waitFor(
-				(value) => value.type === "message_start" && value.sessionId === sessionB,
-			);
-			const turn = b.peer.request({ id: "prompt-p2", type: "prompt", sessionId: sessionB, message: "isolation-turn" });
+			const turnStarted = b.peer.waitFor((value) => value.type === "message_start" && value.sessionId === sessionB);
+			const turn = b.peer.request({
+				id: "prompt-p2",
+				type: "prompt",
+				sessionId: sessionB,
+				message: "isolation-turn",
+			});
 			await turnStarted;
 			const third = await connectPeer(qa.socketPath);
 			try {
