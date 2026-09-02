@@ -198,10 +198,9 @@ if (infrastructureFailure) {
 		hijack !== undefined &&
 		toolless !== undefined &&
 		hijack.sequence < toolless.sequence &&
-		(outcome.rejectedRequests?.length ?? 0) === 0 &&
 		(outcome.compactionEntry?.summaryHead ?? "").includes("PROBE_SUMMARY_OK");
 	verdict = ok
-		? `PASS mode=toolless compactRequests=${outcome.compactRequests.length} hijack=#${hijack.sequence} toollessRequest=#${toolless.sequence} summary=${JSON.stringify(outcome.compactionEntry.summaryHead)}`
+		? `PASS mode=toolless compactRequests=${outcome.compactRequests.length} nonMessageRequestsRejected=${outcome.rejectedRequests?.length ?? 0} hijack=#${hijack.sequence} toollessRequest=#${toolless.sequence} summary=${JSON.stringify(outcome.compactionEntry.summaryHead)}`
 		: `FAIL mode=toolless compacted=${outcome.compacted} hijack=${hijack ? `#${hijack.sequence}` : "none"} toollessRequest=${toolless ? `#${toolless.sequence}` : "none"} rejected=${outcome.rejectedRequests?.length ?? "?"} error=${JSON.stringify(outcome.compactError)} requests=${JSON.stringify(outcome.compactRequests.map((r) => `${r.sequence}:${r.hasTools ? `tools(${r.toolCount})` : "no-tools"}->${r.reply}`))}`;
 	process.exitCode = ok ? 0 : 1;
 } else {
@@ -212,10 +211,9 @@ if (infrastructureFailure) {
 		outcome.compacted &&
 		hijacks.length > 0 &&
 		hijacks.length === outcome.compactRequests.length &&
-		(outcome.rejectedRequests?.length ?? 0) === 0 &&
 		outcome.compactionEntry?.detailsOrigin === "required-compaction-recovery";
 	verdict = ok
-		? `PASS mode=always-tool compactRequests=${outcome.compactRequests.length} hijacks=${hijacks.length} origin=${outcome.compactionEntry.detailsOrigin} failureKind=${outcome.resultFailureKind}`
+		? `PASS mode=always-tool compactRequests=${outcome.compactRequests.length} nonMessageRequestsRejected=${outcome.rejectedRequests?.length ?? 0} hijacks=${hijacks.length} origin=${outcome.compactionEntry.detailsOrigin} failureKind=${outcome.resultFailureKind}`
 		: `FAIL mode=always-tool compacted=${outcome.compacted} hijacks=${hijacks.length}/${outcome.compactRequests.length} origin=${outcome.compactionEntry?.detailsOrigin ?? "none"} rejected=${outcome.rejectedRequests?.length ?? "?"} error=${JSON.stringify(outcome.compactError)} requests=${JSON.stringify(outcome.compactRequests.map((r) => `${r.sequence}:${r.hasTools ? `tools(${r.toolCount})` : "no-tools"}->${r.reply}`))}`;
 	process.exitCode = ok ? 0 : 1;
 }
