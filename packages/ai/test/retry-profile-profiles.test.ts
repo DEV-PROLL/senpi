@@ -8,9 +8,6 @@ describe("shipped retry profiles", () => {
 		expect(KIMI_CODE_RETRY_PROFILE.id).toBe("kimi-code");
 		expect(SENPI_DEFAULT_RETRY_PROFILE.providerRequest.maxRetries).toBe(0);
 		expect(SENPI_DEFAULT_RETRY_PROFILE.turn.maxRetries).toBe(5);
-		expect(SENPI_DEFAULT_RETRY_PROFILE.providerRequest.serverHint).toMatchObject({
-			ceiling: { maxDelayMs: 300_000 },
-		});
 		expect(KIMI_CODE_RETRY_PROFILE.providerRequest.enabled).toBe(false);
 		expect(KIMI_CODE_RETRY_PROFILE.turn.maxRetries).toBe(9);
 	});

@@ -22,9 +22,7 @@ export const SENPI_DEFAULT_RETRY_PROFILE: RetryPolicyProfile = {
 		serverHint: {
 			mode: "override",
 			acceptZero: true,
-			// 300s matches the turn stage's hinted-wait cap and the 300s ceilings
-			// opencode/codex/oh-my-pi grant slow providers (opus/fable-class).
-			ceiling: { maxDelayMs: 300_000, onExceeded: "error-with-marker" },
+			ceiling: { maxDelayMs: 60_000, onExceeded: "error-with-marker" },
 		},
 		classify: classifySenpiAssistantFailure,
 	},

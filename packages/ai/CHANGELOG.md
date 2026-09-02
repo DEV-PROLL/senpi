@@ -8,7 +8,7 @@
 
 ### Changed
 
-- The `senpi-default` retry profile is more patient with slow long-thinking providers (Opus/Fable-class with xhigh thinking): the turn-stage retry budget rises from 3 to 5 attempts, matching opencode's session retry budget and codex's `stream_max_retries` default, and the provider-stage server-hint ceiling rises from 60s to 300s, so a server-requested `Retry-After` longer than 60s is waited out instead of failing the turn instantly (opencode honors such hints uncapped, codex honors server-advised delays, oh-my-pi caps them at 300s).
+- The `senpi-default` retry profile is more patient with slow long-thinking providers (Opus/Fable-class with xhigh thinking): the turn-stage retry budget rises from 3 to 5 attempts, matching opencode's session retry budget and codex's `stream_max_retries` default. Backoff shapes, failure classification, `providerRequest.maxRetries` (still 0) and `KIMI_CODE_RETRY_PROFILE` are unchanged.
 
 ### Fixed
 

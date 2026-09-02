@@ -2,11 +2,11 @@
 
 ### What changed
 
-- `utils/retry-profile/profiles.ts`: `SENPI_DEFAULT_RETRY_PROFILE.turn.maxRetries` goes from 3 to 5, and the `providerRequest` server-hint ceiling from 60s to 300s. Backoff shapes, the `error-with-marker` overflow behavior, `providerRequest.maxRetries` (still 0, so no hidden second budget), and `KIMI_CODE_RETRY_PROFILE` are untouched.
+- `utils/retry-profile/profiles.ts`: `SENPI_DEFAULT_RETRY_PROFILE.turn.maxRetries` goes from 3 to 5. Backoff shapes, the server-hint policies, `providerRequest.maxRetries` (still 0, so no hidden second budget), and `KIMI_CODE_RETRY_PROFILE` are untouched.
 
 ### Why
 
-- Opus/Fable-class models with xhigh thinking make transient provider failures and long server-requested waits more likely per turn, and the previous budgets were the least tolerant of the harnesses we compared: opencode retries a session 5 times and honors `Retry-After` uncapped, codex defaults to `stream_max_retries` 5 and honors server-advised delays, and oh-my-pi allows up to 10 agent retries with a 300s hint cap. A 60s ceiling turned any provider asking for 61s into an instantly failed turn even though the turn stage's own hinted wait cap is already 300s.
+- Opus/Fable-class models with xhigh thinking make transient provider failures more likely per turn, and the previous turn budget was the least tolerant of the harnesses we compared: opencode retries a session 5 times, codex defaults to `stream_max_retries` 5, and oh-my-pi allows up to 10 agent retries. The `providerRequest` server-hint ceiling was deliberately left alone: `planRetryDelay` has no production caller today, so changing that constant would have been an inert edit dressed up as a fix.
 
 ### Why an extension could not handle it
 
