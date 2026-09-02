@@ -96,7 +96,7 @@ describe("formatMonitorStatus", () => {
 
 	it("marks paused watches and keeps the marker through truncation", () => {
 		const all = formatMonitorStatus([entry("bash_1", "a", true), entry("bash_2", "b", true)], T0 + 60_000);
-		expect(all).toBe("◉ watching 2: a, b (1m, paused)");
+		expect(all).toBe("◉ watching 2: a, b (1m, muted)");
 		const some = formatMonitorStatus(
 			[
 				entry("bash_1", "errors in deploy.log", true),
@@ -105,7 +105,7 @@ describe("formatMonitorStatus", () => {
 			],
 			T0,
 		);
-		expect(some).toContain("1 paused");
+		expect(some).toContain("1 muted");
 		expect((some ?? "").length).toBeLessThanOrEqual(48);
 	});
 });

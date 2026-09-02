@@ -60,7 +60,7 @@ export function monitorElapsedSeconds(snapshot: readonly MonitorSnapshotEntry[],
 export function formatMonitorStatus(snapshot: readonly MonitorSnapshotEntry[], nowMs: number): string | undefined {
 	if (snapshot.length === 0) return undefined;
 	const pausedCount = snapshot.filter((entry) => entry.paused).length;
-	const pausedPart = pausedCount === 0 ? "" : pausedCount === snapshot.length ? ", paused" : `, ${pausedCount} paused`;
+	const pausedPart = pausedCount === 0 ? "" : pausedCount === snapshot.length ? ", muted" : `, ${pausedCount} muted`;
 	const suffix = ` (${formatElapsedSeconds(monitorElapsedSeconds(snapshot, nowMs))}${pausedPart})`;
 	if (snapshot.length === 1) {
 		const head = `${WATCH_GLYPH} watching `;
