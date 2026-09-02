@@ -277,7 +277,7 @@ describe("provider idle recovery", () => {
 				{
 					success: false,
 					attempt: 1,
-					finalError: `Provider stream start timed out after ${DEFAULT_STREAM_START_TIMEOUT_MS}ms`,
+					finalError: `Provider stream start timed out after ${DEFAULT_STREAM_START_TIMEOUT_MS}ms (raise retry.provider.streamStartTimeoutMs, 0 disables)`,
 				},
 			]);
 			expect(harness.eventsOfType("auto_retry_end").map((event) => event.finalError)).not.toContain(
