@@ -9,6 +9,9 @@
 // uppercase key verbs; Kimi takes positive DO-framing with terminal conditions
 // and no all-caps NEVER (the K2.6 guidance says prohibitions make it overthink).
 
+const MONITOR_SUBSCRIBE_CODEX =
+	"When a monitor tool is available, every wait on a long-running command, child task, or detached cell is a subscription: register monitor with a filter for the decisive line or sentinel, continue independent work or end the turn, and let the completion event wake you. Timed sleeps, retry loops, and repeated status reads do not count as waiting.";
+
 export type ExecutionToolingRuleId =
 	| "eval-default-surface"
 	| "eval-real-code"
@@ -60,12 +63,12 @@ export const EXECUTION_TOOLING_RULES = [
 			claude:
 				"NEVER WAIT BY SLEEPING OR POLLING. Anything that takes time - a build, a test run, a deploy, a child task, a detached cell - is a SUBSCRIPTION: register `monitor` with a filter for the decisive line or sentinel, keep doing independent work or end the turn, and let the completion event wake you. A blind `sleep`, a timed retry loop, or a repeated status read is a defect.",
 			kimi: "**SUBSCRIBE TO EVERYTHING THAT TAKES TIME.** For a build, test run, deploy, child task, or detached cell, register `monitor` with a filter for the decisive line or sentinel, then continue independent work or end the turn; the completion event wakes you. The wait ends when that event arrives - a sleep, a timed retry, or a repeated status read is not the wait.",
-			codex: "When a monitor tool is available, every wait on a long-running command, child task, or detached cell is a subscription: register monitor with a filter for the decisive line or sentinel, continue independent work or end the turn, and let the completion event wake you. Timed sleeps, retry loops, and repeated status reads do not count as waiting.",
+			codex: MONITOR_SUBSCRIBE_CODEX,
 		},
 	},
 ] as const satisfies readonly ExecutionToolingRule[];
 
-export const CODEX_MONITOR_SUBSCRIBE_DIRECTIVE = EXECUTION_TOOLING_RULES[3].directive.codex;
+export const CODEX_MONITOR_SUBSCRIBE_DIRECTIVE = MONITOR_SUBSCRIBE_CODEX;
 
 const CONCERN_TOOL: Readonly<Record<ExecutionToolingConcern, string>> = {
 	"code-cell-routing": "eval",

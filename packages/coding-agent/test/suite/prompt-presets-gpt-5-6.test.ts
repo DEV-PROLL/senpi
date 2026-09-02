@@ -24,12 +24,16 @@ function createModel(id: string): Model<Api> {
 	};
 }
 
-function buildPrompt(presetName: PromptPresetName, modelId: string): string {
+function buildPrompt(
+	presetName: PromptPresetName,
+	modelId: string,
+	selectedTools: readonly string[] = ["eval", "monitor", "read", "bash"],
+): string {
 	const settings: PromptPresetSettings = { promptPreset: presetName };
 	const preset = resolvePreset(createModel(modelId), settings, {
 		cwd: "/repo",
-		selectedTools: ["eval", "read", "bash"],
-		toolSnippets: { eval: "Run one persistent code cell." },
+		selectedTools: [...selectedTools],
+		toolSnippets: Object.fromEntries(selectedTools.map((name) => [name, `${name} snippet`])),
 		promptGuidelines: [],
 		contextFiles: [],
 		skills: [],
@@ -118,6 +122,19 @@ describe("GPT-5.6 execution discipline", () => {
 			expect(section, `missing section for ${rule.id}`).toBeDefined();
 			expect(section).toContain(rule.directive);
 		}
+	});
+
+	it("renders the monitor directive only when the monitor tool is selected", () => {
+		// given
+		const withMonitor = buildPrompt("gpt-5.6", "gpt-5.6-sol", ["eval", "monitor", "read"]);
+		const withoutMonitor = buildPrompt("gpt-5.6", "gpt-5.6-sol", ["eval", "read"]);
+		const monitorRule = GPT56_EXECUTION_RULES.find((rule) => rule.id === "monitor-subscribe");
+
+		// then
+		expect(monitorRule).toBeDefined();
+		const directive = monitorRule?.directive ?? "";
+		expect(occurrences(withMonitor, directive)).toBe(1);
+		expect(withoutMonitor).not.toContain(directive);
 	});
 
 	it("keeps the shared GPT code-execution routing bridge at the orchestration point of use", () => {
