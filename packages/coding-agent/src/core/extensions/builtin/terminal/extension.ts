@@ -132,6 +132,7 @@ function buildToolContext(pi: ExtensionAPI, state: TerminalExtensionState): Term
 			state.bundle?.notifyBackgroundExit(id, runtime);
 		},
 		onMonitorRearmed: (id: string) => state.monitorNotifier?.rearm(id),
+		onMonitorsResumed: (ids: readonly string[]) => state.monitorNotifier?.resume(ids),
 	};
 }
 
@@ -211,7 +212,7 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 			getContext: () => state.ctx,
 			getMode: () => state.settings.notify,
 			getSettings: () => state.settings.monitor,
-			pauseMonitors: () => state.bundle?.monitors.pauseAll() ?? [],
+			pauseMonitors: (ids) => state.bundle?.monitors.pause(ids) ?? [],
 		});
 		const sessionKey = sessionKeyOf(ctx);
 		if (event.reason === "reload") {

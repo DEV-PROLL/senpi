@@ -10,6 +10,7 @@
 
 - The shared RPC supervisor's observer receives content-free session and agent lifecycle records even without a session attachment, so it no longer exits the host during an active turn.
 - Multi-session RPC `close_session` teardown is bounded by a 10-second grace period (configurable via `SENPI_RPC_CLOSE_GRACE_MS`), force-releasing the session and path reservation on expiry; a second close joins the in-flight teardown instead of returning `unknown_session`.
+- Monitor wake-budget pauses now use single-source, scoped state: only the noisy monitor is muted, quiet monitors are not left permanently paused, and `rearm` without a `bash_id` resumes all paused monitors.
 
 ### New Features
 
@@ -22,7 +23,6 @@
 ### Fixed
 
 ### Removed
-
 ## [2026.9.2-4] - 2026-09-02
 
 ### Added
