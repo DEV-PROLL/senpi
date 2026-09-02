@@ -4,6 +4,8 @@
 
 ### Added
 
+- Claude (Fable 5/5.1, Opus 4.5-4.8/5), Kimi (K2.6/K2.7/K3), and GPT-5.6 presets now carry an execution-tooling stance: when the `eval` tool is selected, multi-call steps are routed through one code cell with maximal parallel batching and real control-flow code; when `monitor` is selected, every wait on a long-running command, child task, or detached cell is a subscription instead of a sleep or poll. Wording is tailored per family and renders only for tools the session actually has.
+
 ### Changed
 
 ### Fixed

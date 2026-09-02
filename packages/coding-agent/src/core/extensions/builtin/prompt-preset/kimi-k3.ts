@@ -49,6 +49,7 @@ import type { DynamicPromptCoreContext } from "../../../dynamic-prompt/build.ts"
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "../../../dynamic-prompt/build.ts";
 import { getToolsPromptDisplay } from "../../../dynamic-prompt/tool-categorization.ts";
 import { buildTestDisciplineSection } from "../../../dynamic-prompt/verification.ts";
+import { buildExecutionToolingParagraph } from "./execution-tooling.ts";
 
 function buildSearchTriggerLine(context: DynamicPromptCoreContext): string {
 	const triggerTools = getToolsPromptDisplay(context.tools);
@@ -86,7 +87,7 @@ Decide one path and act; reopen a settled choice only when new evidence contradi
 
 Fire independent tool calls - reads, searches, listings, diagnostics - in one parallel wave; sequence only when a call needs a value another produced, and never fill missing parameters with placeholders. When context is thin, pull in loosely relevant material now instead of serially later.
 
-Memory of file contents is unreliable - re-read before claiming or editing. Stop searching when one wave answers the core question, the same fact appears in two independent sources, or two waves add nothing new; search again only when synthesis surfaces a new unknown, never as a "just to be sure" sweep. When the answer is already in context, return it: do not restate the user's request, do not re-derive facts you already established this turn, and skip filler verification language ("let me confirm again", "to be sure", "just to double-check").
+${buildExecutionToolingParagraph({ toolNames: context.tools.map((tool) => tool.name), dialect: "kimi" })}Memory of file contents is unreliable - re-read before claiming or editing. Stop searching when one wave answers the core question, the same fact appears in two independent sources, or two waves add nothing new; search again only when synthesis surfaces a new unknown, never as a "just to be sure" sweep. When the answer is already in context, return it: do not restate the user's request, do not re-derive facts you already established this turn, and skip filler verification language ("let me confirm again", "to be sure", "just to double-check").
 
 ## Verification
 

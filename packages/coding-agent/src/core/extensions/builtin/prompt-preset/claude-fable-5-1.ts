@@ -40,6 +40,7 @@ import type { DynamicPromptCoreContext } from "../../../dynamic-prompt/build.ts"
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "../../../dynamic-prompt/build.ts";
 import { getToolsPromptDisplay } from "../../../dynamic-prompt/tool-categorization.ts";
 import { buildTestDisciplineSection } from "../../../dynamic-prompt/verification.ts";
+import { buildExecutionToolingParagraph } from "./execution-tooling.ts";
 
 function buildSearchLine(context: DynamicPromptCoreContext): string {
 	const triggerTools = getToolsPromptDisplay(context.tools);
@@ -77,7 +78,7 @@ Smallest correct change wins: no refactors beside a focused fix, no helpers or a
 
 Before each response, privately list what you need next, then request every item that does not depend on another's result in that one response; sequence only true dependencies, and never fill missing parameters with placeholders. Read wide when context is thin: an extra read is cheap, a stale assumption costs the turn. Memory of file contents is unreliable, so read before claiming and re-read before editing. Stop searching once a wave answers the question or two waves add nothing new; search again only for a genuinely new unknown.
 
-When you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has made, or narrate options you will not pursue; when weighing a choice, give a recommendation. When a delegation tool is available, hand sizeable independent tracks to subagents and keep working while they run; keep work you can finish in a few calls yourself.
+${buildExecutionToolingParagraph({ toolNames: context.tools.map((tool) => tool.name), dialect: "claude" })}When you have enough information to act, act. Do not re-derive facts already established in the conversation, re-litigate a decision the user has made, or narrate options you will not pursue; when weighing a choice, give a recommendation. When a delegation tool is available, hand sizeable independent tracks to subagents and keep working while they run; keep work you can finish in a few calls yourself.
 
 ## Verification
 
