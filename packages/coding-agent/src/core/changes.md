@@ -1,5 +1,23 @@
 # changes
 
+## 2026-09-02 - Inherit extension provider settings for models.json custom models
+
+### What changed
+
+- `packages/coding-agent/src/core/provider-composer.ts` now lets models.json custom models inherit an extension-registered provider's `api` and `baseUrl`, and preserves extension catalog models when adding new custom IDs.
+
+### Why
+
+- A custom models.json model under an extension provider previously failed before the extension could compose it because the models.json layer could not see the extension's provider-level settings; models.json custom definitions not declared by the extension catalog were also dropped.
+
+### Why an extension could not handle it
+
+- Provider composition order and models.json merging are core responsibilities in `packages/coding-agent/src/core/provider-composer.ts`, before extension model behavior can repair the intermediate layer.
+
+### Expected merge conflict zones
+
+- LOW: models.json and extension composition in `packages/coding-agent/src/core/provider-composer.ts`.
+
 ## 2026-08-31 - Session activity contract for host occupancy decisions
 
 ### What changed

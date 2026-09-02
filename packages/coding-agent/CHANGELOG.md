@@ -6,6 +6,8 @@
 
 ### Fixed
 
+- models.json custom models under extension-registered providers now inherit the extension's provider-level `api` and `baseUrl`, while extension catalog models remain available alongside new custom models.
+
 ### New Features
 
 ### Breaking Changes
