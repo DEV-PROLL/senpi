@@ -1,5 +1,25 @@
 # prompt-preset Extension Changes
 
+## Execution tooling stance: eval-default + monitor subscription (2026-09-02)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/prompt-preset/execution-tooling.ts`: new shared rule data `EXECUTION_TOOLING_RULES` (ids `eval-default-surface`, `eval-real-code`, `eval-stay-direct` under `code-cell-routing`; `monitor-subscribe` under `async-waiting`) with a claude dialect (tagged `<execution_tooling>` block, uppercase key verbs) and a kimi dialect (bold DO-framing, terminal conditions, no all-caps NEVER), plus the codex wording of the monitor rule. `buildExecutionToolingSection` renders the eval rules only when `eval` is a selected tool and the monitor rule only when `monitor` is, so no preset names a tool the session lacks.
+- Claude cores (`claude-fable-5-1.ts`, `claude-fable-5.ts`, `claude-opus-5.ts`) and `kimi-k3.ts` render it inside Working the Task after the batching paragraph; Opus 4.5-4.8 and Kimi K2.6/K2.7 prepend it to their tuning section; `gpt-5.6.ts` adds `monitor-subscribe` to `GPT56_EXECUTION_RULES` at the orchestration point of use (its eval stance was already maximal).
+- `test/suite/prompt-presets-execution-tooling.test.ts`: rule-data shape, exactly-once rendering per preset/dialect, eval/monitor gating, out-of-scope presets untouched. `prompt-presets-gpt-5-6.test.ts` expects the new rule.
+
+### Why
+
+- The eval tool description teaches cell mechanics and the terminal prompt documents monitor, but neither makes the routing decision: models still default to serial or native-parallel tool calls and to sleep/poll waits. The owner's standing workflow (one code cell per multi-call step with real control flow and maximal parallel batching; every wait as a monitor subscription) needs a system-prompt stance, written per family per the prompt-engineering references.
+
+### Why extension system couldn't handle this differently
+
+- Content-only change inside this builtin; the rule-data module follows the `verification.ts` / `GPT56_EXECUTION_RULES` pattern.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: all touched files are fork-only presets; `execution-tooling.ts` is new.
+
 ## Mythos routing + Fable 5.1 preset diet (2026-09-02)
 
 ### What changed

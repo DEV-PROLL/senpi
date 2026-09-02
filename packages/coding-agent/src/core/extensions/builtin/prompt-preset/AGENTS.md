@@ -11,6 +11,7 @@ prompt-preset/
 ├── settings.ts          # PromptPresetName settings type ("auto" | family ids)
 ├── file-operations.ts   # Shared "use apply_patch, not python heredoc" tuning block (codex-style)
 ├── gpt-eval-routing.ts  # GPT-only bridge to eval's model-aware Tool Guidelines
+├── execution-tooling.ts # Shared eval/monitor stance rule data (`EXECUTION_TOOLING_RULES`, claude + kimi dialects, codex monitor wording) rendered only when `eval` / `monitor` are selected; wired into every Claude and Kimi preset, and GPT-5.6 imports the codex monitor rule
 ├── gpt-5.ts             # GPT-5 baseline preset
 ├── gpt-5.2.ts           # GPT-5.2 preset
 ├── gpt-5.3-codex.ts     # GPT-5.3 Codex preset
@@ -38,6 +39,7 @@ prompt-preset/
 | Add a preset for a new model release | new `<family>.ts` + entry in `presets.ts` |
 | Tune GPT-5.x file-handling guidance | `file-operations.ts` (all GPT presets append it) |
 | Tune GPT-5.6 execution discipline (eval/parallel/TDD/commits/LSP) | `gpt-5.6.ts` `GPT56_EXECUTION_RULES` + `test/suite/prompt-presets-gpt-5-6.test.ts` |
+| Tune the eval-default / monitor-subscription stance for Claude and Kimi presets | `execution-tooling.ts` + `test/suite/prompt-presets-execution-tooling.test.ts` |
 | Adjust model-id → preset matching | `presets.ts` `resolvePresetName()` |
 | User override via settings | `settings.ts` `PromptPresetName` |
 
