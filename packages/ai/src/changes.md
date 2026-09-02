@@ -38,7 +38,7 @@
 
 ### What changed
 
-- Anthropic OAuth now falls back to manual redirect URL entry when local callback port 53692 cannot bind with EACCES, EADDRINUSE, or EPERM, while preserving the registered localhost redirect URI.
+- `auth/oauth/anthropic.ts`: Anthropic OAuth now falls back to manual redirect URL entry when local callback port 53692 cannot bind with EACCES, EADDRINUSE, or EPERM, while preserving the registered localhost redirect URI.
 
 ### Why
 
