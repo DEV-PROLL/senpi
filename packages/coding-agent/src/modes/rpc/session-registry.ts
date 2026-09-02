@@ -8,12 +8,7 @@ import {
 	createAgentSessionRuntime,
 } from "../../core/agent-session-runtime.ts";
 import { SessionManager } from "../../core/session-manager.ts";
-import {
-	beginSessionClose,
-	closeMarkedSession,
-	closeSession,
-	type SessionTeardownHost,
-} from "./session-teardown.ts";
+import { beginSessionClose, closeMarkedSession, closeSession, type SessionTeardownHost } from "./session-teardown.ts";
 
 /** The immutable flags selected when a routing session is opened. */
 export interface RpcSessionLaunchProfile extends AgentSessionLaunchProfile {
