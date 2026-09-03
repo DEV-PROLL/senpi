@@ -18,6 +18,7 @@
 import * as crypto from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, dirname, extname } from "node:path";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { OAuthProviderId } from "@earendil-works/pi-ai/compat";
 import { VERSION } from "../../config.ts";
 import type { AgentAbortSource } from "../../core/agent-abort-provenance.ts";
@@ -61,6 +62,7 @@ import {
 	buildCustomUnsupportedRequest,
 	DEFAULT_CUSTOM_EXTENSION_LABEL,
 	EXTENSION_EVENTS_CAPABILITY,
+	MEDIA_PLACEHOLDERS_CAPABILITY,
 	RENDERED_COMPONENTS_CAPABILITY,
 } from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
@@ -82,6 +84,7 @@ import type {
 	RpcSessionState,
 	RpcSkillInvocationEvent,
 } from "./rpc-types.ts";
+import { RPC_ERROR_MEDIA_NOT_FOUND } from "./rpc-types.ts";
 import { RENDERED_COMPONENT_RECORD } from "./session-event-writer.ts";
 import { SessionExtensionUiRequests } from "./session-extension-ui-requests.ts";
 import { createLiveComponentRenderer, type LiveComponentRenderer } from "./widget-line-renderer.ts";
@@ -257,6 +260,44 @@ function loadedSurfacesFingerprint(
 		extensions,
 		mcpServers,
 	});
+}
+
+/**
+ * Locate one media block inside a tool result by `(toolCallId, contentIndex)`.
+ *
+ * Durable session entries are searched first: they survive the live message window
+ * being compacted or trimmed away. The live `session.messages` cover the window
+ * between `tool_execution_end` and persistence. Returns `undefined` unless the index
+ * lands on an actual image block, so a text block or an out-of-range index is
+ * reported as `media_not_found` rather than as a differently-shaped success.
+ */
+function findToolResultMedia(
+	session: AgentSession,
+	toolCallId: string,
+	contentIndex: number,
+): ImageContent | undefined {
+	const fromContent = (content: unknown): ImageContent | undefined => {
+		if (!Array.isArray(content)) return undefined;
+		const block = content[contentIndex] as ImageContent | undefined;
+		return block?.type === "image" ? block : undefined;
+	};
+	const matches = (message: unknown): message is { role: "toolResult"; toolCallId: string; content: unknown } => {
+		const candidate = message as { role?: unknown; toolCallId?: unknown } | null;
+		return candidate?.role === "toolResult" && candidate.toolCallId === toolCallId;
+	};
+
+	for (const entry of session.sessionManager.getEntries()) {
+		if (entry.type !== "message") continue;
+		if (!matches(entry.message)) continue;
+		const found = fromContent(entry.message.content);
+		if (found) return found;
+	}
+	for (const message of session.messages) {
+		if (!matches(message)) continue;
+		const found = fromContent(message.content);
+		if (found) return found;
+	}
+	return undefined;
 }
 
 /**
@@ -995,7 +1036,12 @@ export function createRpcConnectionHandler(
 						protocolVersion: 1,
 						serverVersion: VERSION,
 						capabilities: [
-							...new Set(["multi_session", AUTO_TITLE_SESSIONS_CAPABILITY, ...(options.capabilities ?? [])]),
+							...new Set([
+								"multi_session",
+								AUTO_TITLE_SESSIONS_CAPABILITY,
+								MEDIA_PLACEHOLDERS_CAPABILITY,
+								...(options.capabilities ?? []),
+							]),
 						],
 						mode: "classic",
 					},
@@ -1463,6 +1509,19 @@ export function createRpcConnectionHandler(
 
 			case "get_messages": {
 				return success(id, "get_messages", { messages: session.messages });
+			}
+
+			// On-demand fetch of a media block a `media_placeholders` client received as
+			// an `image_ref` stub. Durable session entries first (they survive the live
+			// message window being compacted away), then the live messages for a result
+			// that has not been persisted yet.
+			case "get_media": {
+				const { toolCallId, contentIndex } = command;
+				const content = findToolResultMedia(session, toolCallId, contentIndex);
+				if (!content) {
+					return error(id, "get_media", RPC_ERROR_MEDIA_NOT_FOUND, RPC_ERROR_MEDIA_NOT_FOUND);
+				}
+				return success(id, "get_media", { toolCallId, contentIndex, content });
 			}
 
 			// =================================================================

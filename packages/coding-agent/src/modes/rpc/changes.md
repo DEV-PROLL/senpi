@@ -11,14 +11,16 @@
 - `SessionEventFanout` gained the generic `connectionHas(id, capability)` accessor; the four hard-coded `"rendered_components"` string checks now go through it with `RENDERED_COMPONENTS_CAPABILITY`. Behavior is unchanged.
 - `SnapshotRecord` gained `placeholderLine` and the source record. `replaySnapshot` picks the variant by the attaching connection's capability; the variant is derived on the first capable replay and memoized, so a session with no capable client pays nothing and replay stays O(1) per record.
 
+- `rpc-types.ts` adds the `get_media {toolCallId, contentIndex}` command, its `get_media` response and `RPC_ERROR_MEDIA_NOT_FOUND`; `connection-handler.ts` answers it (`findToolResultMedia`: durable session entries first, live messages second) and lists `media_placeholders` in classic-mode `get_protocol_info`; `session-command-router.ts` lists it in multi-mode `get_protocol_info`; `rpc-client.ts` gains `getMedia()`; `custom-capability.ts` declares `MEDIA_PLACEHOLDERS_CAPABILITY`.
+
 ### Why
 
 - Four base64 `read` results overflowed a socket queue in one burst (2026-09-03, omo-desktop) and the host then dropped every record and command response for that connection. Gating the bytes on a client capability is the structural fix the previous entry recorded as a follow-up.
 - The image-carrying wire paths are not enumerable reliably: beyond the obvious events, `entry_appended`, `get_entries`, `get_tree` and `open_session`'s `state.entries` all carry `ToolResultMessage.content`. Every one of them converges on `SessionEventWriter.enqueue` in multi-session mode, so the transform runs there once instead of at each call site.
 
-### Scope
+### Why this cannot be expressed externally
 
-- Classic single-connection stdio mode is out of scope: applying the transform there needs a second application point in `connection-handler.ts`, and no stdio client asks for placeholders.
+- The rewrite has to live inside the host: only the host knows which connection advertised the capability and which records converge on `SessionEventWriter.enqueue`; a client-side filter would still receive the bytes it wants to avoid. Classic single-connection stdio mode is out of scope: applying the transform there needs a second application point in `connection-handler.ts`, and no stdio client asks for placeholders.
 - A default client (one that never advertised `media_placeholders`) receives byte-identical output.
 
 ### Expected merge conflict zones

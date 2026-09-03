@@ -39,6 +39,33 @@ Rebranded distributions read the equivalent variable under their configured envi
 `extension_events` opts the client into generic extension-owned event records; clients that omit it
 retain the previous wire stream unchanged.
 
+#### media_placeholders
+
+A client that advertises `media_placeholders` in `set_client_info` tells the host it does not want
+inline media bytes on the wire. For that connection the host replaces every image block inside a
+tool result (`ToolResultMessage.content` and `tool_execution_end.result.content`, including the
+entries carried by `get_entries`, `get_messages`, `get_tree`, `open_session` state and attach-time
+snapshot replay) with an `image_ref` placeholder:
+
+```json
+{
+  "type": "image_ref",
+  "mimeType": "image/png",
+  "byteLength": 553000,
+  "ref": {"toolCallId": "call_abc123", "contentIndex": 1}
+}
+```
+
+`byteLength` is the decoded size of the omitted payload. The original block is fetched on demand with
+[`get_media`](#get_media) using the `ref`. User-authored images (`prompt`/`steer`/`follow_up`
+`images`) are never replaced.
+
+A connection that does not advertise the capability receives byte-identical output to before. The
+capability is advertised by the host in `get_protocol_info.capabilities` in both classic and
+multi-session mode, but the transform itself is applied only by the multi-session host: classic
+single-connection stdio mode never rewrites its output, so a stdio client always receives inline
+media even if it names the capability. `get_media` is answered in both modes.
+
 ## Multi-session mode (D1 wire protocol)
 
 Multi-session mode lets one `senpi --mode rpc` process serve several independent conversations concurrently over the same stdio JSONL stream. Classic single-session mode is byte-identical to today; the only additive classic-mode behavior is that `get_protocol_info` is answered.
@@ -199,6 +226,7 @@ In the response `error` field, machine-matchable:
 - `invalid_path` (relative `sessionPath`/`cwd`)
 - `too_many_sessions` (`open_session` while `SENPI_RPC_MAX_SESSIONS` sessions are already opening/open; attaching to a live session never fails this way)
 - `open_failed: <detail>`
+- `media_not_found` (`get_media` for an unknown `toolCallId`, or a `contentIndex` that does not point at an image block)
 
 ### Tagging
 
@@ -448,6 +476,51 @@ Response:
 ```
 
 Messages are `AgentMessage` objects (see [Message Types](#message-types)).
+
+#### get_media
+
+Fetch one media block that was omitted for a [`media_placeholders`](#media_placeholders) client. The
+parameters are exactly the placeholder's `ref`.
+
+```json
+{"type": "get_media", "toolCallId": "call_abc123", "contentIndex": 1}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "get_media",
+  "success": true,
+  "data": {
+    "toolCallId": "call_abc123",
+    "contentIndex": 1,
+    "content": {"type": "image", "data": "<base64>", "mimeType": "image/png"}
+  }
+}
+```
+
+`content` is the original `ImageContent` block, byte-for-byte. `contentIndex` indexes the tool
+result's `content` array. The host looks the tool call up in the durable session entries first (so a
+block stays fetchable after the live message window moved on), then in the current messages for a
+result that has not been persisted yet.
+
+When the tool call is unknown, the index is out of range, or the index points at a non-image block,
+the response fails with `error` and `errorCode` both set to `media_not_found`:
+
+```json
+{
+  "type": "response",
+  "command": "get_media",
+  "success": false,
+  "error": "media_not_found",
+  "errorCode": "media_not_found"
+}
+```
+
+The command is answered in classic and multi-session mode alike; in multi-session mode it takes the
+usual `sessionId` envelope. It is answerable regardless of whether the connection advertised
+`media_placeholders`.
 
 ### Model
 

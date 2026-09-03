@@ -844,6 +844,18 @@ export class RpcClient {
 	}
 
 	/**
+	 * Fetch one media block that arrived as an `image_ref` placeholder.
+	 *
+	 * `contentIndex` is the index inside the tool result's `content` array carried by
+	 * the placeholder's `ref`. Rejects with `media_not_found` when the tool call is
+	 * unknown or the index does not point at an image block.
+	 */
+	async getMedia(toolCallId: string, contentIndex: number): Promise<ImageContent> {
+		const response = await this.send({ type: "get_media", toolCallId, contentIndex });
+		return this.getData<{ toolCallId: string; contentIndex: number; content: ImageContent }>(response).content;
+	}
+
+	/**
 	 * Get available commands (extension commands, prompt templates, skills).
 	 */
 	async getCommands(): Promise<RpcSlashCommand[]> {

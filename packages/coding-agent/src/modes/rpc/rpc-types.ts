@@ -132,6 +132,12 @@ type RpcSessionCommand =
 
 	// Messages
 	| { id?: string; type: "get_messages" }
+	/**
+	 * Fetch one media block a `media_placeholders` client received as an `image_ref`
+	 * stub. `contentIndex` indexes the toolResult's `content` array and must point at
+	 * an image block; anything else answers `media_not_found`.
+	 */
+	| { id?: string; type: "get_media"; toolCallId: string; contentIndex: number }
 
 	// Commands and loaded runtime surfaces
 	| { id?: string; type: "get_commands" }
@@ -164,6 +170,7 @@ export const RPC_ERROR_MULTI_SESSION_DISABLED = "multi_session_disabled";
 export const RPC_ERROR_INVALID_PATH = "invalid_path";
 export const RPC_ERROR_OPEN_FAILED = "open_failed";
 export const RPC_ERROR_TOO_MANY_SESSIONS = "too_many_sessions";
+export const RPC_ERROR_MEDIA_NOT_FOUND = "media_not_found";
 
 export type RpcErrorCode =
 	| typeof RPC_ERROR_UNKNOWN_SESSION
@@ -173,7 +180,8 @@ export type RpcErrorCode =
 	| typeof RPC_ERROR_MULTI_SESSION_DISABLED
 	| typeof RPC_ERROR_INVALID_PATH
 	| typeof RPC_ERROR_OPEN_FAILED
-	| typeof RPC_ERROR_TOO_MANY_SESSIONS;
+	| typeof RPC_ERROR_TOO_MANY_SESSIONS
+	| typeof RPC_ERROR_MEDIA_NOT_FOUND;
 
 /** Every established command accepts an additive routing envelope. */
 export type RpcCommand =
@@ -519,6 +527,13 @@ export type RpcResponse =
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_media";
+			success: true;
+			data: { toolCallId: string; contentIndex: number; content: ImageContent };
+	  }
 
 	// Commands and loaded runtime surfaces
 	| {
