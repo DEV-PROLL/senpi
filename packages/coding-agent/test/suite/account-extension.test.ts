@@ -263,6 +263,33 @@ describe("/gpt-account command", () => {
 		expect(storage.listSlots("openai-codex").map((slot) => slot.name)).toEqual(["default"]);
 	});
 
+	it("remove default on a promoted pool leaves the survivor as the stored top-level credential", async () => {
+		// The shape appendLoginSlot writes when a legacy flat openai-codex credential
+		// gains a second login: the flat fields still project the legacy `default`.
+		await storage.modify("openai-codex", async () => ({
+			type: "oauth",
+			access: "legacy-access",
+			refresh: "legacy-refresh",
+			expires: 1,
+			accounts: [
+				{ name: "default", access: "legacy-access", refresh: "legacy-refresh", expires: 1, source: "login" },
+				{ name: "login-2", access: "second-access", refresh: "second-refresh", expires: 2, source: "login" },
+			],
+		}));
+		const { ctx, notices } = createContext();
+
+		await registeredGptCommand().handler("remove default", ctx);
+
+		expect(notices.at(-1)?.message).toContain("Removed OpenAI Codex OAuth account 'default'");
+		expect(storage.listSlots("openai-codex").map((slot) => slot.name)).toEqual(["login-2"]);
+		expect(storage.get("openai-codex")).toMatchObject({
+			type: "oauth",
+			access: "second-access",
+			refresh: "second-refresh",
+			expires: 2,
+		});
+	});
+
 	it("remove without a name reports usage instead of removing anything", async () => {
 		const { ctx, notices } = createContext();
 
