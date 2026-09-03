@@ -118,6 +118,7 @@ function handleMessage(
 	// the fork's content is lost.
 	if (message.type === "system" && message.subtype === "init" && typeof message.session_id === "string") {
 		if (message.session_id !== entry.sdkSessionId) entry.sdkSessionId = message.session_id;
+		entry.sdkSessionIdConfirmed = true;
 	}
 	const turn = currentTurn(entry);
 	if (!turn || !registry.isCurrentGeneration(entry.senpiSessionId, turn.generation)) return false;

@@ -1,7 +1,7 @@
 import { BoundedAsyncQueue, SESSION_STREAM_QUEUE_CAPACITY } from "./bounded-queue.ts";
 import { sdkResultFailure } from "./errors.ts";
 import type { SDKMessage, SDKUserMessage } from "./sdk-boundary.ts";
-import { bindingFromEntry, rememberBinding } from "./session-reattach.ts";
+import { bindingFromEntry, forgetBinding, rememberBinding } from "./session-reattach.ts";
 import {
 	type ClaudeSdkOauthSessionEntry,
 	closeSession,
@@ -34,9 +34,17 @@ function recordAssistantUuid(entry: ClaudeSdkOauthSessionEntry, sentCount: numbe
  * SAME turn's retry fork past the orphaned message instead of appending it
  * twice (issue #723 retry storm). In-memory only — nothing here is persisted.
  */
+function publishBinding(entry: ClaudeSdkOauthSessionEntry, binding: Parameters<typeof rememberBinding>[0]): void {
+	if (!entry.sdkSessionIdConfirmed) {
+		forgetBinding(entry.senpiSessionId);
+		return;
+	}
+	rememberBinding(binding);
+}
+
 function rememberRetryCheckpoint(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]): void {
 	if (entry.sentCount < 0 || entry.sentCount > hashes.length) return;
-	rememberBinding({
+	publishBinding(entry, {
 		...bindingFromEntry(entry, hashes.slice(0, entry.sentCount)),
 		unansweredTurnDigest: sentHashPrefixDigest(hashes, hashes.length),
 	});
@@ -70,7 +78,7 @@ export function createSessionTurnAttempt(
 				const turn = await completion;
 				if (!turn.aborted && successfulTurn(turn.messages)) {
 					recordSyncedStream(entry, hashes);
-					rememberBinding(bindingFromEntry(entry, hashes));
+					publishBinding(entry, bindingFromEntry(entry, hashes));
 				} else {
 					rememberRetryCheckpoint(entry, hashes);
 				}

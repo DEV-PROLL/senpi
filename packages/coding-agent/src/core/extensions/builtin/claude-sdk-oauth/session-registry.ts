@@ -82,6 +82,7 @@ export type SessionBranchInfo = { oldLeafId: string; newLeafId: string };
 export interface ClaudeSdkOauthSessionEntry {
 	senpiSessionId: string;
 	sdkSessionId: string;
+	sdkSessionIdConfirmed: boolean;
 	generation: number;
 	accountName: string;
 	modelId: string;
@@ -211,6 +212,7 @@ export class ClaudeSdkOauthSessionRegistry {
 		const target: ClaudeSdkOauthSessionEntry = {
 			...entryInput,
 			sdkSessionId,
+			sdkSessionIdConfirmed: input.resume !== undefined,
 			generation,
 			query,
 			inputController,

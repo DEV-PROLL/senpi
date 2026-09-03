@@ -1,5 +1,27 @@
 # claude-sdk-oauth
 
+## 2026-09-03 - Never resume an SDK session id that init never confirmed
+
+### What changed
+
+- `session-registry.ts`: resident entries now track whether the SDK confirmed their session id; resumed entries start confirmed while cold-seeded ids start provisional.
+- `session-registry-pump.ts`: `system/init` confirms the entry's SDK session id, including when the SDK changes it.
+- `session-turn-attempt.ts`: continuity bindings are published only after confirmation; failed provisional attempts forget any existing binding.
+- `claude-sdk-oauth-unconfirmed-binding.test.ts`: covers provisional failure cleanup, confirmed failures and successes, and resumed entries.
+
+### Why
+
+- A failed cold-seed attempt could publish its locally minted SDK id before Claude Code confirmed it, poisoning subsequent admissions with a permanently unresumable binding ([oh-my-openagent#7562](https://github.com/code-yeongyu/oh-my-openagent/issues/7562)).
+
+### Why an extension could not handle it
+
+- Session ids are minted, confirmed, and published inside the builtin resident SDK pump before any extension-facing stream event can correct the continuity binding.
+
+### Expected merge conflict zones
+
+- LOW in `session-registry.ts` around entry construction, `session-registry-pump.ts` around init handling, and `session-turn-attempt.ts` around binding publication.
+- NEW test in `claude-sdk-oauth-unconfirmed-binding.test.ts`.
+
 ## 2026-09-03 - Map malformed content entries to text instead of broken image blocks
 
 ### What changed
