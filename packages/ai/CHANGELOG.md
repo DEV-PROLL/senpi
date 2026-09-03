@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Adding a second account to a provider that manages its own credential pool no longer stored the provider's placeholder tokens as an extra `login-2` slot; the pooled login result is now written through untouched ([#1279](https://github.com/code-yeongyu/senpi/issues/1279)).
+
 ### Removed
 
 ## [2026.9.3] - 2026-09-03

@@ -1,3 +1,21 @@
+## Login keeps a provider-owned credential pool intact (2026-09-03)
+
+### What changed
+
+- `packages/ai/src/auth/pool/slots.ts`: `appendLoginSlot` returns the login result untouched when that result already carries a populated `accounts` array. Every other branch is unchanged: an absent or flat `current` still stores the flat credential as-is, and an unnamed flat credential against a pooled `current` still becomes the next generated `login-N` slot with its own material.
+
+### Why
+
+- A provider whose own `login` returns the complete pooled credential (claude-sdk-oauth builds it with `addAccount`) was double-pooled: the shared login path read that result's top-level fields as if they were a flat credential and appended them as a second slot. For claude-sdk-oauth those top-level fields are the managed sentinel, so a second account produced a `login-2` slot holding `claude-sdk-oauth-managed` instead of the newly issued tokens, and selecting that slot failed authentication (senpi#1279).
+
+### Why an extension could not handle it
+
+- `appendLoginSlot` is the shared write step inside `ModelsImpl.login` and the coding-agent auth storage `set`; it runs after the provider's `login` returns and before the credential is persisted, so no provider or extension seam exists between producing the pool and mangling it.
+
+### Expected merge conflict zones
+
+- LOW: the guard at the top of `appendLoginSlot` and its JSDoc in `auth/pool/slots.ts`. The same hunk appears in the open PRs #1304 and #1196.
+
 ## Anthropic OAuth advertises Claude Code 2.1.251 (2026-09-02)
 
 ### What changed
