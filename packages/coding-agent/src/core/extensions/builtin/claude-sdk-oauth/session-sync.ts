@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import type { Context, ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
+import type { Context, Message } from "@earendil-works/pi-ai";
+import { appendSdkContentBlocks } from "./content-blocks.ts";
 import type { ClaudeSdkOauthAuthLane } from "./options.ts";
-import type { Base64ImageSource, ContentBlockParam, Options } from "./sdk-boundary.ts";
+import type { ContentBlockParam, Options } from "./sdk-boundary.ts";
 import type { ClaudeSdkOauthSessionEntry } from "./session-registry.ts";
 import { HOST_TOOL_POLICY_FINGERPRINT, mapPiToolNameToSdk } from "./tools.ts";
 
@@ -156,25 +157,8 @@ export function configFingerprint(
 	};
 }
 
-function appendContent(blocks: ContentBlockParam[], content: string | readonly (TextContent | ImageContent)[]): void {
-	if (typeof content === "string") {
-		blocks.push({ type: "text", text: content });
-		return;
-	}
-	for (const block of content) {
-		blocks.push(
-			block.type === "text"
-				? { type: "text", text: block.text }
-				: {
-						type: "image",
-						source: {
-							type: "base64",
-							media_type: block.mimeType as Base64ImageSource["media_type"],
-							data: block.data,
-						},
-					},
-		);
-	}
+function appendContent(blocks: ContentBlockParam[], content: string | readonly unknown[]): void {
+	appendSdkContentBlocks(blocks, content);
 }
 
 export function buildDeltaPromptBlocks(
