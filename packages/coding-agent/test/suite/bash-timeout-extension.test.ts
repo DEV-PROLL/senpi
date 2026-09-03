@@ -120,11 +120,13 @@ describe("buildBashTimeoutPrompt", () => {
 		"\n## Bash Tool Timeout Policy\n\nThe `bash` tool's `timeout` parameter is the process kill deadline, not how long you wait for output: the command is killed when it reaches the deadline.\n\n- Default timeout: 1800s (30 min). Applied automatically when you do not set `timeout`.\n- Recommended maximum timeout: 1800s (30 min). Explicit `timeout` values are preserved because different hosts may use different timeout units.\n- Foreground blocking stops at the ~60s window. A command still running then auto-detaches alive to a background session with a `bash_id` and keeps running until it exits, hits the kill deadline, or is stopped with `kill_bash`.\n- Completion arrives automatically as a notification carrying the exit status and output tail, so end your turn rather than poll. Use `bash_output` only for a midpoint peek.\n- Waiting on an observable condition (a log line, a CI check, a server coming up) belongs to `monitor({command, filter})`, never a foreground `sleep` or poll loop.\n- Sessions started with `run_in_background: true` ignore `timeout` and live until exit or `kill_bash`.\n";
 
 	it("is byte-identical to the shipped kill-deadline policy", () => {
-		expect(buildBashTimeoutPrompt({ defaultSeconds: 1800, maxSeconds: 1800 }, 60)).toBe(SHIPPED_POLICY);
+		expect(buildBashTimeoutPrompt({ defaultSeconds: 1800, maxSeconds: 1800 }, { foregroundWindowSeconds: 60 })).toBe(
+			SHIPPED_POLICY,
+		);
 	});
 
 	it("states that timeout is the process kill deadline, not the wait budget", () => {
-		const prompt = buildBashTimeoutPrompt(resolveBashTimeoutDefaults({}), 60);
+		const prompt = buildBashTimeoutPrompt(resolveBashTimeoutDefaults({}), { foregroundWindowSeconds: 60 });
 
 		expect(prompt).toContain("## Bash Tool Timeout Policy");
 		expect(prompt).toContain("process kill deadline");
@@ -133,7 +135,7 @@ describe("buildBashTimeoutPrompt", () => {
 	});
 
 	it("contains the auto-detach and monitor guidance and never mentions the prompt cache", () => {
-		const prompt = buildBashTimeoutPrompt(resolveBashTimeoutDefaults({}), 60);
+		const prompt = buildBashTimeoutPrompt(resolveBashTimeoutDefaults({}), { foregroundWindowSeconds: 60 });
 
 		expect(prompt).toContain("~60s window");
 		expect(prompt).toContain("auto-detaches alive");

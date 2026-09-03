@@ -1,5 +1,26 @@
 # senpi-codemode fork changes
 
+## Eval description subscribes to monitor events when available (2026-09-03)
+
+### What changed
+
+- `packages/senpi-codemode/src/prompt/eval-prompt.ts` adds a capability-gated monitor-subscription bullet to each emphasis dialect and folds filter/join/aggregate wording into the existing result-reduction bullets.
+- `packages/senpi-codemode/src/tool/eval-tool-options.ts` carries the optional `monitor` capability, and `packages/senpi-codemode/src/tool/eval-tool.ts` forwards it to prompt construction.
+- `packages/senpi-codemode/src/index.ts` detects `monitor` in `pi.getAllTools()` for session-runtime eval registration; the pre-extension fallback registration passes `false` deliberately because monitor is not loaded yet.
+- `packages/senpi-codemode/test/prompt.test.ts` asserts both gated directions across all five dialects, and `packages/senpi-codemode/test/__snapshots__/prompt.test.ts.snap` records the intentional result-reduction wording change.
+
+### Why
+
+- With monitor reachable only through an eval cell, the eval description is the only model-facing surface that can teach the callable `tool.monitor({ command, filter })` form and the event-driven wait stance without naming an unavailable tool. The existing monitor rule is being removed from the preset, so this compact addition preserves the contract while consolidating result reduction.
+
+### Why an extension could not handle it
+
+- The description is composed by the eval tool factory before the model can invoke a cell; an external extension cannot add a capability-gated instruction to that tool's registered description or change its dialect rendering.
+
+### Expected merge conflict zones
+
+- LOW in `src/prompt/eval-prompt.ts` around the dialect template, `src/tool/eval-tool-options.ts` and `src/tool/eval-tool.ts` around prompt options, and `src/index.ts` around baseline/session-runtime eval registration.
+
 ## Bun child-process output stays inside the JS cell (2026-09-03)
 
 ### What changed
@@ -21,7 +42,6 @@
 
 - LOW in `src/kernels/js/worker-runtime.js` around `#installGlobals` (import plus install/restore lines).
 - NONE for the new module and tests.
-
 ## Binary skill resolution and stdout-safe miss reporting (2026-09-02)
 
 ### What changed

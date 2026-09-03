@@ -48,7 +48,6 @@ import { APP_NAME } from "../../../../config.ts";
 import type { DynamicPromptCoreContext } from "../../../dynamic-prompt/build.ts";
 import { type BuildDynamicSystemPromptOptions, buildDynamicSystemPrompt } from "../../../dynamic-prompt/build.ts";
 import { buildTestDisciplineSection } from "../../../dynamic-prompt/verification.ts";
-import { CODEX_MONITOR_SUBSCRIBE_DIRECTIVE } from "./execution-tooling.ts";
 import { buildFileOperationsTuning } from "./file-operations.ts";
 import { buildGptEvalRoutingTuning } from "./gpt-eval-routing.ts";
 
@@ -58,7 +57,6 @@ export type Gpt56ExecutionRuleId =
 	| "over-call-bias"
 	| "in-kernel-reduction"
 	| "stay-direct-exceptions"
-	| "monitor-subscribe"
 	| "delegation"
 	| "todo-granularity"
 	| "test-first"
@@ -115,17 +113,12 @@ export const GPT56_EXECUTION_RULES = [
 	{ id: "over-call-bias", concern: "tool-orchestration", directive: OVER_CALL_BIAS },
 	{ id: "in-kernel-reduction", concern: "tool-orchestration", directive: IN_KERNEL_REDUCTION },
 	{ id: "stay-direct-exceptions", concern: "tool-orchestration", directive: STAY_DIRECT_EXCEPTIONS },
-	{ id: "monitor-subscribe", concern: "tool-orchestration", directive: CODEX_MONITOR_SUBSCRIBE_DIRECTIVE },
 	{ id: "delegation", concern: "delegation", directive: DELEGATION },
 	{ id: "todo-granularity", concern: "todo-discipline", directive: TODO_GRANULARITY },
 	{ id: "test-first", concern: "test-first", directive: TEST_FIRST },
 	{ id: "atomic-commits", concern: "commit-discipline", directive: ATOMIC_COMMITS },
 	{ id: "lsp-symbol-routing", concern: "symbol-routing", directive: LSP_SYMBOL_ROUTING },
 ] as const satisfies readonly Gpt56ExecutionRule[];
-
-function buildCodexMonitorClause(context: DynamicPromptCoreContext): string {
-	return context.tools.some((tool) => tool.name === "monitor") ? `${CODEX_MONITOR_SUBSCRIBE_DIRECTIVE} ` : "";
-}
 
 function buildGpt56Core(context: DynamicPromptCoreContext): string {
 	return `You are ${APP_NAME}, a coding agent and autonomous deep worker: you receive goals, not step-by-step instructions, and execute them end-to-end.
@@ -152,7 +145,7 @@ The workspace is shared with the user and other agents. Never revert or modify c
 
 Todo discipline: for any non-trivial task (2+ steps, uncertain scope, or multiple items), start with \`todo\`: atomic items named by their deliverable ("edit \`foo.ts\` to add X"). ${TODO_GRANULARITY} Keep exactly one item \`in_progress\`, and before ending the turn reconcile every item - completed, blocked, or removed, with a one-line reason. Trivial single-step asks need none.
 
-Tool orchestration: resolve the request in the fewest useful tool loops, without letting loop minimization outrank correctness or required evidence. ${buildGptEvalRoutingTuning()} ${EVAL_FIRST_ROUTING} ${PARALLEL_BATCHING} ${OVER_CALL_BIAS} ${IN_KERNEL_REDUCTION} ${STAY_DIRECT_EXCEPTIONS} ${buildCodexMonitorClause(context)}With no code-execution tool registered, fire those independent calls in one message instead - one bash call per command, never chained with \`;\` or \`&&\`. Never fill parameters with placeholders. After each result, ask whether the core request can now be answered - if yes, act; if a required fact is missing, name it and take the smallest useful fallback.
+Tool orchestration: resolve the request in the fewest useful tool loops, without letting loop minimization outrank correctness or required evidence. ${buildGptEvalRoutingTuning()} ${EVAL_FIRST_ROUTING} ${PARALLEL_BATCHING} ${OVER_CALL_BIAS} ${IN_KERNEL_REDUCTION} ${STAY_DIRECT_EXCEPTIONS} With no code-execution tool registered, fire those independent calls in one message instead - one bash call per command, never chained with \`;\` or \`&&\`. Never fill parameters with placeholders. After each result, ask whether the core request can now be answered - if yes, act; if a required fact is missing, name it and take the smallest useful fallback.
 
 Never speculate about code you have not read - memory of file contents is unreliable, so re-read before claiming or editing. ${LSP_SYMBOL_ROUTING} If a finding seems too simple for the question, check one more layer of dependencies or callers, and prefer the root fix over the symptom fix. Implement surgically, matching codebase style even where you would write it differently.
 

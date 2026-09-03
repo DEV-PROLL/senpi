@@ -1,5 +1,23 @@
 # Builtin extensions changes
 
+## Shared eval-only routing predicate for prompt surfaces (2026-09-03)
+
+### What changed
+
+- `eval-only-routing.ts` (new): `isEvalOnlyRouting(pi)` returns whether the session registry holds an `eval` tool, which is the session's own condition for withholding `bash`, `powershell`, `workflow` and `monitor` from the model's direct tool list. `terminal/extension.ts` and `bash-timeout/index.ts` both consume it when rendering their system-prompt sections.
+
+### Why
+
+- Two builtins must render the same call form for the same tools, and each re-deriving the condition invites them to drift apart. One predicate keeps both surfaces on the session's actual arming rule, and keeps eval-less child agents (`explore`, `librarian`) on the direct forms they can really call.
+
+### Why an extension could not handle it
+
+- The consumers are builtins whose prompt sections are appended before the agent loop; a user extension cannot rewrite another builtin's section.
+
+### Expected merge conflict zones
+
+- LOW: the module is new and fork-only.
+
 ## Hooks trust-state snapshots publish atomically for same-account application state (2026-08-31)
 
 ### What changed

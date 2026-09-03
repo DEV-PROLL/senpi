@@ -28,6 +28,7 @@ export function createEvalTool(options: CreateEvalToolOptions): ToolDefinition<E
 	const parameters = createEvalInputSchema(options.enabledLanguages);
 	const prompt = buildEvalPrompt(options.enabledLanguages, {
 		spawns: options.spawns ?? false,
+		monitor: options.monitor,
 		...(options.spawnDefaultAgent === undefined ? {} : { spawnDefaultAgent: options.spawnDefaultAgent }),
 		...(options.modelId === undefined ? {} : { modelId: options.modelId }),
 		...(options.hostLine === undefined ? {} : { hostLine: options.hostLine }),

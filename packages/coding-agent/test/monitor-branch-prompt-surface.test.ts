@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { TERMINAL_PROMPT_SECTION } from "../src/core/extensions/builtin/terminal/prompt.ts";
+import { buildTerminalPromptSection } from "../src/core/extensions/builtin/terminal/prompt.ts";
 import type { TerminalToolContext } from "../src/core/extensions/builtin/terminal/tools/context.ts";
 import { createMonitorTool, monitorSchema } from "../src/core/extensions/builtin/terminal/tools/monitor.ts";
 
@@ -28,6 +28,12 @@ const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const CODING_AGENT_ROOT = join(REPO_ROOT, "packages", "coding-agent");
 
 const CREATE_BRANCH_PROPERTIES = ["command", "path", "event", "filter", "persistent"] as const;
+
+/** Both eval-only renderings must teach both branches; neither may lose one to a call-form rewrite. */
+const PROMPT_SECTIONS = [true, false].map((evalOnly) => ({
+	label: `evalOnly=${evalOnly}`,
+	text: buildTerminalPromptSection({ evalOnly }),
+}));
 
 /** A branch is documented only when its own call shape is shown, not merely its property names. */
 const BRANCH_CALL_SHAPES = [/monitor\(\{[^}]*\bcommand\b[^}]*\}\)/, /monitor\(\{[^}]*\bpath\b[^}]*\}\)/] as const;
@@ -59,14 +65,16 @@ describe("monitor create-branch prompt coverage gate", () => {
 	});
 
 	it("the terminal prompt section shows a call shape for each create branch", () => {
-		const missing = BRANCH_CALL_SHAPES.filter((shape) => !shape.test(TERMINAL_PROMPT_SECTION));
-		expect(missing.map(String), "a monitor branch has no call shape in the prompt section").toEqual([]);
-		expect(TERMINAL_PROMPT_SECTION).toContain("event");
+		for (const { label, text } of PROMPT_SECTIONS) {
+			const missing = BRANCH_CALL_SHAPES.filter((shape) => !shape.test(text));
+			expect(missing.map(String), `${label}: a monitor branch has no call shape in the prompt section`).toEqual([]);
+			expect(text, label).toContain("event");
+		}
 	});
 
 	it("the file branch's create-on-appearance limit is stated wherever the file branch is taught", () => {
 		for (const [name, surface] of [
-			["prompt section", TERMINAL_PROMPT_SECTION],
+			...PROMPT_SECTIONS.map(({ label, text }) => [`prompt section ${label}`, text] as const),
 			["tool surface", monitorToolSurface()],
 			["terminal-tools doc", terminalToolsDoc()],
 		] as const) {
@@ -82,7 +90,9 @@ describe("monitor create-branch prompt coverage gate", () => {
 
 	it("the XOR rule is stated on the tool surface and in the prompt, not only in a runtime error", () => {
 		expect(monitorToolSurface()).toContain("XOR");
-		expect(TERMINAL_PROMPT_SECTION).toContain("XOR");
+		for (const { label, text } of PROMPT_SECTIONS) {
+			expect(text, label).toContain("XOR");
+		}
 	});
 
 	it("no create-branch property is advertised as unconditionally required", () => {

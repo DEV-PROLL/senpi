@@ -159,6 +159,40 @@ describe("buildEvalPrompt", () => {
 		expect(evalEmphasisStyle(undefined)).toBe("default");
 	});
 
+	it("gates the monitor subscription stance on monitor availability in every dialect", () => {
+		// Given: each eval emphasis dialect with and without the reachable monitor tool.
+		const enabled = { py: true, js: true, rb: false, jl: false };
+		const dialects = [undefined, "claude-opus-4-8", "gpt-5.6", "o3-mini", "kimi-k2.6"] as const;
+		const render = (modelId: (typeof dialects)[number], monitor?: boolean): string => {
+			const options: { spawns: boolean; modelId?: string; monitor?: boolean } = {
+				spawns: false,
+				...(modelId === undefined ? {} : { modelId }),
+				...(monitor === undefined ? {} : { monitor }),
+			};
+			return buildEvalPrompt(enabled, options).description;
+		};
+
+		// When: the prompt is built with the registry-gated monitor capability.
+		for (const modelId of dialects) {
+			const withMonitor = render(modelId, true);
+			expect(withMonitor.match(/tool\.monitor\(/g) ?? [], `model=${modelId ?? "default"}`).toHaveLength(1);
+			expect(withMonitor, `model=${modelId ?? "default"}`).toContain("event wakes the turn");
+		}
+
+		// Then: unavailable monitor capability leaves no unreachable call or stance behind.
+		for (const modelId of dialects) {
+			for (const monitor of [false, undefined]) {
+				const withoutMonitor = render(modelId, monitor);
+				expect(withoutMonitor, `model=${modelId ?? "default"}, monitor=${monitor ?? "omitted"}`).not.toContain(
+					"tool.monitor(",
+				);
+				expect(withoutMonitor, `model=${modelId ?? "default"}, monitor=${monitor ?? "omitted"}`).not.toContain(
+					"event wakes the turn",
+				);
+			}
+		}
+	});
+
 	it("renders exactly one batching dialect selected by the model id", () => {
 		// Given: the same kernel set rendered for each model family.
 		const enabled = { py: true, js: true, rb: false, jl: false };

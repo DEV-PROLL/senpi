@@ -54,7 +54,6 @@ const EXPECTED_CONCERN: Record<ExecutionToolingRuleId, ExecutionToolingConcern> 
 	"eval-default-surface": "code-cell-routing",
 	"eval-real-code": "code-cell-routing",
 	"eval-stay-direct": "code-cell-routing",
-	"monitor-subscribe": "async-waiting",
 };
 
 const PRESET_DIALECT: ReadonlyArray<readonly [PromptPresetName, ExecutionToolingDialect]> = [
@@ -75,7 +74,6 @@ const PRESET_DIALECT: ReadonlyArray<readonly [PromptPresetName, ExecutionTooling
 const OUT_OF_SCOPE: readonly PromptPresetName[] = ["gpt-5.5", "grok-4.6", "deepseek-v4-flash"];
 
 const evalRules = () => EXECUTION_TOOLING_RULES.filter((rule) => rule.concern === "code-cell-routing");
-const monitorRules = () => EXECUTION_TOOLING_RULES.filter((rule) => rule.concern === "async-waiting");
 
 describe("execution tooling directive", () => {
 	it("models the directives as parsed rule data with one wording per dialect", () => {
@@ -96,45 +94,48 @@ describe("execution tooling directive", () => {
 		}
 	});
 
-	it.each(PRESET_DIALECT)(
-		"renders every %s directive exactly once when eval and monitor are selected",
-		(presetName, dialect) => {
-			// given
-			const prompt = buildPrompt(presetName, ["eval", "monitor", "read", "bash"]);
-
-			// then
-			for (const rule of EXECUTION_TOOLING_RULES) {
-				expect(occurrences(prompt, rule.directive[dialect]), rule.id).toBe(1);
-			}
-		},
-	);
-
-	it.each(PRESET_DIALECT)(
-		"renders nothing for %s when neither eval nor monitor is selected",
-		(presetName, dialect) => {
-			// given
-			const prompt = buildPrompt(presetName, ["read", "bash"]);
-
-			// then
-			for (const rule of EXECUTION_TOOLING_RULES) {
-				expect(prompt, rule.id).not.toContain(rule.directive[dialect]);
-			}
-		},
-	);
-
-	it.each(PRESET_DIALECT)("gates %s eval rules on eval and the monitor rule on monitor", (presetName, dialect) => {
+	it.each(PRESET_DIALECT)("renders every %s directive exactly once when eval is selected", (presetName, dialect) => {
 		// given
-		const evalOnly = buildPrompt(presetName, ["eval", "read"]);
+		const prompt = buildPrompt(presetName, ["eval", "monitor", "read", "bash"]);
+
+		// then
+		for (const rule of EXECUTION_TOOLING_RULES) {
+			expect(occurrences(prompt, rule.directive[dialect]), rule.id).toBe(1);
+		}
+	});
+
+	it.each(PRESET_DIALECT)("renders nothing for %s when eval is not selected", (presetName, dialect) => {
+		// given
+		const prompt = buildPrompt(presetName, ["read", "bash"]);
+
+		// then
+		for (const rule of EXECUTION_TOOLING_RULES) {
+			expect(prompt, rule.id).not.toContain(rule.directive[dialect]);
+		}
+	});
+
+	it.each(PRESET_DIALECT)("gates %s eval rules on eval alone, never on monitor", (presetName, dialect) => {
+		// given
+		const evalSelected = buildPrompt(presetName, ["eval", "read"]);
 		const monitorOnly = buildPrompt(presetName, ["monitor", "bash"]);
 
 		// then
 		for (const rule of evalRules()) {
-			expect(occurrences(evalOnly, rule.directive[dialect]), rule.id).toBe(1);
+			expect(occurrences(evalSelected, rule.directive[dialect]), rule.id).toBe(1);
 			expect(monitorOnly, rule.id).not.toContain(rule.directive[dialect]);
 		}
-		for (const rule of monitorRules()) {
-			expect(occurrences(monitorOnly, rule.directive[dialect]), rule.id).toBe(1);
-			expect(evalOnly, rule.id).not.toContain(rule.directive[dialect]);
+	});
+
+	it("leaves the wait-as-subscription stance to the eval tool description", () => {
+		// given
+		const ids = EXECUTION_TOOLING_RULES.map((rule) => rule.id);
+
+		// then
+		expect(ids).not.toContain("monitor-subscribe");
+		for (const rule of EXECUTION_TOOLING_RULES) {
+			for (const dialect of ["claude", "kimi"] as const) {
+				expect(rule.directive[dialect], rule.id).not.toMatch(/register `?monitor`?/i);
+			}
 		}
 	});
 

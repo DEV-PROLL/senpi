@@ -1,5 +1,25 @@
 # prompt-preset Extension Changes
 
+## Wait-as-subscription stance moves to the eval tool description (2026-09-03)
+
+### What changed
+
+- `execution-tooling.ts`: the `monitor-subscribe` rule, the `async-waiting` concern, and the exported `CODEX_MONITOR_SUBSCRIBE_DIRECTIVE` are deleted. `ExecutionToolingRuleId` keeps the three `code-cell-routing` ids, `ExecutionToolingConcern` narrows to that single concern, `ExecutionToolingRule.directive` drops its optional `codex` member, and `CONCERN_TOOL` maps the one remaining concern to `eval`.
+- `gpt-5.6.ts`: the `monitor-subscribe` entry leaves `GPT56_EXECUTION_RULES`, `buildCodexMonitorClause()` is deleted along with its interpolation in the Tool-orchestration paragraph, and `"monitor-subscribe"` leaves the `Gpt56ExecutionRuleId` union.
+- `test/suite/prompt-presets-execution-tooling.test.ts` and `test/suite/prompt-presets-gpt-5-6.test.ts`: the deleted rule leaves the concern/placement tables, the gating cases assert eval alone, and each file gains a case pinning that the stance is absent here.
+
+### Why
+
+- `monitor` is now withheld from the model's direct tool list whenever the session has an `eval` tool. Both surfaces gated this rule on `monitor` being a *selected* tool, so the anti-polling stance would silently stop rendering in every eval session — exactly the regression the gating contract was written to prevent. Only the eval tool description can teach the `tool.monitor(...)` form the model must actually type, so the stance moves there and is stated once.
+
+### Why an extension could not handle it
+
+- Content-only change inside this builtin's own rule data; the presets are fork-only surfaces.
+
+### Expected merge conflict zones
+
+- LOW: both touched files are fork-only presets, and the change is a deletion.
+
 ## Kimi K3 core redesign for excessive proactiveness (2026-09-03)
 
 ### What changed
@@ -46,7 +66,6 @@
 ### Expected merge conflict zones on next upstream sync
 
 - LOW: all preset files are fork-only; `glm-5.ts` is new.
-
 ## Execution tooling stance: eval-default + monitor subscription (2026-09-02)
 
 ### What changed

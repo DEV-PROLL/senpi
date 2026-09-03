@@ -2,12 +2,13 @@ import { getShellEnv } from "../../../../utils/shell.ts";
 import { SettingsManager } from "../../../settings-manager.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { isAnthropicBashEnabled } from "../anthropic-bash/index.ts";
+import { isEvalOnlyRouting } from "../eval-only-routing.ts";
 import { TERMINAL_MONITOR_STATE_EVENT, WAKE_SOURCE_STATE_EVENT } from "../monitor-state-event.ts";
 import { MonitorNotifier } from "./monitor-notify.ts";
 import { MONITOR_STATUS_KEY } from "./monitor-status.ts";
 import { MonitorStatusTicker } from "./monitor-status-ticker.ts";
 import { TerminalNotifier } from "./notify.ts";
-import { TERMINAL_PROMPT_SECTION } from "./prompt.ts";
+import { buildTerminalPromptSection } from "./prompt.ts";
 import type { TerminalRuntimeSession } from "./runtime-session.ts";
 import {
 	claimParkedBundle,
@@ -249,7 +250,9 @@ export function registerTerminalExtension(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async (event) => {
 		if (state.steppedAside) return undefined;
-		return { systemPrompt: `${event.systemPrompt}\n${TERMINAL_PROMPT_SECTION}` };
+		return {
+			systemPrompt: `${event.systemPrompt}\n${buildTerminalPromptSection({ evalOnly: isEvalOnlyRouting(pi) })}`,
+		};
 	});
 
 	pi.on("session_shutdown", async (event, ctx) => {

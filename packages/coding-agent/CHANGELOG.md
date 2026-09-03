@@ -6,9 +6,10 @@
 
 ### Changed
 
+- `bash`, `powershell`, `workflow` and `monitor` now run only inside eval cells whenever the `eval` tool is available, with no setting to enable it. They leave the model's direct tool list and are called as `tool.bash(...)`, `tool.workflow(...)` and `tool.monitor(...)`; hooks and permission checks still apply, a direct call returns a hint naming the eval form, and a session without `eval` (codemode disabled, or a child agent whose allowlist omits it) keeps all four directly callable. The prompt surfaces that document these tools render the reachable call form to match, and no session is told about a tool its registry does not hold.
+- The wait-as-subscription guidance moved from the model presets into the `eval` tool description, where it can name the reachable `tool.monitor(...)` form. Because the preset rule was gated on `monitor` being directly selectable, it would otherwise have stopped rendering entirely once monitor became eval-only.
 - Per-model system prompt presets for Claude Opus 4.5-4.8, Claude Opus 5, and GLM 5.2/5.3 are audited against their prompting guides and the dieted shared core: the Opus 5 core is rebuilt on the Fable 5.1 skeleton with the Opus 5 guide behaviors stated once each and gains the guide's outcome-first final-summary shape; Opus 4.7/4.8 keep only their documented deltas and gain the same-turn subagent fan-out direction; Opus 4.6 drops tuning text the core now carries; GLM 5.2/5.3 share one builder, gain the eval/monitor execution-tooling stance, and lose the lineage preamble, undefined-mode reference, and unconditional todo procedure. The shared core gains a conditional delegation rule and states the auto-compaction mechanism behind the context-limits rule.
 - The Kimi K3 prompt preset is rebuilt on the Fable 5.1 skeleton for Moonshot's documented K3 "excessive proactiveness": a Scope section makes the request the deliverable (pre-existing problems become follow-ups, tests are committed only where the task or repository calls for them), the ambiguity gate does the answer-independent work first and then asks one question, a bounded failure cap stops improvisation after three failed approaches, delegation propagates a stop condition to subagents, and the K2.6-era act-bias repetition that outvoted those boundaries is gone - at 11 fewer Kimi K3 tokens than before.
-
 ### Fixed
 
 - RPC logins now answer providers' mid-flow prompts over the extension UI dialog channel (`extension_ui_request` `input` for pasted codes, text, and secrets; `select` for account choices) and release an unanswered dialog when the login settles, so Anthropic Claude Pro/Max and other prompt-driven OAuth flows complete through the browser callback instead of failing with `Interactive login input is not supported over RPC` and a dead callback port ([#1316](https://github.com/code-yeongyu/senpi/issues/1316)).
@@ -28,6 +29,8 @@
 ### Fixed
 
 ### Removed
+
+- The `experimental.bashEvalOnly` and `experimental.workflowEvalOnly` settings are removed; the behaviour they enabled is now the default and needs no configuration. Existing entries in a settings file are ignored.
 
 ## [2026.9.3] - 2026-09-03
 

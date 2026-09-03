@@ -110,8 +110,6 @@ export type PackageSource =
 	  };
 
 export interface ExperimentalSettings {
-	bashEvalOnly?: boolean;
-	workflowEvalOnly?: boolean;
 	sharedHost?: boolean;
 }
 
@@ -1942,14 +1940,6 @@ export class SettingsManager {
 	getDefaultTools(): string[] | undefined {
 		const tools = this.settings.defaultTools;
 		return tools ? [...tools] : undefined;
-	}
-
-	getExperimentalBashEvalOnly(): boolean {
-		return this.settings.experimental?.bashEvalOnly === true;
-	}
-
-	getExperimentalWorkflowEvalOnly(): boolean {
-		return this.settings.experimental?.workflowEvalOnly === true;
 	}
 
 	getExperimentalSharedHost(): boolean {

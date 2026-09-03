@@ -1,5 +1,24 @@
 # terminal builtin extension — fork surface
 
+## Prompt section renders the reachable bash/monitor call form (2026-09-03)
+
+### What changed
+
+- `prompt.ts`: the `TERMINAL_PROMPT_SECTION` constant becomes `buildTerminalPromptSection({ evalOnly })`. Under `evalOnly` the `bash` and `monitor` call shapes render as `tool.bash(` / `tool.monitor(` (including both create branches and the `rearm` shapes); otherwise the direct shapes are unchanged. The steering companions `bash_output`, `bash_input`, `bash_resize` and `kill_bash` keep their direct shapes in both branches because the policy never withholds them.
+- `extension.ts`: the `before_agent_start` handler calls the builder with `evalOnly: isEvalOnlyRouting(pi)`.
+
+### Why
+
+- This section is appended to the system prompt unconditionally, so its hardcoded direct shapes taught a call the model cannot make in any session that routes shell tools through eval cells. A prompt that describes an impossible call is worse than a silent one.
+
+### Why an extension could not handle it
+
+- The section is this builtin's own prompt surface; only it can render the branch its tools are registered under.
+
+### Expected merge conflict zones
+
+- LOW: `prompt.ts` is a fork-only surface; the `extension.ts` change is a single handler line.
+
 ## bash_output muted-monitor metadata (2026-09-02)
 
 ### What changed
