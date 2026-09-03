@@ -1,5 +1,28 @@
 # changes
 
+## RPC logins answer mid-flow OAuth prompts over the dialog channel (2026-09-03)
+
+### What changed
+
+- New `modes/rpc/login-prompts.ts` exports `createRpcLoginPromptCallbacks(ui, signal)`. It bridges the provider's `onPrompt` and `onSelect` callbacks onto the extension UI dialog channel: `text`, `secret`, and `manual_code` prompts become an `extension_ui_request` with method `input` (title = prompt message, optional placeholder); `select` prompts become method `select` with the option labels, and the chosen label is mapped back to the option id in-process.
+- `connection-handler.ts` `startLogin()` spreads those callbacks in place of the old `rejectInteractive` pair. A second `settled` AbortController is combined with the login controller via `AbortSignal.any`, and the `finally` block aborts it first, so an unanswered dialog is released (pending entry deleted) the moment the login settles for any reason: success, failure, or `login_cancel`.
+- Cancel semantics mirror the TUI's `showAuthPrompt`: a dismissed dialog (`cancelled: true`) or an aborted prompt signal rejects with `Error("Login cancelled")`, which surfaces as `auth_login_end` with `success: false`.
+- `onManualCodeInput` stays undefined on purpose; `AuthStorage.handleLegacyPrompt` already routes `manual_code` to `onPrompt`.
+- Secrets never cross the wire. Only the prompt message, placeholder, and option labels go out; the client's answer is consumed in-process and never echoed back.
+
+### Why
+
+- senpi#1316: providers whose OAuth flow needs mid-flow input could not log in over RPC. Anthropic Claude Pro/Max is the loud case: `loginAnthropic` races the local callback listener against a `manual_code` prompt right after emitting the auth URL. The old `rejectInteractive` threw immediately, which set `manualError`, called `server.cancelWait()`, and closed the listener roughly 150ms after `auth_login_url` went out. The browser then landed on connection refused, and the login failed no matter what the client did.
+- With the prompt parked on a real dialog, the race resolves the way it does in the TUI: whichever side finishes first wins, and the loser is released. A client that never answers loses nothing, because the browser/callback path completes the login and the settled signal drops the dangling request.
+
+### Why this cannot be expressed externally
+
+- The login callbacks are wired inside the RPC connection handler when it calls `AuthStorage.login`; no extension seam sees them.
+
+### Expected merge conflict zones
+
+- LOW: the `startLogin` callback object and its `finally` block in `connection-handler.ts`, plus the doc comment above it.
+
 ## Startup failures keep their own diagnostic (2026-09-02)
 
 ### What changed

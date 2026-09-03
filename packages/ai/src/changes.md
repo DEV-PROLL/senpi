@@ -1,3 +1,21 @@
+## OAuth prompt types carry the provider's cancellation signal (2026-09-03)
+
+### What changed
+
+- `src/compat/extension-oauth-types.ts`: `OAuthPrompt` and `OAuthSelectPrompt` gained an optional `signal?: AbortSignal`. Purely additive; every existing field and callback signature is untouched.
+
+### Why
+
+- `AuthStorage.handleLegacyPrompt` already hands the richer `AuthPrompt` (which carries `signal`) to `onPrompt` and `onSelect`, but the public callback types didn't say so. Extension and RPC callbacks that park a prompt on a dialog need that signal to notice when the provider gives up on the prompt (`loginAnthropic` aborts its `manual_code` prompt once the browser callback wins the race) and to release the dialog instead of leaving it dangling. The RPC login-prompt bridge for senpi#1316 is the first consumer.
+
+### Why an extension could not handle it
+
+- It's a type on the shared callback contract; an extension can only read what the type declares.
+
+### Expected merge conflict zones
+
+- LOW: the two interface bodies in `compat/extension-oauth-types.ts`.
+
 ## Login keeps a provider-owned credential pool intact (2026-09-03)
 
 ### What changed
