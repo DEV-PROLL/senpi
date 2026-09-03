@@ -245,6 +245,12 @@ describe("issue #6981 headless restart continuity", () => {
 			id: "user-entry",
 			message: { role: "user" as const, content: [], timestamp: 1 },
 		};
+		const compactionSummary = {
+			role: "compactionSummary" as const,
+			summary: "Earlier work summarized.",
+			tokensBefore: 200_000,
+			timestamp: 2,
+		};
 		const currentUser = {
 			role: "user" as const,
 			content: [{ type: "text" as const, text: "after compaction" }],
@@ -270,14 +276,14 @@ describe("issue #6981 headless restart continuity", () => {
 		const extension = fakeExtension(branch);
 		registerSessionRegistry(extension.api);
 		const entry = residentEntry();
-		const eventContext = context(sessionFile, branch, [currentUser]);
+		const eventContext = context(sessionFile, branch, [compactionSummary, currentUser]);
 
 		await emit(extension.handlers, "message_end", { type: "message_end", message: assistant() }, eventContext);
 
 		expect(await readStoredBinding(sessionFile)).toMatchObject({
 			sessionId: SESSION_ID,
 			sdkSessionId: entry.sdkSessionId,
-			sentCount: 1,
+			sentCount: 2,
 		});
 	});
 });
