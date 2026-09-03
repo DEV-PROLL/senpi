@@ -1,5 +1,25 @@
 # claude-sdk-oauth
 
+## 2026-09-03 - Classify Fable usage-credit failures as entitlement
+
+### What changed
+
+- `errors.ts`: added `SdkErrorKind` `entitlement` and classified prose matching `requires usage credits`, `/usage-credits`, and `credits_required` as `{ kind: "entitlement", retryable: false }`.
+- `guidance.ts`: `sdkErrorGuidance("entitlement")` tells the user to switch models, enable usage credits, or pin another account.
+
+### Why
+
+- #709: Claude Code returns "Fable 5 requires usage credits" for subscription accounts. Classifying that as `rate_limit` would block the single account for 60s and prevent Opus fallback on the same account. Non-retryable entitlement is thrown immediately (no account block); AgentSession's hard-error fallback already advances to the next model.
+
+### Why an extension could not handle it
+
+- SDK error classification and auth guidance live inside this builtin provider before any extension-facing result exists.
+
+### Expected merge conflict zones
+
+- MEDIUM in `errors.ts` around `classifySdkError` prose matchers and the `SdkErrorKind` union.
+- LOW in `guidance.ts` around `sdkErrorGuidance`.
+
 ## 2026-09-03 - Never resume an SDK session id the SDK never acknowledged
 
 ### What changed
