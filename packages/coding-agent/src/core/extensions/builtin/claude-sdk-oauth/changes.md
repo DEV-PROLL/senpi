@@ -19,7 +19,25 @@
 
 - MEDIUM in `errors.ts` around `classifySdkError` prose matchers and the `SdkErrorKind` union.
 - LOW in `guidance.ts` around `sdkErrorGuidance`.
+## 2026-09-03 - State host-tool denial as a fact, not an instruction to end the turn
 
+### What changed
+
+- `tools.ts`: `TOOL_EXECUTION_DENIED_MESSAGE` and `HOST_TOOL_EXECUTION_DENIED_MESSAGE` now state that Senpi executes the tool on the host and returns the result as the next user message; the copy no longer tells the model to end the turn. `HOST_TOOL_POLICY_FINGERPRINT` is `host-tool-denial-v2` so resident sessions re-fingerprint instead of silently keeping the old denial text; because `toolsetHash` is also persisted in the restart sidecar, the first admission after upgrading cold-seeds once (`flatten` / `options_changed`) instead of resuming the pre-bump SDK session - intended, pinned by `claude-sdk-oauth-fingerprint.test.ts`. PreToolUse still denies with `continue: false` and `permissionDecisionReason`; there is no Stop hook.
+- `session-sync.ts`: `configFingerprint` still hashes `hostToolPolicy: HOST_TOOL_POLICY_FINGERPRINT` into `toolsetHash`; the bump is what makes a wording-only denial change retire live queries via `options_changed`.
+
+### Why
+
+- senpi#784 / oh-my-openagent#7115: agents diagnosed "Do not retry with other tools; end the turn." as a failure and retried with other tools. The denial is not a failure - Senpi executes the captured call and returns the result as the next user message. A wording-only change without bumping the fingerprint would leave resident queries serving the old reason.
+
+### Why an extension could not handle it
+
+- Host-tool denial hooks and the session fingerprint are private to this builtin provider; no extension hook sees `permissionDecisionReason` or `toolsetHash`.
+
+### Expected merge conflict zones
+
+- LOW: `tools.ts` denial constants and `HOST_TOOL_POLICY_FINGERPRINT`.
+- LOW: `session-sync.ts` `configFingerprint` `hostToolPolicy` field.
 ## 2026-09-03 - Never resume an SDK session id the SDK never acknowledged
 
 ### What changed
