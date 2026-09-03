@@ -42,8 +42,11 @@ describe("regression #1169: Claude SDK is_error results", () => {
 		);
 		overrideSdkBoundary({
 			query: () => ({
-				async *[Symbol.asyncIterator]() {
-					throw new ClassifiedSdkError({ kind: "rate_limit", retryable: true }, failed, false);
+				[Symbol.asyncIterator]() {
+					return {
+						next: () =>
+							Promise.reject(new ClassifiedSdkError({ kind: "rate_limit", retryable: true }, failed, false)),
+					};
 				},
 				async interrupt() {},
 				close() {},
