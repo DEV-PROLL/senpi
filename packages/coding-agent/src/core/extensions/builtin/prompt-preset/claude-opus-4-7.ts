@@ -6,9 +6,9 @@ function buildClaudeOpus47Tuning(): string {
 
 Prefer tool calls over reasoning when a tool can resolve the question directly; do not reason past a fact you can look up.
 
-For frontend design with no specified visual direction, derive one from the project's context or propose distinct options before building; do not fall back to your default cream/serif/terracotta house style or generic AI aesthetics.
+Spawn the subagents for a fan-out across items or files in the same turn, not one at a time.
 
-Do not wrap up early because the context window is running low; the harness auto-compacts context. Keep working until the task is complete.`;
+For frontend design with no specified visual direction, derive one from the project's context or propose distinct options before building; do not fall back to your default cream/serif/terracotta house style or generic AI aesthetics.`;
 }
 
 export function buildClaudeOpus47Prompt(options: BuildDynamicSystemPromptOptions): string {

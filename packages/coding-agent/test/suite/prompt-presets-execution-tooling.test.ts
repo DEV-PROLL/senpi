@@ -68,9 +68,11 @@ const PRESET_DIALECT: ReadonlyArray<readonly [PromptPresetName, ExecutionTooling
 	["kimi-k3", "kimi"],
 	["kimi-k2-7", "kimi"],
 	["kimi-k2-6", "kimi"],
+	["glm-5.3", "claude"],
+	["glm-5.2", "claude"],
 ];
 
-const OUT_OF_SCOPE: readonly PromptPresetName[] = ["gpt-5.5", "grok-4.6", "deepseek-v4-flash", "glm-5.3"];
+const OUT_OF_SCOPE: readonly PromptPresetName[] = ["gpt-5.5", "grok-4.6", "deepseek-v4-flash"];
 
 const evalRules = () => EXECUTION_TOOLING_RULES.filter((rule) => rule.concern === "code-cell-routing");
 const monitorRules = () => EXECUTION_TOOLING_RULES.filter((rule) => rule.concern === "async-waiting");
