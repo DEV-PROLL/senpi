@@ -4,7 +4,10 @@ import { decideNativeContinuity } from "../../../src/core/extensions/builtin/cla
 import { forgetBinding, getBinding } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
 import { closeSession } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
 import { registerSessionRegistry } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-registry-wiring.ts";
-import { sentHashPrefixDigest } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
+import {
+	sentHashPrefixDigest,
+	sentMessageHashes,
+} from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
 import {
 	assistant,
 	cleanupRestartFixture,
@@ -26,16 +29,26 @@ afterEach(() => {
 describe("issue #6981 compaction restart continuity", () => {
 	it("persists the admission projection and reattaches after compaction", async () => {
 		const { sessionFile, branch } = sessionFixture();
-		// A compacted branch: the original user turn is summarised away and one
-		// user message survives after the compaction boundary.
+		// A compacted branch with real firstKeptEntryId semantics: the first user turn
+		// is summarised away, "kept-user" (BEFORE the boundary) survives verbatim
+		// because the compaction names it, and one user turn follows the boundary.
 		branch.push(
+			{
+				type: "message",
+				id: "kept-user",
+				message: {
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "kept verbatim" }],
+					timestamp: 2,
+				},
+			},
 			{
 				type: "compaction",
 				id: "compaction-entry",
 				summary: "Earlier work summarized.",
-				firstKeptEntryId: "current-user",
+				firstKeptEntryId: "kept-user",
 				tokensBefore: 200_000,
-				timestamp: 2,
+				timestamp: 3,
 			},
 			{
 				type: "message",
@@ -43,7 +56,7 @@ describe("issue #6981 compaction restart continuity", () => {
 				message: {
 					role: "user" as const,
 					content: [{ type: "text" as const, text: "after compaction" }],
-					timestamp: 3,
+					timestamp: 4,
 				},
 			},
 		);
@@ -52,9 +65,14 @@ describe("issue #6981 compaction restart continuity", () => {
 		const entry = residentEntry();
 		const eventContext = context(sessionFile, branch);
 		// The wiring must persist exactly what the next admission computes from this
-		// branch through the real session-manager projection (summary + kept user).
+		// branch through the real session-manager projection: summary, the kept
+		// pre-boundary user, and the post-boundary user - and NOT the summarised turn.
 		const expectedHashes = projectedHashes(branch);
-		expect(expectedHashes).toHaveLength(2);
+		expect(expectedHashes).toHaveLength(3);
+		const summarisedTurn = sentMessageHashes([
+			{ role: "user", content: [{ type: "text", text: "turn one" }], timestamp: 1 },
+		]);
+		expect(expectedHashes).not.toContain(summarisedTurn[0]);
 
 		await emit(extension.handlers, "message_end", { type: "message_end", message: assistant() }, eventContext);
 
