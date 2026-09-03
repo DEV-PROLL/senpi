@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SdkQueryHandle } from "../../../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import {
@@ -111,7 +112,7 @@ function fakeExtension(branch: BranchEntry[]) {
 	return { api, handlers, persisted };
 }
 
-function context(sessionFile: string, branch: BranchEntry[], messages: Context["messages"]): ExtensionContext {
+function context(sessionFile: string, branch: BranchEntry[], messages: AgentMessage[]): ExtensionContext {
 	return {
 		sessionManager: {
 			getSessionId: () => SESSION_ID,
