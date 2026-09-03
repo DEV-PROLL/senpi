@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Provider requests are no longer sent with `max_tokens` shrunk to a handful of tokens (down to 1) once the estimated context fills the model window. `buildBaseOptions` now throws `ContextWindowExhaustedError` when fewer than 1024 tokens of answer room remain after the safety margin (windows under 5120 tokens cannot hold that geometry and keep the previous behavior); the lazy API boundary surfaces it as an assistant error ("Context window exhausted: the conversation is estimated at X of Y tokens, leaving fewer than 1024 tokens for a response. Compact the conversation, enable auto-compaction, or start a new session before retrying.") that `isContextOverflow` classifies as a context overflow, so auto-compaction can recover when it is enabled and the user sees the real cause when it is not. Previously such requests returned truncated tool calls ("Tool call stream ended before completion") or a one-token "length" stop while billing the whole prompt.
+
 ### Removed
 
 ## [2026.9.3-3] - 2026-09-03
