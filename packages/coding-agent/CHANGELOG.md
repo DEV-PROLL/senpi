@@ -5,6 +5,7 @@
 ### Added
 
 - `/gpt-account` manages OpenAI Codex OAuth accounts the way `/claude-account` manages claude-sdk-oauth ones: `add` runs an interactive Codex login and stores the new account beside the existing ones, `remove <name>`, `pin <name>` and `unpin` select which account is used, and the bare command lists every stored account with its source, availability and pin state without printing token material.
+- RPC clients that send `media_placeholders` in `set_client_info` now receive inline tool-result images as `image_ref` placeholders shaped with `mimeType`, `byteLength` and a `{ toolCallId, contentIndex }` reference, and can retrieve an omitted image through the `get_media` command; default clients remain byte-identical, while classic stdio mode is not covered. This prevented inline image tool results from overflowing a desktop client's socket queue.
 
 ### Changed
 
