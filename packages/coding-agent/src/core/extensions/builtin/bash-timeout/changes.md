@@ -3,6 +3,25 @@
 Injects the default `timeout` into every `bash` call and appends the "Bash Tool Timeout Policy"
 section to the system prompt.
 
+## Timeout policy renders the reachable bash/monitor call form (2026-09-03)
+
+### What changed
+
+- `timeout.ts`: `buildBashTimeoutPrompt`'s second positional `foregroundWindowSeconds` parameter becomes a `BashTimeoutPromptOptions` object (`foregroundWindowSeconds?`, `evalOnly?`). Under `evalOnly` the wait-routing bullet names `tool.monitor({ command, filter })` and the background-session bullet names `tool.bash({ command, run_in_background: true })`; otherwise both keep their direct forms. The kill-deadline contract, the detach bullets, and their omission when no PTY bash is live are unchanged.
+- `index.ts`: the `before_agent_start` handler passes the resolved window and `evalOnly: isEvalOnlyRouting(pi)` through the new options object.
+
+### Why
+
+- The policy is appended to every system prompt and hardcoded `monitor({command, filter})`, so in any eval-routed session it pointed the model at a tool that is not on its direct tool list. The bullet that exists to stop sleep/poll waits was the one bullet naming an uncallable form.
+
+### Why an extension could not handle it
+
+- The policy text is built and appended by this builtin; only it can choose the call form for the session it is rendering into.
+
+### Expected merge conflict zones
+
+- LOW: both files are fork-only; the signature change is contained to this extension and its tests.
+
 ## Kill-deadline semantics (2026-08-07)
 
 ### What changed

@@ -70,7 +70,6 @@ const EXPECTED_CONCERN: Record<Gpt56ExecutionRuleId, Gpt56ExecutionConcern> = {
 	"over-call-bias": "tool-orchestration",
 	"in-kernel-reduction": "tool-orchestration",
 	"stay-direct-exceptions": "tool-orchestration",
-	"monitor-subscribe": "tool-orchestration",
 	delegation: "delegation",
 	"todo-granularity": "todo-discipline",
 	"test-first": "test-first",
@@ -84,7 +83,6 @@ const EXPECTED_SECTION: Record<Gpt56ExecutionRuleId, string> = {
 	"over-call-bias": "Working the Task",
 	"in-kernel-reduction": "Working the Task",
 	"stay-direct-exceptions": "Working the Task",
-	"monitor-subscribe": "Working the Task",
 	delegation: "Working the Task",
 	"todo-granularity": "Working the Task",
 	"lsp-symbol-routing": "Working the Task",
@@ -124,17 +122,13 @@ describe("GPT-5.6 execution discipline", () => {
 		}
 	});
 
-	it("renders the monitor directive only when the monitor tool is selected", () => {
+	it("leaves the wait-as-subscription stance to the eval tool description", () => {
 		// given
-		const withMonitor = buildPrompt("gpt-5.6", "gpt-5.6-sol", ["eval", "monitor", "read"]);
-		const withoutMonitor = buildPrompt("gpt-5.6", "gpt-5.6-sol", ["eval", "read"]);
-		const monitorRule = GPT56_EXECUTION_RULES.find((rule) => rule.id === "monitor-subscribe");
+		const prompt = buildPrompt("gpt-5.6", "gpt-5.6-sol", ["eval", "monitor", "read"]);
 
 		// then
-		expect(monitorRule).toBeDefined();
-		const directive = monitorRule?.directive ?? "";
-		expect(occurrences(withMonitor, directive)).toBe(1);
-		expect(withoutMonitor).not.toContain(directive);
+		expect(GPT56_EXECUTION_RULES.map((rule) => rule.id)).not.toContain("monitor-subscribe");
+		expect(prompt).not.toMatch(/register monitor with a filter/i);
 	});
 
 	it("keeps the shared GPT code-execution routing bridge at the orchestration point of use", () => {

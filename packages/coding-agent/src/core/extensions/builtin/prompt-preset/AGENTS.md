@@ -11,7 +11,7 @@ prompt-preset/
 ├── settings.ts          # PromptPresetName settings type ("auto" | family ids)
 ├── file-operations.ts   # Shared "use apply_patch, not python heredoc" tuning block (codex-style)
 ├── gpt-eval-routing.ts  # GPT-only bridge to eval's model-aware Tool Guidelines
-├── execution-tooling.ts # Shared eval/monitor stance rule data (`EXECUTION_TOOLING_RULES`, claude + kimi dialects, codex monitor wording) rendered only when `eval` / `monitor` are selected; wired into every Claude and Kimi preset, and GPT-5.6 imports the codex monitor rule
+├── execution-tooling.ts # Shared eval-routing stance rule data (`EXECUTION_TOOLING_RULES`, claude + kimi dialects) rendered only when `eval` is selected; wired into every Claude and Kimi preset. The wait-as-subscription stance is NOT here: `monitor` is eval-only, so that line lives in the eval tool description (`senpi-codemode/src/prompt/eval-prompt.ts`), which is the only surface that can teach the `tool.monitor(...)` form
 ├── gpt-5.ts             # GPT-5 baseline preset
 ├── gpt-5.2.ts           # GPT-5.2 preset
 ├── gpt-5.3-codex.ts     # GPT-5.3 Codex preset
@@ -40,7 +40,8 @@ prompt-preset/
 | Add a preset for a new model release | new `<family>.ts` + entry in `presets.ts` |
 | Tune GPT-5.x file-handling guidance | `file-operations.ts` (all GPT presets append it) |
 | Tune GPT-5.6 execution discipline (eval/parallel/TDD/commits/LSP) | `gpt-5.6.ts` `GPT56_EXECUTION_RULES` + `test/suite/prompt-presets-gpt-5-6.test.ts` |
-| Tune the eval-default / monitor-subscription stance for Claude, GLM, and Kimi presets | `execution-tooling.ts` + `test/suite/prompt-presets-execution-tooling.test.ts` |
+| Tune the eval-default stance for Claude, GLM, and Kimi presets | `execution-tooling.ts` + `test/suite/prompt-presets-execution-tooling.test.ts` |
+| Tune the wait-as-subscription (`tool.monitor`) stance | `senpi-codemode/src/prompt/eval-prompt.ts` (eval tool description), not this directory |
 | Tune GLM 5.x behavior | `glm-5.ts` `GLM5_TUNING` (both 5.2 and 5.3 render it) |
 | Adjust model-id → preset matching | `presets.ts` `resolvePresetName()` |
 | User override via settings | `settings.ts` `PromptPresetName` |

@@ -1,31 +1,27 @@
-// Execution-tooling stance shared by the Claude and Kimi presets (GPT-5.6 keeps
-// its own GPT56_EXECUTION_RULES and borrows only the codex monitor wording).
-// The eval tool description already teaches cell mechanics per dialect and the
-// terminal prompt already documents monitor; this module carries the ROUTING
-// decision those descriptions cannot make for the model - eval is the default
-// surface for any multi-call step, and every wait is a monitor subscription -
-// and renders only when the named tool is actually selected. Dialects follow
-// the prompt-engineering references: Claude takes a tagged block with
+// Execution-tooling stance shared by the Claude and Kimi presets. The eval tool
+// description already teaches cell mechanics per dialect and the terminal prompt
+// already documents monitor; this module carries the ROUTING decision those
+// descriptions cannot make for the model - eval is the default surface for any
+// multi-call step - and renders only when eval is actually selected. Dialects
+// follow the prompt-engineering references: Claude takes a tagged block with
 // uppercase key verbs; Kimi takes positive DO-framing with terminal conditions
 // and no all-caps NEVER (the K2.6 guidance says prohibitions make it overthink).
+//
+// The wait-as-subscription stance lives in the eval tool description instead:
+// `monitor` is reachable only through an eval cell, so a rule gated on it being
+// directly selected could never render, and only the description can teach the
+// `tool.monitor(...)` form the model must actually type.
 
-const MONITOR_SUBSCRIBE_CODEX =
-	"When a monitor tool is available, every wait on a long-running command, child task, or detached cell is a subscription: register monitor with a filter for the decisive line or sentinel, continue independent work or end the turn, and let the completion event wake you. Timed sleeps, retry loops, and repeated status reads do not count as waiting.";
+export type ExecutionToolingRuleId = "eval-default-surface" | "eval-real-code" | "eval-stay-direct";
 
-export type ExecutionToolingRuleId =
-	| "eval-default-surface"
-	| "eval-real-code"
-	| "eval-stay-direct"
-	| "monitor-subscribe";
-
-export type ExecutionToolingConcern = "code-cell-routing" | "async-waiting";
+export type ExecutionToolingConcern = "code-cell-routing";
 
 export type ExecutionToolingDialect = "claude" | "kimi";
 
 export interface ExecutionToolingRule {
 	readonly id: ExecutionToolingRuleId;
 	readonly concern: ExecutionToolingConcern;
-	readonly directive: Readonly<Record<ExecutionToolingDialect, string>> & { readonly codex?: string };
+	readonly directive: Readonly<Record<ExecutionToolingDialect, string>>;
 }
 
 export const EXECUTION_TOOLING_RULES = [
@@ -56,23 +52,10 @@ export const EXECUTION_TOOLING_RULES = [
 			kimi: "Use a direct tool call when one call is enough, when each result decides the next call, or when the action needs approval - then stop deliberating and make it.",
 		},
 	},
-	{
-		id: "monitor-subscribe",
-		concern: "async-waiting",
-		directive: {
-			claude:
-				"NEVER WAIT BY SLEEPING OR POLLING. Anything that takes time - a build, a test run, a deploy, a child task, a detached cell - is a SUBSCRIPTION: register `monitor` with a filter for the decisive line or sentinel, keep doing independent work or end the turn, and let the completion event wake you. A blind `sleep`, a timed retry loop, or a repeated status read is a defect.",
-			kimi: "**SUBSCRIBE TO EVERYTHING THAT TAKES TIME.** For a build, test run, deploy, child task, or detached cell, register `monitor` with a filter for the decisive line or sentinel, then continue independent work or end the turn; the completion event wakes you. The wait ends when that event arrives - a sleep, a timed retry, or a repeated status read is not the wait.",
-			codex: MONITOR_SUBSCRIBE_CODEX,
-		},
-	},
 ] as const satisfies readonly ExecutionToolingRule[];
-
-export const CODEX_MONITOR_SUBSCRIBE_DIRECTIVE = MONITOR_SUBSCRIBE_CODEX;
 
 const CONCERN_TOOL: Readonly<Record<ExecutionToolingConcern, string>> = {
 	"code-cell-routing": "eval",
-	"async-waiting": "monitor",
 };
 
 export interface BuildExecutionToolingSectionOptions {
@@ -80,7 +63,7 @@ export interface BuildExecutionToolingSectionOptions {
 	readonly dialect: ExecutionToolingDialect;
 }
 
-/** Directives for the selected tools, or "" when neither eval nor monitor is available. */
+/** Directives for the selected tools, or "" when eval is not available. */
 export function buildExecutionToolingSection(options: BuildExecutionToolingSectionOptions): string {
 	const paragraphs = EXECUTION_TOOLING_RULES.filter((rule) =>
 		options.toolNames.includes(CONCERN_TOOL[rule.concern]),
