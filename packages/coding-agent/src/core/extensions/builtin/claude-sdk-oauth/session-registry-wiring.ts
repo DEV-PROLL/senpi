@@ -142,20 +142,27 @@ export function registerSessionRegistry(
 		if (!sessionFile || !pi.appendEntry) return;
 		const context = ctx.sessionManager.buildSessionContext();
 		const hashes = sentMessageHashes(sentMessages({ ...context, messages: convertToLlm(context.messages) }));
+		const committedAssistantHash = assistantContentHash(event.message);
+		const recordFor = (markerEntryId: string) => {
+			const anchor = {
+				sessionPath: sessionFile,
+				sessionId,
+				markerEntryId,
+				assistantContentHash: committedAssistantHash,
+			};
+			return entry
+				? storedBindingFromEntry(entry, hashes, anchor)
+				: binding
+					? storedBindingFromBinding(binding, hashes, anchor)
+					: undefined;
+		};
+		// Validate before touching the branch: a rejected closed-entry fallback must
+		// not leave a marker-only entry that retires the still-valid older sidecar.
+		if (!recordFor("pending")) return;
 		pi.appendEntry(BINDING_ENTRY_TYPE, BINDING_MARKER);
 		const markerEntryId = ctx.sessionManager.getLeafId();
 		if (!markerEntryId) return;
-		const anchor = {
-			sessionPath: sessionFile,
-			sessionId,
-			markerEntryId,
-			assistantContentHash: assistantContentHash(event.message),
-		};
-		const stored = entry
-			? storedBindingFromEntry(entry, hashes, anchor)
-			: binding
-				? storedBindingFromBinding(binding, hashes, anchor)
-				: undefined;
+		const stored = recordFor(markerEntryId);
 		if (!stored) return;
 		await writeStoredBinding(sessionFile, stored);
 	});

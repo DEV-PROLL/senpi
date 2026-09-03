@@ -4,12 +4,7 @@ import { decideNativeContinuity } from "../../../src/core/extensions/builtin/cla
 import { forgetBinding, getBinding } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
 import { closeSession } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
 import { registerSessionRegistry } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-registry-wiring.ts";
-import {
-	sentHashPrefixDigest,
-	sentMessageHashes,
-	sentMessages,
-} from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
-import { convertToLlm } from "../../../src/core/messages.ts";
+import { sentHashPrefixDigest } from "../../../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
 import {
 	assistant,
 	cleanupRestartFixture,
@@ -17,6 +12,7 @@ import {
 	emit,
 	fakeExtension,
 	PROMPT_HASH,
+	projectedHashes,
 	residentEntry,
 	SESSION_ID,
 	sessionFixture,
@@ -30,43 +26,38 @@ afterEach(() => {
 describe("issue #6981 compaction restart continuity", () => {
 	it("persists the admission projection and reattaches after compaction", async () => {
 		const { sessionFile, branch } = sessionFixture();
-		branch[0] = { type: "message", id: "user-entry", message: { role: "user" as const, content: [], timestamp: 1 } };
-		const compactionSummary = {
-			role: "compactionSummary" as const,
-			summary: "Earlier work summarized.",
-			tokensBefore: 200_000,
-			timestamp: 2,
-		};
-		const currentUser = {
-			role: "user" as const,
-			content: [{ type: "text" as const, text: "after compaction" }],
-			timestamp: 3,
-		};
+		// A compacted branch: the original user turn is summarised away and one
+		// user message survives after the compaction boundary.
 		branch.push(
 			{
 				type: "compaction",
 				id: "compaction-entry",
-				parentId: "user-entry",
 				summary: "Earlier work summarized.",
-				firstKeptEntryId: "user-entry",
+				firstKeptEntryId: "current-user",
 				tokensBefore: 200_000,
 				timestamp: 2,
 			},
 			{
 				type: "message",
 				id: "current-user",
-				parentId: "compaction-entry",
-				message: { role: "user" as const, content: [], timestamp: 3 },
+				message: {
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "after compaction" }],
+					timestamp: 3,
+				},
 			},
 		);
 		const extension = fakeExtension(branch);
 		registerSessionRegistry(extension.api);
 		const entry = residentEntry();
-		const contextMessages = [compactionSummary, currentUser];
-		const eventContext = context(sessionFile, branch, contextMessages);
-		const expectedHashes = sentMessageHashes(sentMessages({ messages: convertToLlm(contextMessages) }));
+		const eventContext = context(sessionFile, branch);
+		// The wiring must persist exactly what the next admission computes from this
+		// branch through the real session-manager projection (summary + kept user).
+		const expectedHashes = projectedHashes(branch);
+		expect(expectedHashes).toHaveLength(2);
 
 		await emit(extension.handlers, "message_end", { type: "message_end", message: assistant() }, eventContext);
+
 		const stored = await readStoredBinding(sessionFile);
 		expect(stored).toMatchObject({
 			sessionId: SESSION_ID,
@@ -75,6 +66,8 @@ describe("issue #6981 compaction restart continuity", () => {
 			sentPrefixHash: sentHashPrefixDigest(expectedHashes),
 		});
 
+		// The lifecycle appends the committed assistant after the marker; a fresh
+		// process then restores the sidecar and admission reattaches at that prefix.
 		branch.push({ type: "message", id: "assistant-entry", message: assistant() });
 		closeSession(SESSION_ID, "process_exit");
 		forgetBinding(SESSION_ID);
@@ -86,7 +79,7 @@ describe("issue #6981 compaction restart continuity", () => {
 			decideNativeContinuity({
 				entry: undefined,
 				binding: restored,
-				currentHashes: expectedHashes,
+				currentHashes: projectedHashes(branch),
 				accountName: "default",
 				modelId: "claude-test",
 				fingerprint: { systemPromptHash: PROMPT_HASH, toolsetHash: TOOLSET_HASH },

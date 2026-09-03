@@ -36,12 +36,12 @@ afterEach(() => {
 
 describe("issue #6981 headless restart continuity", () => {
 	it("invalidates persisted continuity when the committed assistant is rewritten", async () => {
-		const { sessionFile, branch, contextMessages, turnHashes } = sessionFixture();
+		const { sessionFile, branch, turnHashes } = sessionFixture();
 		const extension = fakeExtension(branch);
 		registerSessionRegistry(extension.api);
 		const entry = residentEntry();
 		rememberBinding(bindingFromEntry(entry, turnHashes));
-		const eventContext = context(sessionFile, branch, contextMessages);
+		const eventContext = context(sessionFile, branch);
 
 		await emit(
 			extension.handlers,
@@ -66,12 +66,12 @@ describe("issue #6981 headless restart continuity", () => {
 	});
 
 	it("restores a sidecar-bound SDK lineage after a separate process starts", async () => {
-		const { sessionFile, branch, contextMessages, turnHashes } = sessionFixture();
+		const { sessionFile, branch, turnHashes } = sessionFixture();
 		const extension = fakeExtension(branch);
 		registerSessionRegistry(extension.api);
 		const entry = residentEntry();
 		rememberBinding(bindingFromEntry(entry, turnHashes));
-		const eventContext = context(sessionFile, branch, contextMessages);
+		const eventContext = context(sessionFile, branch);
 		recordSyncedStream(entry, turnHashes);
 		closeSession(SESSION_ID, "other");
 
@@ -126,6 +126,28 @@ describe("issue #6981 headless restart continuity", () => {
 		).toMatchObject({ kind: "reattach", reason: "registry_miss" });
 	});
 
+	it("leaves no marker when a closed-entry fallback binding does not match the branch", async () => {
+		// The resident entry is gone (process kept running after closeSession) and the
+		// remembered binding was minted for a DIFFERENT sent stream: the wiring must
+		// neither write a sidecar nor append a marker that would retire the last good one.
+		const { sessionFile, branch } = sessionFixture();
+		const extension = fakeExtension(branch);
+		registerSessionRegistry(extension.api);
+		const entry = residentEntry();
+		rememberBinding({
+			...bindingFromEntry(entry, ["stale-stream-hash"]),
+			sentPrefixHash: sentHashPrefixDigest(["stale-stream-hash"]),
+		});
+		closeSession(SESSION_ID, "attempt_discarded");
+		const eventContext = context(sessionFile, branch);
+
+		await emit(extension.handlers, "message_end", { type: "message_end", message: assistant() }, eventContext);
+
+		expect(await readStoredBinding(sessionFile)).toBeUndefined();
+		expect(extension.persisted).toEqual([]);
+		expect(branch.some((item) => item.type === "custom" && item.customType === BINDING_ENTRY_TYPE)).toBe(false);
+	});
+
 	it("anchors and reattaches a contentless first turn at count zero", async () => {
 		const { sessionFile, branch } = sessionFixture();
 		branch[0].message = { role: "user", content: [], timestamp: 1 };
@@ -134,7 +156,7 @@ describe("issue #6981 headless restart continuity", () => {
 		const entry = residentEntry();
 		entry.sentCount = 0;
 		entry.assistantUuidByIndex.clear();
-		const eventContext = context(sessionFile, branch, [{ role: "user", content: [], timestamp: 1 }]);
+		const eventContext = context(sessionFile, branch);
 
 		await emit(extension.handlers, "message_end", { type: "message_end", message: assistant() }, eventContext);
 		const stored = await readStoredBinding(sessionFile);

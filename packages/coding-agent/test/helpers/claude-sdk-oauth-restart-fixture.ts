@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { expect } from "vitest";
 import type { SdkQueryHandle } from "../../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
@@ -13,8 +12,10 @@ import {
 	overrideSessionRegistryBoundary,
 	resetSessionRegistryBoundary,
 } from "../../src/core/extensions/builtin/claude-sdk-oauth/session-registry.ts";
-import { sentMessageHashes } from "../../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
+import { sentMessageHashes, sentMessages } from "../../src/core/extensions/builtin/claude-sdk-oauth/session-sync.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../src/core/extensions/types.ts";
+import { convertToLlm } from "../../src/core/messages.ts";
+import { buildSessionContext, type SessionEntry } from "../../src/core/session-manager.ts";
 
 /** Shared fixture for the issue #6981 restart-continuity regressions (lifecycle + compaction re-anchor). */
 export type EventHandler = (event: unknown, ctx: ExtensionContext) => unknown;
@@ -94,16 +95,35 @@ export function fakeExtension(branch: BranchEntry[]) {
 	return { api, handlers, persisted };
 }
 
-export function context(sessionFile: string, branch: BranchEntry[], messages: AgentMessage[]): ExtensionContext {
+/**
+ * Extension context whose `buildSessionContext()` is the REAL session-manager
+ * projection of `branch` (walks parent ids from the leaf, applies compaction
+ * entries), so tests prove the digest the wiring persists equals what admission
+ * computes from the same branch. Entries are chained through `parentId` in
+ * array order when a test did not set one explicitly.
+ */
+export function context(sessionFile: string, branch: BranchEntry[]): ExtensionContext {
+	const entries = (): SessionEntry[] =>
+		branch.map((entry, index) => ({
+			timestamp: new Date(entry.timestamp ?? index + 1).toISOString(),
+			parentId: index === 0 ? null : (branch[index - 1]?.id ?? null),
+			...entry,
+		})) as unknown as SessionEntry[];
 	return {
 		sessionManager: {
 			getSessionId: () => SESSION_ID,
 			getSessionFile: () => sessionFile,
 			getBranch: () => branch,
 			getLeafId: () => branch[branch.length - 1]?.id ?? null,
-			buildSessionContext: () => ({ messages }),
+			buildSessionContext: () => buildSessionContext(entries(), branch[branch.length - 1]?.id ?? null),
 		},
 	} as unknown as ExtensionContext;
+}
+
+/** The admission-side projection of a branch: the same hashes `message_end` persists. */
+export function projectedHashes(branch: BranchEntry[]): string[] {
+	const ctx = context("", branch).sessionManager.buildSessionContext();
+	return sentMessageHashes(sentMessages({ ...ctx, messages: convertToLlm(ctx.messages) }));
 }
 
 export async function emit(
