@@ -1,5 +1,25 @@
 # claude-sdk-oauth
 
+## 2026-09-03 - Persist compaction-aware restart bindings
+
+### What changed
+
+- `session-binding.ts`: requires a matching sent-prefix digest for closed-entry fallback bindings, and admits only labels, approved metadata, goal-cache warmups, and the goal-continuation custom message after a committed assistant.
+- `session-registry-wiring.ts`: hashes the converted, compaction-aware session context at `message_end`, including an empty transmitted-message list, and falls back to a verified binding when the resident entry has already closed.
+
+### Why
+
+- Restart persistence must use the same provider-visible projection as admission, preserve valid count-zero anchors, and fail closed when lineage identity is unavailable or later conversation may already have reached the SDK.
+
+### Why an extension could not handle it
+
+- The SDK sent-stream digest, resident binding lifecycle, and restart sidecar are private to this builtin provider lane; no external extension hook can safely reconstruct them at `message_end`.
+
+### Expected merge conflict zones
+
+- MEDIUM: `session-binding.ts` around stored-binding identity checks and safe suffix validation.
+- MEDIUM: `session-registry-wiring.ts` at the `message_end` persistence boundary and converted context hashing.
+
 ## 2026-09-03 - Classify Fable usage-credit failures as entitlement
 
 ### What changed

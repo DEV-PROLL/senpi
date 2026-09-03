@@ -9,6 +9,7 @@
 ### Changed
 
 ### Fixed
+- Claude SDK OAuth restart continuity now persists from the compaction-aware active context, survives goal-continuation metadata and a resident entry closing before `message_end`, and therefore avoids flattening and re-sending an oversized full transcript after restart.
 
 - Multi-session RPC socket clients no longer lose assistant text when they fall behind: a queued `message_update` snapshot superseded by a newer one is now delivered in its delta-only form instead of being replaced, so `text_delta` streams stay lossless the way the stdout path already was. A stalled omo-desktop reader had lost a 411-character window and rendered a message that started mid-word.
 - A multi-session RPC socket whose per-connection event queue overflows is now closed (after the `overflow` record), instead of being left open while the host silently dropped every later record and command response for it; the client reconnects and resyncs. The overflow is reported to stderr with the queued/incoming/max byte counts and a preview of the offending record, and the default per-connection cap rises from 4 MiB to 64 MiB, which four inline image tool results had exceeded in one burst.
