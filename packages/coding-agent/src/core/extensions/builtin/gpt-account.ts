@@ -4,8 +4,10 @@ import {
 	removeCredentialAccount,
 } from "../../../core/credential-accounts.ts";
 import type { ExtensionAPI, ExtensionCommandContext } from "../types.ts";
+import { emitProviderAccountsChanged } from "./claude-sdk-oauth/account-events.ts";
 
 const OPENAI_CODEX_PROVIDER_ID = "openai-codex";
+const LOGIN_CANCELLED_MESSAGE = "Login cancelled";
 
 function parseArgs(rawArgs: string): string[] {
 	return rawArgs.trim().split(/\s+/).filter(Boolean);
@@ -49,14 +51,17 @@ async function addAccount(ctx: ExtensionCommandContext): Promise<void> {
 			signal: ctx.signal,
 			prompt: async (prompt) => {
 				const answer = await ctx.ui.input(prompt.message);
-				if (answer === undefined) throw new Error("Login cancelled");
+				if (answer === undefined) throw new Error(LOGIN_CANCELLED_MESSAGE);
 				return answer;
 			},
 			notify: (event) => ctx.ui.notify(authEventMessage(event), "info"),
 		});
+		emitProviderAccountsChanged(OPENAI_CODEX_PROVIDER_ID);
 		ctx.ui.notify("OpenAI Codex OAuth account added.", "info");
 	} catch (error) {
-		ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+		const message = error instanceof Error ? error.message : String(error);
+		if (message === LOGIN_CANCELLED_MESSAGE) return;
+		ctx.ui.notify(message, "error");
 	}
 }
 

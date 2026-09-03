@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
 import accountExtension from "../../src/core/extensions/builtin/account/index.ts";
+import { subscribeProviderAccountEvents } from "../../src/core/extensions/builtin/claude-sdk-oauth/account-events.ts";
 import gptAccountExtension from "../../src/core/extensions/builtin/gpt-account.ts";
 import type { ExtensionAPI, ExtensionCommandContext, RegisteredCommand } from "../../src/core/extensions/types.ts";
 
@@ -177,5 +178,97 @@ describe("/gpt-account command", () => {
 
 		await command.handler("unpin", ctx);
 		expect(storage.get("openai-codex")).not.toHaveProperty("pinned");
+	});
+
+	function createLoginContext(login: (provider: string, method: string) => Promise<void>): {
+		ctx: ExtensionCommandContext;
+		notices: Notice[];
+		logins: string[];
+	} {
+		const { ctx, notices } = createContext();
+		const logins: string[] = [];
+		const runtime = {
+			login: async (provider: string, method: string) => {
+				logins.push(`${provider}:${method}`);
+				await login(provider, method);
+			},
+		};
+		Object.assign(ctx.modelRegistry, { modelRuntime: runtime });
+		return { ctx, notices, logins };
+	}
+
+	it("add runs an openai-codex oauth login and announces the new account", async () => {
+		const changed: string[] = [];
+		const unsubscribe = subscribeProviderAccountEvents((event) => {
+			if (event.type === "accounts_changed") changed.push(event.provider);
+		});
+		const { ctx, notices, logins } = createLoginContext(async () => {});
+
+		try {
+			await registeredGptCommand().handler("add", ctx);
+		} finally {
+			unsubscribe();
+		}
+
+		expect(logins).toEqual(["openai-codex:oauth"]);
+		expect(notices.at(-1)).toMatchObject({ message: "OpenAI Codex OAuth account added.", type: "info" });
+		expect(changed).toEqual(["openai-codex"]);
+	});
+
+	it("add stays silent when the user cancels the login prompt", async () => {
+		const changed: string[] = [];
+		const unsubscribe = subscribeProviderAccountEvents((event) => {
+			if (event.type === "accounts_changed") changed.push(event.provider);
+		});
+		const { ctx, notices } = createLoginContext(async () => {
+			throw new Error("Login cancelled");
+		});
+
+		try {
+			await registeredGptCommand().handler("add", ctx);
+		} finally {
+			unsubscribe();
+		}
+
+		expect(notices).toEqual([]);
+		expect(changed).toEqual([]);
+	});
+
+	it("add surfaces a real login failure as an error notice", async () => {
+		const { ctx, notices } = createLoginContext(async () => {
+			throw new Error("authorization server rejected the code");
+		});
+
+		await registeredGptCommand().handler("add", ctx);
+
+		expect(notices.at(-1)).toMatchObject({ message: "authorization server rejected the code", type: "error" });
+	});
+
+	it("remove deletes exactly the named account", async () => {
+		await storage.modify("openai-codex", async () => ({
+			type: "oauth",
+			access: "access-secret",
+			refresh: "refresh-secret",
+			expires: 1,
+			accounts: [
+				{ name: "default", access: "access-secret", refresh: "refresh-secret", expires: 1, source: "login" },
+				{ name: "work", access: "work-access", refresh: "work-refresh", expires: 1, source: "login" },
+			],
+		}));
+		const { ctx, notices } = createContext();
+
+		await registeredGptCommand().handler("remove work", ctx);
+
+		expect(notices.at(-1)?.message).toContain("Removed OpenAI Codex OAuth account 'work'");
+		expect(storage.listSlots("openai-codex").map((slot) => slot.name)).toEqual(["default"]);
+	});
+
+	it("remove without a name reports usage instead of removing anything", async () => {
+		const { ctx, notices } = createContext();
+
+		await registeredGptCommand().handler("remove", ctx);
+
+		expect(notices.at(-1)?.type).toBe("error");
+		expect(notices.at(-1)?.message).toContain("Usage: /gpt-account");
 	});
 });
