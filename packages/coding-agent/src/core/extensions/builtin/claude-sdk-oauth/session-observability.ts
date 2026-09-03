@@ -44,6 +44,7 @@ export type ContinuityReason =
 	| "resume_mode_off"
 	| "query_failed"
 	| "turn_attribution_failed"
+	| "session_unconfirmed"
 	| "abort_timeout"
 	| "extensions_removed"
 	| "session_shutdown"

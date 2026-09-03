@@ -57,16 +57,33 @@ function replay(uuid: string, sessionId: string): SDKMessage {
 	} as SDKMessage;
 }
 
-function result(uuid: string, sessionId: string, isError: boolean): SDKMessage {
+const API_FAILURE =
+	"API Error: 400 Claude Code 2.1.241 does not support this model; version 2.1.251 or newer is required.";
+const RESUME_MISSING = "Claude Code returned an error result: No conversation found with session ID: dead-id";
+
+function result(uuid: string, sessionId: string, failure: string | false): SDKMessage {
 	return {
 		type: "result",
 		subtype: "success",
 		user_message_uuid: uuid,
 		uuid: "result",
 		session_id: sessionId,
-		is_error: isError,
-		result: isError ? "No conversation found with session ID" : "done",
+		is_error: failure !== false,
+		result: failure === false ? "done" : failure,
 	} as unknown as SDKMessage;
+}
+
+/** The NEXT user turn's admission (a new message, so the same-turn retry checkpoint does not apply). */
+function decide(binding: ReturnType<typeof getBinding>) {
+	return decideNativeContinuity({
+		entry: undefined,
+		binding: binding ? { ...binding, sentPrefixHash: undefined } : undefined,
+		currentHashes: [...HASHES, "next-turn-hash"],
+		accountName: "default",
+		modelId: "claude-test",
+		fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
+		transcriptAvailable: true,
+	});
 }
 
 function init(sessionId: string): SDKMessage {
@@ -108,26 +125,43 @@ afterEach(() => {
 });
 
 describe("claude-sdk-oauth unconfirmed continuity bindings", () => {
-	it("forgets a cold-seed id when failure arrives before init confirmation", async () => {
+	it("never resumes a cold-seed id that failed before the SDK acknowledged it (#7562)", async () => {
 		const { query, entry, attempt } = fixture();
 		const consuming = consume(attempt.messages);
 		const submitted = await submittedMessage(entry);
-		query.emit(result(submitted.uuid!, entry.sdkSessionId, true));
+		// Neither init nor a replay echo arrived: the id was only ever minted locally.
+		query.emit(result(submitted.uuid!, entry.sdkSessionId, API_FAILURE));
+
+		await expect(consuming).rejects.toThrow("does not support this model");
+		expect(getSession(SESSION_ID)).toBeUndefined();
+		const binding = getBinding(SESSION_ID);
+		expect(binding).toMatchObject({ sdkSessionId: entry.sdkSessionId, sdkSessionIdConfirmed: false });
+		// A cold seed, not a resume of the dead id.
+		expect(decide(binding)).toEqual({ kind: "flatten", reason: "session_unconfirmed" });
+	});
+
+	it("confirms the id from the SDK's replay echo even without an init message", async () => {
+		const { query, entry, attempt } = fixture();
+		const consuming = consume(attempt.messages);
+		const submitted = await submittedMessage(entry);
+		query.emit(replay(submitted.uuid!, entry.sdkSessionId));
+		query.emit(result(submitted.uuid!, entry.sdkSessionId, API_FAILURE));
+
+		await expect(consuming).rejects.toThrow("does not support this model");
+		const binding = getBinding(SESSION_ID);
+		expect(binding).toMatchObject({ sdkSessionId: entry.sdkSessionId, sdkSessionIdConfirmed: true });
+		expect(decide(binding).kind).toBe("reattach");
+	});
+
+	it("forgets a resumed id that Claude Code reports as missing", async () => {
+		const { query, entry, attempt } = fixture("sdk-dead");
+		const consuming = consume(attempt.messages);
+		const submitted = await submittedMessage(entry);
+		query.emit(result(submitted.uuid!, "sdk-dead", RESUME_MISSING));
 
 		await expect(consuming).rejects.toThrow("No conversation found");
-		expect(getSession(SESSION_ID)).toBeUndefined();
 		expect(getBinding(SESSION_ID)).toBeUndefined();
-		expect(
-			decideNativeContinuity({
-				entry: undefined,
-				binding: undefined,
-				currentHashes: HASHES,
-				accountName: "default",
-				modelId: "claude-test",
-				fingerprint: { toolsetHash: "tools-v1", systemPromptHash: "prompt-v1" },
-				transcriptAvailable: false,
-			}),
-		).toEqual({ kind: "bootstrap" });
+		expect(decide(getBinding(SESSION_ID))).toEqual({ kind: "bootstrap" });
 	});
 
 	it("retains a retry checkpoint after init confirms the SDK session id", async () => {
@@ -137,10 +171,14 @@ describe("claude-sdk-oauth unconfirmed continuity bindings", () => {
 		const confirmedId = "sdk-confirmed";
 		query.emit(init(confirmedId));
 		query.emit(replay(submitted.uuid!, confirmedId));
-		query.emit(result(submitted.uuid!, confirmedId, true));
+		query.emit(result(submitted.uuid!, confirmedId, API_FAILURE));
 
-		await expect(consuming).rejects.toThrow("No conversation found");
-		expect(getBinding(SESSION_ID)).toMatchObject({ sdkSessionId: confirmedId, sentCount: 0 });
+		await expect(consuming).rejects.toThrow("does not support this model");
+		expect(getBinding(SESSION_ID)).toMatchObject({
+			sdkSessionId: confirmedId,
+			sentCount: 0,
+			sdkSessionIdConfirmed: true,
+		});
 	});
 
 	it("records a successful confirmed turn exactly as before", async () => {
@@ -154,6 +192,7 @@ describe("claude-sdk-oauth unconfirmed continuity bindings", () => {
 		await consuming;
 		expect(getBinding(SESSION_ID)).toMatchObject({
 			sdkSessionId: entry.sdkSessionId,
+			sdkSessionIdConfirmed: true,
 			sentCount: 1,
 			sentHashes: HASHES,
 		});
@@ -164,10 +203,13 @@ describe("claude-sdk-oauth unconfirmed continuity bindings", () => {
 		const { query, entry, attempt } = fixture(resumedId);
 		const consuming = consume(attempt.messages);
 		const submitted = await submittedMessage(entry);
-		query.emit(replay(submitted.uuid!, resumedId));
-		query.emit(result(submitted.uuid!, resumedId, true));
+		query.emit(result(submitted.uuid!, resumedId, API_FAILURE));
 
-		await expect(consuming).rejects.toThrow("No conversation found");
-		expect(getBinding(SESSION_ID)).toMatchObject({ sdkSessionId: resumedId, sentCount: 0 });
+		await expect(consuming).rejects.toThrow("does not support this model");
+		expect(getBinding(SESSION_ID)).toMatchObject({
+			sdkSessionId: resumedId,
+			sentCount: 0,
+			sdkSessionIdConfirmed: true,
+		});
 	});
 });

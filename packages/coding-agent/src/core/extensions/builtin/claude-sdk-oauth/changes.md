@@ -1,27 +1,27 @@
 # claude-sdk-oauth
 
-## 2026-09-03 - Never resume an SDK session id that init never confirmed
+## 2026-09-03 - Never resume an SDK session id the SDK never acknowledged
 
 ### What changed
 
-- `session-registry.ts`: resident entries now track whether the SDK confirmed their session id; resumed entries start confirmed while cold-seeded ids start provisional.
-- `session-registry-pump.ts`: `system/init` confirms the entry's SDK session id, including when the SDK changes it.
-- `session-turn-attempt.ts`: continuity bindings are published only after confirmation; failed provisional attempts forget any existing binding.
-- `claude-sdk-oauth-unconfirmed-binding.test.ts`: covers provisional failure cleanup, confirmed failures and successes, and resumed entries.
+- `session-registry.ts`: `ClaudeSdkOauthSessionEntry.sdkSessionIdConfirmed` records whether the SDK acknowledged the entry's session id; entries created from a resume start confirmed, entries whose id `getOrCreate` minted locally start unconfirmed.
+- `session-registry-pump.ts`: a `system`/`init` message and the replay echo that claims the turn both mark the entry confirmed (either proves Claude Code runs under that id).
+- `session-reattach.ts`: `ContinuityBinding.sdkSessionIdConfirmed` carries the flag; `bindingFromEntry` copies it.
+- `session-turn-attempt.ts`: bindings are published with the flag instead of silently; an attempt whose failure says `No conversation found with session ID` forgets the binding outright, because Claude Code has declared the bound id dead.
+- `session-continuity.ts`: `withoutUnconfirmedResume` turns a `reattach`/`fork` decision on an unconfirmed binding into `flatten` with the new reason `session_unconfirmed`; same-turn retry checkpoints (`timeout_retry`) are unaffected because they never resume the id.
+- `session-observability.ts`: `ContinuityReason` gains `session_unconfirmed`.
 
 ### Why
 
-- A failed cold-seed attempt could publish its locally minted SDK id before Claude Code confirmed it, poisoning subsequent admissions with a permanently unresumable binding ([oh-my-openagent#7562](https://github.com/code-yeongyu/oh-my-openagent/issues/7562)).
+- oh-my-openagent#7562: switching a long session to `claude-sdk-oauth` cold-seeds with a locally minted id; when that first attempt fails before Claude Code echoes anything (result before replay claim, API error), the retry checkpoint still carried the unconfirmed id, the next turn chose `reattach`, Claude Code answered `No conversation found with session ID`, and every later turn repeated the cycle with zero usage. Resuming is now gated on acknowledgement, and an id Claude Code reports missing is dropped instead of retried.
 
 ### Why an extension could not handle it
 
-- Session ids are minted, confirmed, and published inside the builtin resident SDK pump before any extension-facing stream event can correct the continuity binding.
+- Continuity decisions and binding publication are private to this builtin's resident-session lane; no extension hook sees the `init`/replay frames or the binding map.
 
 ### Expected merge conflict zones
 
-- LOW in `session-registry.ts` around entry construction, `session-registry-pump.ts` around init handling, and `session-turn-attempt.ts` around binding publication.
-- NEW test in `claude-sdk-oauth-unconfirmed-binding.test.ts`.
-
+- LOW: `session-continuity.ts` `decideNativeContinuity` entry branch, `session-turn-attempt.ts` publish/catch paths, `session-registry-pump.ts` init/claim handling, the `ContinuityReason` union.
 ## 2026-09-03 - Map malformed content entries to text instead of broken image blocks
 
 ### What changed

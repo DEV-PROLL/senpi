@@ -34,12 +34,11 @@ function recordAssistantUuid(entry: ClaudeSdkOauthSessionEntry, sentCount: numbe
  * SAME turn's retry fork past the orphaned message instead of appending it
  * twice (issue #723 retry storm). In-memory only — nothing here is persisted.
  */
+/** Claude Code answered "No conversation found with session ID": the bound id is dead, never resume it again. */
+const RESUME_TARGET_MISSING = /no conversation found with session id/i;
+
 function publishBinding(entry: ClaudeSdkOauthSessionEntry, binding: Parameters<typeof rememberBinding>[0]): void {
-	if (!entry.sdkSessionIdConfirmed) {
-		forgetBinding(entry.senpiSessionId);
-		return;
-	}
-	rememberBinding(binding);
+	rememberBinding({ ...binding, sdkSessionIdConfirmed: entry.sdkSessionIdConfirmed });
 }
 
 function rememberRetryCheckpoint(entry: ClaudeSdkOauthSessionEntry, hashes: readonly string[]): void {
@@ -86,7 +85,11 @@ export function createSessionTurnAttempt(
 				// The queue failed (completion rejected: pump failure, query end,
 				// attribution error). The payload was still pushed, so the retry needs
 				// the same checkpoint the aborted path records.
-				rememberRetryCheckpoint(entry, hashes);
+				if (error instanceof Error && RESUME_TARGET_MISSING.test(error.message)) {
+					forgetBinding(entry.senpiSessionId);
+				} else {
+					rememberRetryCheckpoint(entry, hashes);
+				}
 				throw error;
 			} finally {
 				staged.emit();
