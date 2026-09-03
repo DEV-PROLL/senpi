@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import * as errors from "../src/core/extensions/builtin/claude-sdk-oauth/errors.ts";
+import { withAuthGuidance } from "../src/core/extensions/builtin/claude-sdk-oauth/stream-guidance.ts";
+
+const fableUsageCredits =
+	"Claude Code returned an error result: Fable 5 requires usage credits. Run /usage-credits to continue or switch models with /model.";
+const entitlementGuidance =
+	"This model needs usage credits on the selected Claude account (it is not included in the subscription). Switch models with /model, enable usage credits at claude.com, or pick another account with /claude-account pin <name>.";
 
 const versionFloor = {
 	type: "result",
@@ -57,5 +63,13 @@ describe("Claude SDK OAuth error extraction", () => {
 			retryable: true,
 		});
 		expect(errors.classifySdkError("invalid_grant")).toEqual({ kind: "auth_error", retryable: true });
+	});
+
+	it("classifies Fable usage-credit prose as a non-retryable entitlement", () => {
+		expect(errors.classifySdkError(fableUsageCredits)).toEqual({ kind: "entitlement", retryable: false });
+		expect(errors.classifySdkError("credits_required")).toEqual({ kind: "entitlement", retryable: false });
+		const guided = withAuthGuidance(fableUsageCredits, fableUsageCredits);
+		expect(guided.startsWith(fableUsageCredits)).toBe(true);
+		expect(guided).toContain(entitlementGuidance);
 	});
 });
