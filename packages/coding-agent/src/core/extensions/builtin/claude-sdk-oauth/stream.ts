@@ -162,7 +162,11 @@ export function streamClaudeSdkOauth(
 						: message.type === "result"
 							? sdkResultFailure(message)
 							: undefined;
-				if (failure) throw failure;
+				if (failure) {
+					// An error result still bills its tokens; account for them before failing.
+					if (message.type === "result" && message.usage) updateUsage(model, output, message.usage);
+					throw failure;
+				}
 				if (!started) {
 					stream.push({ type: "start", partial: output });
 					started = true;

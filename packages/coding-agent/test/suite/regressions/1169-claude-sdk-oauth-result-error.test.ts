@@ -24,6 +24,37 @@ const model = {
 };
 
 describe("regression #1169: Claude SDK is_error results", () => {
+	it("keeps the usage an is_error result reports", async () => {
+		overrideSdkBoundary({
+			query: () => ({
+				async *[Symbol.asyncIterator]() {
+					yield message({
+						type: "result",
+						subtype: "success",
+						is_error: true,
+						api_error_status: 429,
+						result: "API failure",
+						usage: {
+							input_tokens: 7,
+							output_tokens: 3,
+							cache_read_input_tokens: 11,
+							cache_creation_input_tokens: 5,
+						},
+					});
+				},
+				async interrupt() {},
+				close() {},
+			}),
+		});
+		try {
+			const failure = await streamClaudeSdkOauth(model, { messages: [] }).result();
+			expect(failure.stopReason).toBe("error");
+			expect(failure.usage).toMatchObject({ input: 7, output: 3, cacheRead: 11, cacheWrite: 5, totalTokens: 26 });
+		} finally {
+			resetSdkBoundary();
+		}
+	});
+
 	it("fails a success-subtype session limit and preserves ordinary success", async () => {
 		overrideSdkBoundary({
 			query: () => ({
