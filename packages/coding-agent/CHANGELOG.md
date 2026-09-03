@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- RPC logins now answer providers' mid-flow prompts over the extension UI dialog channel (`extension_ui_request` `input` for pasted codes, text, and secrets; `select` for account choices) and release an unanswered dialog when the login settles, so Anthropic Claude Pro/Max and other prompt-driven OAuth flows complete through the browser callback instead of failing with `Interactive login input is not supported over RPC` and a dead callback port ([#1316](https://github.com/code-yeongyu/senpi/issues/1316)).
 - Bundled Claude Code is now 2.1.259 via `@anthropic-ai/claude-agent-sdk` 0.3.259, so `claude-sdk-oauth` sessions on `claude-fable-5-1` no longer fail with the API 400 that required version 2.1.251 or newer ([#1298](https://github.com/code-yeongyu/senpi/issues/1298)).
 - Claude SDK OAuth maps malformed or raw-string content entries to text (or an omission placeholder) instead of image blocks with undefined `media_type`/`data`, which made Claude Code abort the next query ([oh-my-openagent#7660](https://github.com/code-yeongyu/oh-my-openagent/issues/7660)).
 - A second `claude-sdk-oauth` login now stores the newly issued OAuth tokens instead of a broken slot holding the managed placeholder, and no longer fails with `Provider is not configured: claude-sdk-oauth` when account rotation has selected a single account ([#1279](https://github.com/code-yeongyu/senpi/issues/1279)).
