@@ -10,6 +10,7 @@ import {
 import { getSessionClaudeAccountPin } from "./account-command.ts";
 import { queryWithAuthLane } from "./auth-lane.ts";
 import { buildCustomToolServers } from "./custom-tools.ts";
+import { sdkAssistantFailure, sdkResultFailure } from "./errors.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
 import { buildClaudeSdkOauthQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
@@ -20,7 +21,6 @@ import { type ContinuityObservation, emitContinuityObservation } from "./session
 import { residentSessionMessages } from "./session-stream.ts";
 import { loadClaudeSdkOauthProviderSettingsFromDisk } from "./settings.ts";
 import { applyStreamEvent } from "./stream-events.ts";
-import { sdkAssistantFailure, sdkResultFailure } from "./errors.ts";
 import { withAuthGuidance } from "./stream-guidance.ts";
 import { emptyOutput, errorMessage, mapStopReason, type StreamBlock, updateUsage } from "./stream-protocol.ts";
 import { toolWatch } from "./tool-watch.ts";

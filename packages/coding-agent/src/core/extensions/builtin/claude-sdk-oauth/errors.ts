@@ -46,9 +46,14 @@ export function sdkResultFailure(message: Extract<SDKMessage, { type: "result" }
 	const errors = "errors" in message && Array.isArray(message.errors) ? message.errors : [];
 	const firstError = errors.find((error): error is string => typeof error === "string" && error.length > 0);
 	const resultText = "result" in message && typeof message.result === "string" ? message.result.trim() : "";
-	const detail = firstError ?? (message.is_error === true && resultText ? resultText : undefined) ?? `Claude Code ${message.subtype}`;
-	const status = "api_error_status" in message && message.api_error_status != null ? `HTTP ${message.api_error_status}` : "";
-	const reason = "terminal_reason" in message && typeof message.terminal_reason === "string" ? message.terminal_reason : "";
+	const detail =
+		firstError ??
+		(message.is_error === true && resultText ? resultText : undefined) ??
+		`Claude Code ${message.subtype}`;
+	const status =
+		"api_error_status" in message && message.api_error_status != null ? `HTTP ${message.api_error_status}` : "";
+	const reason =
+		"terminal_reason" in message && typeof message.terminal_reason === "string" ? message.terminal_reason : "";
 	const suffix = [status, reason].filter(Boolean).join(", ");
 	return new Error(suffix ? `${detail} (${suffix})` : detail);
 }
@@ -56,12 +61,13 @@ export function sdkResultFailure(message: Extract<SDKMessage, { type: "result" }
 export function sdkAssistantFailure(message: Extract<SDKMessage, { type: "assistant" }>): Error | undefined {
 	if (!message.error) return undefined;
 	const content = message.message.content;
-	const text = (typeof content === "string"
-		? content
-		: content
-				.filter((block) => block.type === "text" && "text" in block && typeof block.text === "string")
-				.map((block) => ("text" in block && typeof block.text === "string" ? block.text : ""))
-				.join(" ")
+	const text = (
+		typeof content === "string"
+			? content
+			: content
+					.filter((block) => block.type === "text" && "text" in block && typeof block.text === "string")
+					.map((block) => ("text" in block && typeof block.text === "string" ? block.text : ""))
+					.join(" ")
 	).trim();
 	return new Error(text ? (message.error === "unknown" ? text : `${text} (${message.error})`) : message.error);
 }
@@ -69,7 +75,11 @@ export function sdkAssistantFailure(message: Extract<SDKMessage, { type: "assist
 /** Classifies Claude SDK OAuth error codes and HTTP-shaped fallback text in one place. */
 export function classifySdkError(error: unknown): SdkErrorClassification {
 	const text = errorText(error).toLowerCase();
-	if (/\b(enotfound|eai_again|econnreset|econnrefused|etimedout|enetunreach|ehostunreach|und_err_connect_timeout|und_err_socket)\b|fetch failed|socket hang up|connection reset by peer/.test(text)) {
+	if (
+		/\b(enotfound|eai_again|econnreset|econnrefused|etimedout|enetunreach|ehostunreach|und_err_connect_timeout|und_err_socket)\b|fetch failed|socket hang up|connection reset by peer/.test(
+			text,
+		)
+	) {
 		return { kind: "other", retryable: true };
 	}
 	for (const [code, classification] of Object.entries(SDK_ERROR_CLASSIFICATIONS)) {

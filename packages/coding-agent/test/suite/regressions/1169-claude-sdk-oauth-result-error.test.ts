@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import {
+	overrideSdkBoundary,
+	resetSdkBoundary,
+	type SDKMessage,
+} from "../../../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import { streamClaudeSdkOauth } from "../../../src/core/extensions/builtin/claude-sdk-oauth/stream.ts";
-import { overrideSdkBoundary, resetSdkBoundary, type SDKMessage } from "../../../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 
 function message(value: unknown): SDKMessage {
 	return value as SDKMessage;

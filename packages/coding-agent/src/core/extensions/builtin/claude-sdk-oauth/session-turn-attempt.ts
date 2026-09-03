@@ -15,7 +15,8 @@ type StagedContinuityDecision = { emit(): void };
 
 function successfulTurn(messages: readonly SDKMessage[]): boolean {
 	return messages.some(
-		(message) => message.type === "result" && message.subtype === "success" && sdkResultFailure(message) === undefined,
+		(message) =>
+			message.type === "result" && message.subtype === "success" && sdkResultFailure(message) === undefined,
 	);
 }
 
