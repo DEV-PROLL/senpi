@@ -27,6 +27,11 @@ export { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
 
 export const EXPIRING_WITHIN_MS = 5 * 60_000;
 
+/** A managed lane with an empty pool must refuse rather than spawn the SDK against ambient host credentials. */
+const NO_MANAGED_ACCOUNTS_ERROR =
+	"authentication_failed: No Claude SDK OAuth accounts configured for the managed lane; " +
+	"run /login claude-sdk-oauth or set CLAUDE_CODE_OAUTH_TOKEN";
+
 type AuthLaneBoundary = {
 	createStore: () => CredentialStore;
 	env: () => NodeJS.ProcessEnv;
@@ -113,7 +118,8 @@ async function managedPool(
 	const configuredLane = resolveEffectiveLane(settings, accounts);
 	const lane =
 		configuredLane === "config-dir" && hasRequestOauthToken(requestEnvironment) ? "oauth-slots" : configuredLane;
-	if (lane === "ambient" || accounts.length === 0) return undefined;
+	if (lane === "ambient") return undefined;
+	if (accounts.length === 0) throw new Error(NO_MANAGED_ACCOUNTS_ERROR);
 	const stored = credential?.type === "oauth" ? (credential as ClaudeSdkOauthCredential) : undefined;
 	return { accounts, environment, lane, pinnedAccount: settings.pinnedAccount ?? stored?.pinned, store };
 }
