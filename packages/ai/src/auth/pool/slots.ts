@@ -144,8 +144,16 @@ function nextLoginSlotName(credential: PooledCredential): string {
  * Appends an unnamed flat credential to a pool as a generated `login-N` slot. A
  * flat or absent current entry keeps today's whole-write shape so no existing
  * user's stored bytes change until a second credential actually exists.
+ *
+ * A login result that already carries its own populated `accounts` array is a
+ * provider-owned pool: it IS the complete post-login credential, so it is
+ * written through untouched. Reading its top-level fields as a flat credential
+ * would append the provider's placeholder material as a second slot.
  */
 export function appendLoginSlot(current: PooledCredential | undefined, flat: Credential): Credential {
+	if ("accounts" in flat && Array.isArray(flat.accounts) && flat.accounts.length > 0) {
+		return flat;
+	}
 	if (!current || !Array.isArray(current.accounts) || current.accounts.length === 0) {
 		return flat;
 	}

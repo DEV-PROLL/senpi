@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+	appendLoginSlot,
 	type Credential,
 	type CredentialSlot,
 	listSlots,
@@ -79,5 +80,54 @@ describe("credential pool slot algebra", () => {
 	test("upsertSlot rejects a slot name that could collide with path syntax", () => {
 		const slot = { name: "../escape", key: "k", source: "login" } as CredentialSlot;
 		expect(() => upsertSlot(pooledApiKey(), slot)).toThrow(/Invalid account name/);
+	});
+
+	function sentinelPool(): PooledCredential {
+		return {
+			type: "oauth",
+			access: "claude-sdk-oauth-managed",
+			refresh: "claude-sdk-oauth-managed",
+			expires: 4_102_444_800_000,
+			accounts: [{ name: "default", source: "login", access: "real-a", refresh: "refresh-a", expires: 999 }],
+		};
+	}
+
+	test("appendLoginSlot returns a provider-owned pooled login result unchanged", () => {
+		const current = sentinelPool();
+		const providerLoginResult: PooledCredential = {
+			...current,
+			accounts: [
+				...listSlots(current),
+				{ name: "account-2", source: "login", access: "real-b", refresh: "refresh-b", expires: 999 },
+			],
+		};
+
+		const next = appendLoginSlot(current, providerLoginResult);
+
+		expect(next).toEqual(providerLoginResult);
+		expect(names(next)).toEqual(["default", "account-2"]);
+		expect(listSlots(next).at(-1)?.access).toBe("real-b");
+	});
+
+	test("appendLoginSlot still appends an unnamed flat oauth credential as login-2", () => {
+		const flat: Credential = { type: "oauth", access: "fresh-access", refresh: "fresh-refresh", expires: 999 };
+
+		const next = appendLoginSlot(sentinelPool(), flat);
+
+		expect(names(next)).toEqual(["default", "login-2"]);
+		expect(listSlots(next).at(-1)).toMatchObject({ access: "fresh-access", refresh: "fresh-refresh" });
+	});
+
+	test("appendLoginSlot still appends an unnamed flat api_key credential", () => {
+		const next = appendLoginSlot(pooledApiKey(), { type: "api_key", key: "third-key" });
+
+		expect(names(next)).toEqual(["default", "work", "login-2"]);
+		expect(listSlots(next).at(-1)?.key).toBe("third-key");
+	});
+
+	test("appendLoginSlot without a current credential writes the flat credential as-is", () => {
+		const flat: Credential = { type: "api_key", key: "only-key" };
+
+		expect(appendLoginSlot(undefined, flat)).toBe(flat);
 	});
 });
