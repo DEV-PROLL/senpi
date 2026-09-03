@@ -55,6 +55,12 @@ function compactDelta(value: RpcRecord): { type: CompactDeltaType; contentIndex:
 	};
 }
 
+/** The delta-only form of a compact message_update: cumulative snapshot fields blanked, delta kept. */
+function demoteToDeltaOnly(value: RpcRecord): RpcRecord {
+	const event = value.assistantMessageEvent as Record<string, unknown>;
+	return { ...value, message: null, assistantMessageEvent: { ...event, partial: null } };
+}
+
 function toolUpdateKey(value: RpcRecord): string | undefined {
 	return value.type === "tool_execution_update" && typeof value.toolCallId === "string"
 		? `tool:${value.toolCallId}`
@@ -119,8 +125,12 @@ export class SessionEventWriter {
 		return bytes;
 	}
 
-	registerConnection(id: string, connection: SessionEventWriterConnection): void {
-		this.fanout.registerConnection(id, connection);
+	registerConnection(
+		id: string,
+		connection: SessionEventWriterConnection,
+		options: { readonly maxQueueBytes?: number } = {},
+	): void {
+		this.fanout.registerConnection(id, connection, options);
 	}
 
 	unregisterConnection(id: string): void {
@@ -189,9 +199,15 @@ export class SessionEventWriter {
 		for (const target of targets) {
 			if (target !== undefined && !this.fanout.get(target)) continue;
 			const registered = target === undefined ? undefined : this.fanout.get(target);
-			if (registered)
-				registered.actor.enqueue(line, compactDelta(tagged) && tagged.message !== null ? MESSAGE_KEY : undefined);
-			else this.appendSessionRecord(sessionId, wireTagged, target);
+			if (registered) {
+				const keyed = compactDelta(tagged) !== undefined && tagged.message !== null;
+				registered.actor.enqueue(
+					line,
+					keyed ? MESSAGE_KEY : undefined,
+					undefined,
+					keyed ? serializeJsonLine(demoteToDeltaOnly(wireTagged)) : undefined,
+				);
+			} else this.appendSessionRecord(sessionId, wireTagged, target);
 		}
 		this.requestFlush();
 		return true;
@@ -376,12 +392,7 @@ export class SessionEventWriter {
 	}
 
 	private demoteAndMerge(queue: RecordQueue, node: QueueNode): void {
-		const event = node.value.assistantMessageEvent as Record<string, unknown>;
-		node.value = {
-			...node.value,
-			message: null,
-			assistantMessageEvent: { ...event, partial: null },
-		};
+		node.value = demoteToDeltaOnly(node.value);
 		const current = compactDelta(node.value);
 		const preceding = node.previous;
 		const previous = preceding ? compactDelta(preceding.value) : undefined;

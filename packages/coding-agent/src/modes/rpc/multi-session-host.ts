@@ -347,6 +347,9 @@ function socketSink(socket: Socket): RpcConnectionSink {
 		writeRaw(chunk) {
 			if (!socket.destroyed) needsDrain = !socket.write(chunk);
 		},
+		close() {
+			socket.destroy();
+		},
 		waitForBackpressure() {
 			if (socket.destroyed || !needsDrain) return Promise.resolve();
 			needsDrain = false;

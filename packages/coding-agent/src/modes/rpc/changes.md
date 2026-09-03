@@ -1,5 +1,23 @@
 # changes
 
+## Socket fan-out: lossless supersession, and overflow closes the socket (2026-09-03)
+
+### What changed
+
+- `SocketEventSinkActor.enqueue` takes an optional delta-only line for keyed records. When a later record with the same key supersedes a queued one, the queued entry is rewritten to that delta-only form (`message: null`, `partial: null`, delta kept) and keeps its position; only the newest record carries the cumulative snapshot. Keyed records without a delta-only form are kept verbatim (the key is dropped) instead of being replaced.
+- `SessionEventWriter` supplies the demoted line for compact `message_update` deltas on the socket path, through the same `demoteToDeltaOnly` the stdout queue's `demoteAndMerge` uses.
+- On queue overflow the actor raises `SocketEventQueueOverflowError` (queued/incoming/max bytes + a preview of the incoming record) and `SessionEventFanout` now logs it to stderr and calls the connection's new optional `close()` (`RpcConnectionSink.close`, implemented by `socketSink` as `socket.destroy()`), after the existing `overflow` record is written.
+- `DEFAULT_QUEUE_BYTES` rises from 4 MiB to 64 MiB.
+
+### Why
+
+- A desktop RPC client assembles assistant text from `text_delta` records. Latest-wins replacement of queued `message_update` lines dropped every delta a stalled reader had not received yet; live (2026-09-03, omo-desktop) an assistant message lost 252 chars of head and 159 chars of thinking tail and rendered as "ared Claude conversation…". The stdout path already demotes-and-merges losslessly; the socket path did not.
+- Overflow used to write `{"type":"overflow"}`, close the actor and forget the connection while the socket stayed open. From then on the host silently dropped every session record and every command response for that connection; the desktop froze and every RPC timed out. Four image `read` results (base64) exceeded the 4 MiB cap in one burst on an otherwise healthy reader.
+
+### Follow-ups
+
+- Image/binary tool-result payloads still travel inline to every attached RPC client; gating them on a client capability (metadata + on-demand fetch) is the structural fix for the cap.
+
 ## RPC logins answer mid-flow OAuth prompts over the dialog channel (2026-09-03)
 
 ### What changed

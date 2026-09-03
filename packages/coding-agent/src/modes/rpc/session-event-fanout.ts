@@ -6,6 +6,13 @@ export type BackpressureWaiter = () => Promise<void>;
 export interface SessionEventWriterConnection {
 	readonly writeRaw: RawWriter;
 	readonly waitForBackpressure: BackpressureWaiter;
+	/**
+	 * Tears the transport down. Called when this connection's event queue fails
+	 * (overflow, write error): the actor has already stopped delivering records
+	 * AND command responses, so a socket left open would strand the client on a
+	 * connection that can never answer again. Closing it lets the client resync.
+	 */
+	readonly close?: () => void;
 }
 
 export const RENDERED_COMPONENT_RECORD = "__senpiRenderedComponent";
@@ -32,15 +39,27 @@ export class SessionEventFanout {
 	private readonly connectionSessions = new Map<string, Set<string>>();
 	private readonly registeredCapabilityConnections = new Set<string>();
 
-	registerConnection(id: string, connection: SessionEventWriterConnection): void {
-		const actor = new SocketEventSinkActor(connection, () => {
+	registerConnection(
+		id: string,
+		connection: SessionEventWriterConnection,
+		options: { readonly maxQueueBytes?: number } = {},
+	): void {
+		const actor = new SocketEventSinkActor(
+			connection,
+			(cause) => {
 			if (this.connections.get(id)?.actor === actor) {
 				this.connections.delete(id);
 				this.connectionCapabilities.delete(id);
 				this.connectionSessions.delete(id);
 				this.registeredCapabilityConnections.delete(id);
 			}
-		});
+				process.stderr.write(
+					`senpi rpc connection ${id} event queue failed; closing: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+				);
+				connection.close?.();
+			},
+			options.maxQueueBytes,
+		);
 		this.connections.set(id, { connection, actor });
 		this.connectionCapabilities.set(id, new Set());
 		this.connectionSessions.set(id, new Set());
