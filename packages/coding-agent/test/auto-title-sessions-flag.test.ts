@@ -2,7 +2,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
 import { afterEach, describe, expect, test } from "vitest";
 import { parseArgs } from "../src/cli/args.ts";
 import { resolveAutoTitleSessions } from "../src/main.ts";
-import { AUTO_TITLE_SESSIONS_CAPABILITY } from "../src/modes/rpc/custom-capability.ts";
+import { AUTO_TITLE_SESSIONS_CAPABILITY, MEDIA_PLACEHOLDERS_CAPABILITY } from "../src/modes/rpc/custom-capability.ts";
 import { SessionCommandRouter } from "../src/modes/rpc/session-command-router.ts";
 import { SessionEventWriter } from "../src/modes/rpc/session-event-writer.ts";
 import { waitForSessionName } from "./agent-session-auto-title-helpers.ts";
@@ -99,7 +99,9 @@ describe("RPC protocol capabilities", () => {
 		const registry = { list: () => [] } as never;
 		const router = new SessionCommandRouter(registry, new SessionEventWriter(() => {}), { cwd: "/tmp" });
 		const response = await router.handle({ id: "probe", type: "get_protocol_info" });
-		expect(response).toMatchObject({ data: { capabilities: ["multi_session", AUTO_TITLE_SESSIONS_CAPABILITY] } });
+		expect(response).toMatchObject({
+			data: { capabilities: ["multi_session", AUTO_TITLE_SESSIONS_CAPABILITY, MEDIA_PLACEHOLDERS_CAPABILITY] },
+		});
 	});
 });
 

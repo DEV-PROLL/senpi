@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { MEDIA_PLACEHOLDERS_CAPABILITY } from "./custom-capability.ts";
 import { serializeJsonLine } from "./jsonl.ts";
+import { omitInlineMedia } from "./media-placeholders.ts";
 import {
 	RENDERED_COMPONENT_RECORD,
 	SessionEventFanout,
@@ -188,7 +190,6 @@ export class SessionEventWriter {
 		const tagged = { ...value, sessionId } as RpcRecord;
 		const { [RENDERED_COMPONENT_RECORD]: _rendered, ...wireTagged } = tagged;
 		const line = serializeJsonLine(wireTagged);
-		if (!isTargeted) this.fanout.rememberSnapshot(sessionId, tagged, line);
 		const targets = this.fanout.targets(
 			sessionId,
 			targetId,
@@ -196,18 +197,28 @@ export class SessionEventWriter {
 			record[RENDERED_COMPONENT_RECORD] === true,
 			record.type,
 		);
+		// A record is only walked and re-serialized when a target asked for placeholders;
+		// otherwise this is byte-for-byte today's path, with serializeJsonLine called once.
+		const hasPlaceholderTarget = targets.some((target) =>
+			this.fanout.connectionHas(target, MEDIA_PLACEHOLDERS_CAPABILITY),
+		);
+		const redacted = hasPlaceholderTarget ? omitInlineMedia(wireTagged) : wireTagged;
+		const placeholderLine = redacted === wireTagged ? undefined : serializeJsonLine(redacted);
+		if (!isTargeted) this.fanout.rememberSnapshot(sessionId, tagged, line, placeholderLine, wireTagged);
 		for (const target of targets) {
 			if (target !== undefined && !this.fanout.get(target)) continue;
 			const registered = target === undefined ? undefined : this.fanout.get(target);
+			const wants =
+				placeholderLine !== undefined && this.fanout.connectionHas(target, MEDIA_PLACEHOLDERS_CAPABILITY);
 			if (registered) {
 				const keyed = compactDelta(tagged) !== undefined && tagged.message !== null;
 				registered.actor.enqueue(
-					line,
+					wants ? placeholderLine : line,
 					keyed ? MESSAGE_KEY : undefined,
 					undefined,
 					keyed ? serializeJsonLine(demoteToDeltaOnly(wireTagged)) : undefined,
 				);
-			} else this.appendSessionRecord(sessionId, wireTagged, target);
+			} else this.appendSessionRecord(sessionId, wants ? (redacted as RpcRecord) : wireTagged, target);
 		}
 		this.requestFlush();
 		return true;

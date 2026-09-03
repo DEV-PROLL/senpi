@@ -1,6 +1,6 @@
 import { VERSION } from "../../config.ts";
 import { buildRpcSessionState } from "./connection-handler.ts";
-import { AUTO_TITLE_SESSIONS_CAPABILITY } from "./custom-capability.ts";
+import { AUTO_TITLE_SESSIONS_CAPABILITY, MEDIA_PLACEHOLDERS_CAPABILITY } from "./custom-capability.ts";
 import type { RpcCommand, RpcResponse } from "./rpc-types.ts";
 import {
 	RPC_ERROR_MISSING_SESSION_ID,
@@ -103,6 +103,7 @@ export class SessionCommandRouter {
 			const capabilities = new Set([
 				"multi_session",
 				AUTO_TITLE_SESSIONS_CAPABILITY,
+				MEDIA_PLACEHOLDERS_CAPABILITY,
 				...(this.connectionOptions?.capabilities ?? []),
 			]);
 			return {

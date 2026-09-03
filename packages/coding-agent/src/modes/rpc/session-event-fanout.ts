@@ -1,3 +1,6 @@
+import { MEDIA_PLACEHOLDERS_CAPABILITY, RENDERED_COMPONENTS_CAPABILITY } from "./custom-capability.ts";
+import { serializeJsonLine } from "./jsonl.ts";
+import { omitInlineMedia } from "./media-placeholders.ts";
 import { SocketEventSinkActor } from "./socket-event-fanout.ts";
 
 export type RawWriter = (chunk: string) => void;
@@ -30,7 +33,30 @@ type RegisteredConnection = {
 	readonly actor: SocketEventSinkActor;
 };
 
-type SnapshotRecord = { readonly line: string; readonly rendered: boolean };
+/**
+ * A replayable snapshot line.
+ *
+ * `placeholderLine` is the `media_placeholders` variant. The writer supplies it only when
+ * a capable connection was already attached when the record was emitted; a connection that
+ * attaches later still needs it, so `source` carries the wire record and the variant is
+ * derived once, on the first capable replay, then memoized. Records with no media resolve
+ * `placeholderLine` to `line`, so replay stays O(1) and never re-serializes twice.
+ */
+type SnapshotRecord = {
+	readonly line: string;
+	placeholderLine?: string;
+	readonly source?: Record<string, unknown>;
+	readonly rendered: boolean;
+};
+
+/** The placeholder variant of a remembered record, derived and memoized on first use. */
+function snapshotPlaceholderLine(record: SnapshotRecord): string {
+	if (record.placeholderLine !== undefined) return record.placeholderLine;
+	const redacted = record.source === undefined ? undefined : omitInlineMedia(record.source);
+	record.placeholderLine =
+		redacted === undefined || redacted === record.source ? record.line : serializeJsonLine(redacted);
+	return record.placeholderLine;
+}
 
 export class SessionEventFanout {
 	private readonly connections = new Map<string, RegisteredConnection>();
@@ -47,12 +73,12 @@ export class SessionEventFanout {
 		const actor = new SocketEventSinkActor(
 			connection,
 			(cause) => {
-			if (this.connections.get(id)?.actor === actor) {
-				this.connections.delete(id);
-				this.connectionCapabilities.delete(id);
-				this.connectionSessions.delete(id);
-				this.registeredCapabilityConnections.delete(id);
-			}
+				if (this.connections.get(id)?.actor === actor) {
+					this.connections.delete(id);
+					this.connectionCapabilities.delete(id);
+					this.connectionSessions.delete(id);
+					this.registeredCapabilityConnections.delete(id);
+				}
 				process.stderr.write(
 					`senpi rpc connection ${id} event queue failed; closing: ${cause instanceof Error ? cause.message : String(cause)}\n`,
 				);
@@ -91,10 +117,10 @@ export class SessionEventFanout {
 	setConnectionCapabilities(id: string, capabilities: readonly string[]): void {
 		const registered = this.connections.get(id);
 		if (!registered) return;
-		const wasCapable = this.connectionCapabilities.get(id)?.has("rendered_components") ?? false;
+		const wasCapable = this.connectionCapabilities.get(id)?.has(RENDERED_COMPONENTS_CAPABILITY) ?? false;
 		this.connectionCapabilities.set(id, new Set(capabilities));
 		this.registeredCapabilityConnections.add(id);
-		if (!wasCapable && capabilities.includes("rendered_components"))
+		if (!wasCapable && capabilities.includes(RENDERED_COMPONENTS_CAPABILITY))
 			for (const sessionId of this.connectionSessions.get(id) ?? []) this.replayRendered(id, sessionId);
 	}
 
@@ -115,9 +141,15 @@ export class SessionEventFanout {
 	}
 
 	hasCapableConnection(sessionId: string): boolean {
-		for (const [id, capabilities] of this.connectionCapabilities)
-			if (capabilities.has("rendered_components") && this.connectionSessions.get(id)?.has(sessionId)) return true;
+		for (const id of this.connectionCapabilities.keys())
+			if (this.connectionHas(id, RENDERED_COMPONENTS_CAPABILITY) && this.connectionSessions.get(id)?.has(sessionId))
+				return true;
 		return false;
+	}
+
+	/** Whether a connection advertised a capability. The only capability lookup in this file. */
+	connectionHas(id: string | undefined, capability: string): boolean {
+		return id === undefined ? false : (this.connectionCapabilities.get(id)?.has(capability) ?? false);
 	}
 
 	targets(
@@ -134,7 +166,7 @@ export class SessionEventFanout {
 			return this.connections.size > 0
 				? [...this.connections.keys()].filter(
 						(id) =>
-							this.connectionCapabilities.get(id)?.has("rendered_components") &&
+							this.connectionHas(id, RENDERED_COMPONENTS_CAPABILITY) &&
 							this.connectionSessions.get(id)?.has(sessionId),
 					)
 				: [undefined];
@@ -160,9 +192,20 @@ export class SessionEventFanout {
 		for (const { actor } of this.connections.values()) actor.enqueue(line);
 	}
 
-	rememberSnapshot(sessionId: string, value: Record<string, unknown>, line: string): void {
+	rememberSnapshot(
+		sessionId: string,
+		value: Record<string, unknown>,
+		line: string,
+		placeholderLine?: string,
+		source?: Record<string, unknown>,
+	): void {
 		const event = value.assistantMessageEvent as Record<string, unknown> | undefined;
-		const record = { line, rendered: value[RENDERED_COMPONENT_RECORD] === true };
+		const record: SnapshotRecord = {
+			line,
+			placeholderLine,
+			source,
+			rendered: value[RENDERED_COMPONENT_RECORD] === true,
+		};
 		if (value.type === "message_start" || (value.type === "message_update" && event?.type === "text_start")) {
 			this.sessionSnapshots.set(sessionId, [record]);
 		} else if (this.sessionSnapshots.has(sessionId)) {
@@ -178,9 +221,10 @@ export class SessionEventFanout {
 	private replaySnapshot(id: string, sessionId: string): void {
 		const actor = this.connections.get(id)?.actor;
 		if (!actor) return;
-		const capable = this.connectionCapabilities.get(id)?.has("rendered_components") ?? false;
+		const capable = this.connectionHas(id, RENDERED_COMPONENTS_CAPABILITY);
+		const placeholders = this.connectionHas(id, MEDIA_PLACEHOLDERS_CAPABILITY);
 		for (const record of this.sessionSnapshots.get(sessionId) ?? [])
-			if (!record.rendered || capable) actor.enqueue(record.line);
+			if (!record.rendered || capable) actor.enqueue(placeholders ? snapshotPlaceholderLine(record) : record.line);
 	}
 
 	private replayRendered(id: string, sessionId: string): void {
