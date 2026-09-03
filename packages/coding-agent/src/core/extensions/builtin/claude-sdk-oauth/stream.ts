@@ -10,7 +10,7 @@ import {
 import { getSessionClaudeAccountPin } from "./account-command.ts";
 import { queryWithAuthLane } from "./auth-lane.ts";
 import { buildCustomToolServers } from "./custom-tools.ts";
-import { sdkAssistantFailure, sdkResultFailure } from "./errors.ts";
+import { sdkAssistantFailure, sdkResultFailure, sdkResultFailureUsage } from "./errors.ts";
 import { defaultExecutableDeps, resolveClaudeCodeExecutable } from "./executable.ts";
 import { buildClaudeSdkOauthQueryOptions } from "./options.ts";
 import { buildPromptBlocks, buildPromptStream } from "./prompt-bridge.ts";
@@ -162,11 +162,7 @@ export function streamClaudeSdkOauth(
 						: message.type === "result"
 							? sdkResultFailure(message)
 							: undefined;
-				if (failure) {
-					// An error result still bills its tokens; account for them before failing.
-					if (message.type === "result" && message.usage) updateUsage(model, output, message.usage);
-					throw failure;
-				}
+				if (failure) throw failure;
 				if (!started) {
 					stream.push({ type: "start", partial: output });
 					started = true;
@@ -225,6 +221,10 @@ export function streamClaudeSdkOauth(
 			// no-excuse-ok: catch
 			// Provider boundary converts every thrown SDK value into the stream error contract.
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+			// A failed result still bills its tokens; managed and resident lanes
+			// throw before the result reaches this loop, so account for it here.
+			const billed = sdkResultFailureUsage(error);
+			if (billed) updateUsage(model, output, billed);
 			output.errorMessage = withAuthGuidance(error, errorMessage(error));
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 		} finally {

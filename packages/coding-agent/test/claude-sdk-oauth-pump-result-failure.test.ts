@@ -1,5 +1,6 @@
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it } from "vitest";
+import { SdkResultFailure } from "../src/core/extensions/builtin/claude-sdk-oauth/errors.ts";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import {
 	ClaudeSdkOauthSessionRegistry,
@@ -108,10 +109,15 @@ describe("claude-sdk-oauth pump: is_error results (#1169 / #1298)", () => {
 				api_error_status: 400,
 				terminal_reason: "api_error",
 				result: VERSION_FLOOR_TEXT,
+				usage: { input_tokens: 7, output_tokens: 3, cache_read_input_tokens: 11, cache_creation_input_tokens: 5 },
 			}),
 		);
 
 		await expect(turn).rejects.toThrow(/does not support this model.*\(HTTP 400, api_error\)/);
+		// The rejection carries the billed usage so the outer stream can account for it.
+		await expect(turn).rejects.toSatisfy(
+			(error: unknown) => error instanceof SdkResultFailure && error.usage?.input_tokens === 7,
+		);
 		expect(registry.get("pump-result-failure")).toBeUndefined();
 		expect(entry.activeTurn).toBeNull();
 	});

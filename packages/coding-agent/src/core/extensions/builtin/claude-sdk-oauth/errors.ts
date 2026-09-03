@@ -41,7 +41,27 @@ function errorText(error: unknown): string {
 	return String(error);
 }
 
-export function sdkResultFailure(message: Extract<SDKMessage, { type: "result" }>): Error | undefined {
+export type SdkResultUsage = Extract<SDKMessage, { type: "result" }>["usage"];
+
+/** A failed SDK result keeps the usage it billed so every lane can account for it. */
+export class SdkResultFailure extends Error {
+	readonly usage: SdkResultUsage | undefined;
+
+	constructor(message: string, usage: SdkResultUsage | undefined) {
+		super(message);
+		this.name = "SdkResultFailure";
+		this.usage = usage;
+	}
+}
+
+/** The usage carried by a failed SDK result, looking through failover's classification wrapper. */
+export function sdkResultFailureUsage(error: unknown): SdkResultUsage | undefined {
+	if (error instanceof SdkResultFailure) return error.usage;
+	const wrapped = record(error)?.original;
+	return wrapped instanceof SdkResultFailure ? wrapped.usage : undefined;
+}
+
+export function sdkResultFailure(message: Extract<SDKMessage, { type: "result" }>): SdkResultFailure | undefined {
 	if (message.subtype === "success" && message.is_error !== true) return undefined;
 	const errors = "errors" in message && Array.isArray(message.errors) ? message.errors : [];
 	const firstError = errors.find((error): error is string => typeof error === "string" && error.length > 0);
@@ -55,7 +75,7 @@ export function sdkResultFailure(message: Extract<SDKMessage, { type: "result" }
 	const reason =
 		"terminal_reason" in message && typeof message.terminal_reason === "string" ? message.terminal_reason : "";
 	const suffix = [status, reason].filter(Boolean).join(", ");
-	return new Error(suffix ? `${detail} (${suffix})` : detail);
+	return new SdkResultFailure(suffix ? `${detail} (${suffix})` : detail, message.usage);
 }
 
 export function sdkAssistantFailure(message: Extract<SDKMessage, { type: "assistant" }>): Error | undefined {
