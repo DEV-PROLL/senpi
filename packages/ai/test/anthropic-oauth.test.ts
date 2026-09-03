@@ -100,6 +100,12 @@ describe.sequential("Anthropic OAuth", () => {
 		installFailingListen("EADDRINUSE");
 		const controller = new AbortController();
 		let promptSignal: AbortSignal | undefined;
+		// Resolve the moment the login opens its manual prompt, so the abort below is
+		// ordered after the prompt exists instead of racing a macrotask tick.
+		let promptOpened!: () => void;
+		const opened = new Promise<void>((resolve) => {
+			promptOpened = resolve;
+		});
 		const login = anthropicOAuth.login({
 			signal: controller.signal,
 			notify: vi.fn(),
@@ -107,21 +113,17 @@ describe.sequential("Anthropic OAuth", () => {
 				new Promise<string>((_resolve, reject) => {
 					promptSignal = prompt.signal;
 					prompt.signal?.addEventListener("abort", () => reject(new Error("prompt aborted")), { once: true });
+					promptOpened();
 				}),
 		});
 		const settled = login.then(
 			() => "resolved",
 			(error: unknown) => (error instanceof Error ? error.message : String(error)),
 		);
-		// Give the login a turn to open the manual prompt, then cancel from the outside.
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await opened;
 		controller.abort();
-		const outcome = await Promise.race([
-			settled,
-			new Promise<string>((resolve) => setTimeout(() => resolve("still pending"), 500)),
-		]);
+		expect(await settled).toBe("prompt aborted");
 		expect(promptSignal?.aborted).toBe(true);
-		expect(outcome).toBe("prompt aborted");
 	});
 
 	it("rejects non-bind callback errors with the callback host and port", async () => {
