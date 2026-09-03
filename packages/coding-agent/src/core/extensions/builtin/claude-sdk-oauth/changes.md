@@ -20,6 +20,7 @@
 - MEDIUM in `errors.ts` around `classifySdkError` prose matchers and the `SdkErrorKind` union.
 - LOW in `guidance.ts` around `sdkErrorGuidance`.
 ## 2026-09-03 - State host-tool denial as a fact, not an instruction to end the turn
+## 2026-09-03 - Fail closed when a managed lane has no accounts (LAB-27)
 
 ### What changed
 
@@ -38,6 +39,22 @@
 
 - LOW: `tools.ts` denial constants and `HOST_TOOL_POLICY_FINGERPRINT`.
 - LOW: `session-sync.ts` `configFingerprint` `hostToolPolicy` field.
+### What changed
+
+- `auth-lane.ts`: `managedPool` no longer folds an empty account pool into the ambient return. The ambient lane still returns `undefined` and spawns the host Claude CLI lane; an explicit or resolved managed lane (`oauth-slots`, `config-dir`) with zero stored and zero environment accounts now throws `NO_MANAGED_ACCOUNTS_ERROR` (`authentication_failed: No Claude SDK OAuth accounts configured for the managed lane; run /login claude-sdk-oauth or set CLAUDE_CODE_OAUTH_TOKEN`) before any subprocess is spawned.
+
+### Why
+
+- After `/logout claude-sdk-oauth` (or with a hand-written `tokenInjection: "oauth-slots"` and no slots), the combined `lane === "ambient" || accounts.length === 0` guard returned `undefined`, and `queryWithAuthLane` then built an ambient child environment and ran the SDK against whatever the host `claude` CLI happened to be logged into. A user who chose a managed lane silently got answers billed to an unrelated local Claude login, and `/logout` was not authoritative. The availability predicate in `oauth-login.ts` can hide the provider, but `streamClaudeSdkOauth` reaches `queryWithAuthLane` directly, so the spawn path had to refuse on its own.
+- The ambient default of oh-my-openagent#6784 is preserved deliberately: unset `tokenInjection` with an empty store still resolves to `ambient` through `resolveEffectiveLane` and keeps spawning ambiently.
+
+### Why an extension could not handle it
+
+- Lane resolution and the pre-spawn credential decision live inside this builtin provider's `managedPool`/`queryWithAuthLane`; no extension hook runs between lane selection and the SDK subprocess spawn.
+
+### Expected merge conflict zones
+
+- LOW in `auth-lane.ts` around the `managedPool` lane guard (one condition split into two statements plus one module-level message constant).
 ## 2026-09-03 - Never resume an SDK session id the SDK never acknowledged
 
 ### What changed
@@ -795,13 +812,6 @@ LOW in `oauth-login.ts` (added `check` to the returned shape + optional `readSet
 ### Expected merge conflict zones
 
 - `auth-lane.ts`, provider error classification, and account failover tests.
-
-## 2026-08-01 - Fail closed after managed-account logout
-
-- Managed `oauth-slots` and `config-dir` modes now report that login is required when their account pool is empty instead of silently falling back to ambient Claude CLI credentials.
-- This makes `/logout` authoritative for the selected managed provider: a fallback attempt cannot reuse an unrelated local Claude login and appear to answer successfully.
-- Ambient mode remains unchanged and still intentionally inherits non-Senpi Claude authentication.
-- Merge-conflict risk: low. The only overlap surface is the empty-pool branch in `managedPool`.
 
 ## 2026-07-31 - Native system prompt, session reuse, env overrides, and transcript hardening
 
