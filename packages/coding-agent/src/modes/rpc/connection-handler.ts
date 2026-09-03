@@ -120,6 +120,8 @@ function createFooterDataProvider(session: AgentSession): FooterDataProvider {
 export interface RpcConnectionSink {
 	writeRaw(chunk: string): void;
 	waitForBackpressure(): Promise<void>;
+	/** Tears the transport down once its event queue can no longer deliver (overflow, write failure). */
+	close?(): void;
 }
 
 export interface RpcConnectionHandler {
