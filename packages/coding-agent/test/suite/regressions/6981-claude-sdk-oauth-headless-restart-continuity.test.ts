@@ -293,6 +293,7 @@ function residentEntry() {
 		options: {},
 	});
 	entry.sentCount = 1;
+	entry.sdkSessionIdConfirmed = true;
 	entry.assistantUuidByIndex.set(1, "assistant-uuid-1");
 	return entry;
 }
