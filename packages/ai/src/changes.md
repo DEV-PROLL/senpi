@@ -1,3 +1,35 @@
+## A legacy flat credential is promoted, not overwritten, by a second login (2026-09-03)
+
+### What changed
+
+- `packages/ai/src/auth/pool/slots.ts`: `appendLoginSlot` whole-writes the login result only when there is no stored
+  credential at all (`if (!current)`), instead of also whole-writing whenever the stored credential is flat. A flat
+  `current` now takes the `upsertSlot` path, so `listSlots` synthesizes its `default` slot from the flat fields and the
+  fresh login is appended as the next generated `login-N`. The provider-owned pool guard added for senpi#1279 keeps its
+  place ahead of both branches and is unchanged, as is the pooled-`current` append.
+
+### Why
+
+- `openai-codex` OAuth `login` returns a plain flat `OAuthCredential` with no `accounts` array, so the #1279 guard never
+  fires for it and the old flat-current disjunct did. A second `/login openai-codex` (or the coding-agent `AuthStorage.set`
+  RPC path) therefore replaced the first account's tokens outright: the user lost the credential they were already using
+  and the pool they were trying to build never came into existence (senpi LAB-109). Promotion is the same transition
+  `setSlot` already performs, and `upsertSlot` keeps the pre-existing flat fields as the top-level projection, so a build
+  that ignores `accounts` still authenticates with exactly the bytes it authenticated with before.
+- This supersedes the sentence in the 2026-09-03 senpi#1279 entry below that says a flat `current` still stores the flat
+  credential as-is; that branch is what this pass changes. Every other branch it describes is still accurate.
+
+### Why an extension could not handle it
+
+- `appendLoginSlot` is the shared write step inside `ModelsImpl.login` and the coding-agent auth storage `set`, running
+  after the provider's `login` resolves and before the credential is persisted. No provider or extension seam exists
+  between producing the credential and the write that was discarding the previous account.
+
+### Expected merge conflict zones
+
+- LOW: the second condition of `appendLoginSlot` and its JSDoc in `auth/pool/slots.ts`, immediately below the senpi#1279
+  guard that the open PRs #1304 and #1196 also touch.
+
 ## OAuth prompt types carry the provider's cancellation signal (2026-09-03)
 
 ### What changed

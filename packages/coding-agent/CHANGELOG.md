@@ -4,6 +4,8 @@
 
 ### Added
 
+- `/gpt-account` manages OpenAI Codex OAuth accounts the way `/claude-account` manages claude-sdk-oauth ones: `add` runs an interactive Codex login and stores the new account beside the existing ones, `remove <name>`, `pin <name>` and `unpin` select which account is used, and the bare command lists every stored account with its source, availability and pin state without printing token material.
+
 ### Changed
 
 ### Fixed

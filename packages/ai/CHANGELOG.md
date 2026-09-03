@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Adding a second account to a provider whose stored credential predates credential pools (a flat entry with no `accounts` array, which is what `openai-codex` OAuth login writes) no longer overwrites the first one. `appendLoginSlot` now promotes that legacy credential into the pool as the `default` slot and stores the new login beside it as `login-2`, so both accounts remain usable and the flat top-level fields still authenticate a build predating pools. First login (no stored credential) still writes the flat credential as-is, and a provider that returns its own populated `accounts` array is still written through untouched.
+
 ### Removed
 
 ## [2026.9.3-2] - 2026-09-03
