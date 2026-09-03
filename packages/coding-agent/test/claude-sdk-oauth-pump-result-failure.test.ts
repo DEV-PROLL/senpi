@@ -116,6 +116,24 @@ describe("claude-sdk-oauth pump: is_error results (#1169 / #1298)", () => {
 		expect(entry.activeTurn).toBeNull();
 	});
 
+	it("surfaces an is_error result that arrives before the replay claim as the API failure", async () => {
+		const { query, registry, entry } = fixture();
+		const turn = submitSessionTurn(registry, entry, { message: userContent });
+		const submitted = await submittedMessage(entry);
+		// No replay echo: the SDK failed the request before it ever confirmed our user message.
+		query.emit(
+			result(submitted.uuid, entry.sdkSessionId, {
+				is_error: true,
+				api_error_status: 429,
+				terminal_reason: "blocking_limit",
+				result: "You've hit your session limit · resets 2:50pm (Asia/Seoul)",
+			}),
+		);
+
+		await expect(turn).rejects.toThrow(/session limit.*\(HTTP 429, blocking_limit\)/);
+		await expect(turn).rejects.not.toThrow(/before replay claim/);
+	});
+
 	it("keeps an ordinary success result on the idle-synced path", async () => {
 		const { query, registry, entry } = fixture();
 		const turn = submitSessionTurn(registry, entry, { message: userContent });

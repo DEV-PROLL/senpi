@@ -125,7 +125,14 @@ function handleMessage(
 		if (isReplayFor(message, turn.uuid)) claimTurn(entry, turn);
 		else if (message.type === "stream_event") bufferBeforeReplay(registry, entry, turn, message);
 		else if (message.type === "result") {
-			throw new SessionTurnAttributionError("Claude SDK OAuth result arrived before replay claim");
+			// A result that fails before the SDK ever echoed our user message (a
+			// 400 version floor, a session limit) must surface as that failure so
+			// failover can classify and rotate; only a genuine success-before-claim
+			// is an attribution error.
+			throw (
+				sdkResultFailure(message) ??
+				new SessionTurnAttributionError("Claude SDK OAuth result arrived before replay claim")
+			);
 		}
 		return false;
 	}
