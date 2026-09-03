@@ -1,5 +1,25 @@
 # changes.md — dynamic-prompt
 
+## Conditional delegation rule + compaction mechanism in the shared core (2026-09-03)
+
+### What changed
+
+- `working-task.ts`: one sentence appended to the one-plan paragraph - "When a delegation tool is available, hand sizeable independent tracks to subagents and keep working while they run; keep work you can finish in a few calls yourself." Conditional wording, inert without a delegation tool.
+- `style.ts`: the context-limits sentence gains its mechanism - "the harness compacts context automatically" - per claude.md's context-awareness guidance (tell the model the harness compacts so it does not wrap up early).
+- Rendered fallback (no tools): +39 o200k tokens.
+
+### Why
+
+- Both rules lived only in the full-core presets (fable-5/5.1, gpt-5.6) and as per-preset copies of the compaction line in every Opus 4.x tuning. The 2026-09-03 preset parity audit (`extensions/builtin/prompt-preset/changes.md`) gives each rule one home here so the thin Claude/GLM/Kimi presets and the fallback carry them once, and the per-preset duplicates are deleted.
+
+### Why extension system couldn't handle this
+
+- Core prompt assembly; the fallback text is core-owned.
+
+### Expected merge conflict zones
+
+- `working-task.ts` / `style.ts` wording. Resolution: keep the one-sentence delegation rule and the mechanism clause.
+
 ## Universal-fallback diet: dieted core sections aligned with per-model preset lessons (2026-09-02)
 
 ### What changed
