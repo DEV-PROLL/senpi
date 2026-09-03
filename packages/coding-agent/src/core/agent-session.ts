@@ -3357,9 +3357,19 @@ export class AgentSession {
 
 	private _rebuildSystemPrompt(toolNames: string[]): string {
 		const validToolNames = toolNames.filter((name) => this._toolRegistry.has(name));
+		// An eval-only tool is hidden from the model but still callable as `tool.<name>(...)`,
+		// so its own snippet and guidelines still apply and must survive the withholding.
+		// `selectedTools` stays the model-visible list; only the contributions are widened.
+		// This can run before the field initializers below it during construction, so the
+		// withheld set is read defensively rather than spread directly.
+		const withheld = this._withheldEvalOnlyToolNames ?? new Set<string>();
+		const contributingToolNames = [
+			...validToolNames,
+			...[...withheld].filter((name) => this._toolRegistry.has(name) && !validToolNames.includes(name)),
+		];
 		const toolSnippets: Record<string, string> = {};
 		const promptGuidelines: string[] = [];
-		for (const name of validToolNames) {
+		for (const name of contributingToolNames) {
 			const snippet = this._toolPromptSnippets.get(name);
 			if (snippet) {
 				toolSnippets[name] = snippet;

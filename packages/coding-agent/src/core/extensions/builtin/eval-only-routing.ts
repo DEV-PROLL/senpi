@@ -8,5 +8,9 @@ import type { ExtensionAPI } from "../types.ts";
  * direct tools, and its prompt must keep the direct call shapes.
  */
 export function isEvalOnlyRouting(pi: ExtensionAPI): boolean {
+	// Prompt rendering must never be what breaks a session: a host that exposes only
+	// the handler surface (and any future partial ExtensionAPI) still gets a prompt,
+	// falling back to the direct call shapes that are always callable.
+	if (typeof pi.getAllTools !== "function") return false;
 	return pi.getAllTools().some((tool) => tool.name === "eval");
 }
