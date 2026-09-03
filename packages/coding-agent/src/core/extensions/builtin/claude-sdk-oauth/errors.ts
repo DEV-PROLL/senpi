@@ -1,7 +1,14 @@
 import type { SDKAssistantMessageError } from "@anthropic-ai/claude-agent-sdk";
 import type { SDKMessage } from "./sdk-boundary.ts";
 
-export type SdkErrorKind = "rate_limit" | "overloaded" | "auth_error" | "billing" | "org_not_allowed" | "other";
+export type SdkErrorKind =
+	| "rate_limit"
+	| "overloaded"
+	| "auth_error"
+	| "billing"
+	| "org_not_allowed"
+	| "entitlement"
+	| "other";
 
 export type SdkErrorClassification = {
 	kind: SdkErrorKind;
@@ -125,6 +132,12 @@ export function classifySdkError(error: unknown): SdkErrorClassification {
 	if (/\b(?:http\s*)?529\b|overloaded/.test(text)) return { kind: "overloaded", retryable: true };
 	if (/\binvalid_grant\b|\binvalid_token\b|\b(?:http\s*)?401\b|\bunauthorized\b/.test(text)) {
 		return { kind: "auth_error", retryable: true };
+	}
+	// Fable 5 and similar models are not in the subscription; Claude Code asks
+	// for usage credits. That is an account entitlement, not a 60s rate limit:
+	// blocking the only account would also block Opus fallback on it.
+	if (/\brequires usage credits\b|\/usage-credits\b|\bcredits_required\b/.test(text)) {
+		return { kind: "entitlement", retryable: false };
 	}
 	return OTHER_ERROR;
 }
