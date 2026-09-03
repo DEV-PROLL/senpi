@@ -60,6 +60,24 @@ describe("credential pool slot algebra", () => {
 		expect(names(next)).toEqual(["default", "second"]);
 	});
 
+	test("appendLoginSlot promotes a legacy flat credential before adding a login", () => {
+		const current: Credential = { type: "oauth", access: "first-access", refresh: "first-refresh", expires: 1 };
+		const next = appendLoginSlot(current, {
+			type: "oauth",
+			access: "second-access",
+			refresh: "second-refresh",
+			expires: 2,
+		});
+
+		expect(next).toMatchObject({ type: "oauth", access: "first-access", refresh: "first-refresh", expires: 1 });
+		expect(names(next)).toEqual(["default", "login-2"]);
+		expect(listSlots(next).find((slot) => slot.name === "login-2")).toMatchObject({
+			access: "second-access",
+			refresh: "second-refresh",
+			expires: 2,
+		});
+	});
+
 	test("removeSlot deletes only the named slot", () => {
 		expect(names(removeSlot(pooledApiKey(), "default"))).toEqual(["work"]);
 	});
