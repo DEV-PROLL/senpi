@@ -1,5 +1,28 @@
 # prompt-preset Extension Changes
 
+## Kimi K3 core redesign for excessive proactiveness (2026-09-03)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/prompt-preset/kimi-k3.ts`: the core is rebuilt on the Fable 5.1 skeleton (Intent Gate / Scope / Working the Task / Verification / Hard Limits / Style). New homes: a Scope section (the request is the deliverable; a pre-existing bug, performance concern, or unmentioned behavior is a follow-up for the summary unless the requested behavior cannot work without it; a blocked part means finishing every other part and naming what was left out; scratch checks are discarded and tests are committed only where the task asks or the repository keeps tests for that kind of change), a reflect-then-ask ambiguity gate that first does every part not depending on the answer, a bounded failure cap (three materially different attempts, then restore in-flight edits and ask one precise question), one delegation sentence with a propagated stop condition, and evidence-backed reporting. Two anchor phrases are bold: `deliver all of it and only it` and `An invented assumption is a defect.`
+- Deleted as duplicates: the "never speculate" hard limit (the re-read rule owns it), the closing stop-condition restatement and the enumerated past-stop defects, the re-litigation sentence (the confirmation-turn rule owns it), the V1/V2/V3 labels, the quoted filler anti-examples, the "Read wide" sentence (the execution-tooling paragraph owns breadth when `eval` is selected), and Claude-default style traits. The act-bias rule that appeared in four places ("decisive" identity, decide-and-act, act-then-report / do-the-next-step / no-permission-begging, the closing keep-working line) now appears once, scoped to "reversible steps the request already covers".
+- Every fork contract is preserved: README routing line (confirmation turns included), binding declared stop condition, `buildExecutionToolingParagraph` in the kimi dialect, `buildTestDisciplineSection()`, non-refusal, auto-compaction continuation, `workstationDialect: "kimi"`. Measured with the Kimi K3 tokenizer (HF `moonshotai/Kimi-K3` `tiktoken.model`): 1894 -> 1883 tokens for the full render with eval/monitor/grep/glob selected, 1608 -> 1597 bare.
+- `AGENTS.md`: the K3 FILES row and the `corePrompt` exception paragraph describe the new rationale.
+
+### Why
+
+- The previous core was written through the K2.6 lens (kimi.md practitioner overlay: an overthinker that needs act-bias and terminal conditions and must not see prohibitions). Moonshot's own K3 release notes (technical blog, Limitations) describe the opposite failure - "excessive proactiveness": on minor issues or ambiguous user intent K3 "may make unexpected decisions on the user's behalf", and the recommended remedy is "more explicit behavioral constraints in the system prompt or AGENTS.md". Four act-bias statements against one reflect-then-ask clause let the trained prior win; the 2026-08-03 corpus (K3 writing more test files than any other model) is the same failure on the test axis.
+- The Fable 5.1 guide's Delivering-work and changes-and-tests blocks are the documented cure for exactly this behavior on Claude (unrequested additions and committed test code drop with no change in task success); the GPT-5.6 guide's bounded failure cap converts the "minor issue" trigger into a decision with a terminal condition. Both are stated once, in positive DO-framing per the Kimi first-party prompt guide, without all-caps prohibitions.
+- Prompt-growth defense: the additions are paid for by the duplicate deletions above; the rendered prompt is 11 tokens shorter than before.
+
+### Why extension system couldn't handle this differently
+
+- Content-only change inside this builtin's K3 core via the builder's existing `corePrompt` override; no core prompt code changed.
+
+### Expected merge conflict zones on next upstream sync
+
+- NONE expected: `kimi-k3.ts` and this tracker are fork-only files.
+
 ## Opus 4.x / Opus 5 / GLM 5.x preset parity with the dieted cores (2026-09-03)
 
 ### What changed
