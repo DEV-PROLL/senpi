@@ -57,6 +57,8 @@ export function createSessionTurnAttempt(
 	staged: StagedContinuityDecision,
 ) {
 	const generation = entry.generation;
+	// Claude Code declared the bound id dead: no later cleanup may re-publish it.
+	let resumeTargetMissing = false;
 	return {
 		messages: (async function* (): AsyncGenerator<SDKMessage> {
 			const queue = new BoundedAsyncQueue<SDKMessage>(SESSION_STREAM_QUEUE_CAPACITY);
@@ -86,6 +88,7 @@ export function createSessionTurnAttempt(
 				// attribution error). The payload was still pushed, so the retry needs
 				// the same checkpoint the aborted path records.
 				if (error instanceof Error && RESUME_TARGET_MISSING.test(error.message)) {
+					resumeTargetMissing = true;
 					forgetBinding(entry.senpiSessionId);
 				} else {
 					rememberRetryCheckpoint(entry, hashes);
@@ -96,7 +99,8 @@ export function createSessionTurnAttempt(
 			}
 		})(),
 		discard: (): void => {
-			rememberRetryCheckpoint(entry, hashes);
+			if (resumeTargetMissing) forgetBinding(entry.senpiSessionId);
+			else rememberRetryCheckpoint(entry, hashes);
 			if (isCurrentGeneration(entry.senpiSessionId, generation)) {
 				closeSession(entry.senpiSessionId, "attempt_discarded");
 			}

@@ -1,7 +1,9 @@
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it } from "vitest";
+import { createAttemptMessages } from "../src/core/extensions/builtin/claude-sdk-oauth/auth-attempt.ts";
 import type { SdkQueryHandle } from "../src/core/extensions/builtin/claude-sdk-oauth/sdk-boundary.ts";
 import { decideNativeContinuity } from "../src/core/extensions/builtin/claude-sdk-oauth/session-continuity.ts";
+import { observeSessionSyncDecision } from "../src/core/extensions/builtin/claude-sdk-oauth/session-observability.ts";
 import { forgetBinding, getBinding } from "../src/core/extensions/builtin/claude-sdk-oauth/session-reattach.ts";
 import {
 	closeSession,
@@ -162,6 +164,35 @@ describe("claude-sdk-oauth unconfirmed continuity bindings", () => {
 		await expect(consuming).rejects.toThrow("No conversation found");
 		expect(getBinding(SESSION_ID)).toBeUndefined();
 		expect(decide(getBinding(SESSION_ID))).toEqual({ kind: "bootstrap" });
+	});
+
+	it("keeps a dead resumed id forgotten through the retained-attempt discard path", async () => {
+		// The production lane consumes the attempt through createAttemptMessages, whose
+		// retainedAttemptMessages() wrapper calls discard() on failure; discard must not
+		// re-publish the checkpoint of an id Claude Code already declared missing.
+		const { query, entry, attempt } = fixture("sdk-dead-wrapped");
+		const messages = await createAttemptMessages(
+			{ prompt: "", query: () => query, createAttempt: () => attempt },
+			{ accountName: "default", accounts: [], authLane: "oauth-slots", options: {} },
+		);
+		const consuming = consume(messages);
+		const submitted = await submittedMessage(entry);
+		query.emit(result(submitted.uuid!, "sdk-dead-wrapped", RESUME_MISSING));
+
+		await expect(consuming).rejects.toThrow("No conversation found");
+		expect(getBinding(SESSION_ID)).toBeUndefined();
+		expect(decide(getBinding(SESSION_ID))).toEqual({ kind: "bootstrap" });
+	});
+
+	it("reports session_unconfirmed through the continuity observation instead of other", () => {
+		const observation = observeSessionSyncDecision({
+			kind: "cold-seed",
+			reason: "session_unconfirmed",
+			deltaMessages: 1,
+			firstTurn: false,
+			senpiSessionId: SESSION_ID,
+		});
+		expect(observation).toMatchObject({ kind: "flatten", reason: "session_unconfirmed" });
 	});
 
 	it("retains a retry checkpoint after init confirms the SDK session id", async () => {
