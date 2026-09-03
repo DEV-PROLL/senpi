@@ -148,6 +148,7 @@ export function configFingerprint(
 			authLane,
 			accountName,
 			permissionMode: options.permissionMode,
+			// Bump HOST_TOOL_POLICY_FINGERPRINT in tools.ts when denial copy or hooks change.
 			hostToolPolicy: HOST_TOOL_POLICY_FINGERPRINT,
 			settingSources: options.settingSources,
 			extraArgs: options.extraArgs,
