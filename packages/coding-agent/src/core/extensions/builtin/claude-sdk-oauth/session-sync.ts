@@ -158,6 +158,13 @@ export function configFingerprint(
 }
 
 function appendContent(blocks: ContentBlockParam[], content: string | readonly unknown[]): void {
+	// The delta path has always transmitted a whole-content empty string as an
+	// empty text block; keep that wire shape so resident sessions see the same
+	// payload as before the shared mapper (prompt-bridge intentionally skips it).
+	if (content === "") {
+		blocks.push({ type: "text", text: "" });
+		return;
+	}
 	appendSdkContentBlocks(blocks, content);
 }
 

@@ -28,7 +28,12 @@ function parseImageMediaType(value: string): Base64ImageSource["media_type"] | u
 
 function omittedPlaceholder(entry: unknown): string {
 	if (isRecord(entry) && typeof entry.type === "string") {
-		if (entry.type === "image") return "[image block omitted: missing data]";
+		if (entry.type === "image") {
+			const complete = typeof entry.mimeType === "string" && typeof entry.data === "string";
+			return complete
+				? `[image block omitted: unsupported media type ${entry.mimeType}]`
+				: "[image block omitted: missing data]";
+		}
 		return `[unsupported content block omitted: ${entry.type}]`;
 	}
 	return "[unsupported content block omitted]";

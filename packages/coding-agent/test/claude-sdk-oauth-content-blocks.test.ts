@@ -95,6 +95,19 @@ describe("claude-sdk-oauth content blocks (#7660)", () => {
 		expect(textOf(delta)).toContain("[unsupported content block omitted: text]");
 	});
 
+	it("keeps each bridge's historical whole-content empty-string shape", () => {
+		expect(buildDeltaPromptBlocks([user("")])).toEqual([{ type: "text", text: "" }]);
+		// prompt-bridge has always skipped the empty text block (and, with no text, appends its image note)
+		expect(buildPromptBlocks(promptContext(user("")))).not.toContainEqual({ type: "text", text: "" });
+	});
+
+	it("names an unsupported image media type instead of claiming missing data", () => {
+		const content = [{ type: "image", mimeType: "image/svg+xml", data: "PHN2Zz4=" }];
+		const prompt = buildPromptBlocks(promptContext(user(content)));
+		expect(imageBlocks(prompt)).toEqual([]);
+		expect(textOf(prompt)).toContain("[image block omitted: unsupported media type image/svg+xml]");
+	});
+
 	it("keeps hasText false for whitespace-only text so buildPromptBlocks still appends the image note", () => {
 		const blocks = buildPromptBlocks(
 			promptContext(
