@@ -21,8 +21,23 @@
 - LOW in `prompt-bridge.ts` around `appendContentBlocks`.
 - LOW in `session-sync.ts` around `appendContent`.
 - NEW file `content-blocks.ts`.
+## 2026-09-03 - Accept a rotation-projected OAuth slot as configured
 
+### What changed
 
+- `oauth-login.ts`: the `configuredFor` predicate behind `check` and `resolveAmbient` counts a stored credential whose top-level OAuth fields are concrete (neither `access` nor `refresh` is the managed sentinel) as one account, in addition to the `accounts` array and environment tokens. A projected sentinel still counts as zero, so the ambient opt-in path is unchanged.
+
+### Why
+
+- Shared credential rotation projects one named slot onto the flat credential shape and strips `accounts` before handing the credential to the provider. The predicate only counted `accounts`, so a projected concrete slot counted as zero accounts and the provider reported "Provider is not configured: claude-sdk-oauth" — which a user hit as a failing second login.
+
+### Why an extension could not handle it
+
+- This IS the extension side: the availability predicate lives in this builtin provider's auth config and runs before any request-scoped hook.
+
+### Expected merge conflict zones
+
+- LOW: `oauth-login.ts` around the `accountCount` computation in `configuredFor`. The same hunk appears in the open PRs #1304 and #1196.
 ## 2026-09-02 - Honor tool-less summarization requests
 
 ### What changed
