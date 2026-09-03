@@ -118,12 +118,16 @@ function handleMessage(
 	// the fork's content is lost.
 	if (message.type === "system" && message.subtype === "init" && typeof message.session_id === "string") {
 		if (message.session_id !== entry.sdkSessionId) entry.sdkSessionId = message.session_id;
+		entry.sdkSessionIdConfirmed = true;
 	}
 	const turn = currentTurn(entry);
 	if (!turn || !registry.isCurrentGeneration(entry.senpiSessionId, turn.generation)) return false;
 	if (!turn.claimed) {
-		if (isReplayFor(message, turn.uuid)) claimTurn(entry, turn);
-		else if (message.type === "stream_event") bufferBeforeReplay(registry, entry, turn, message);
+		if (isReplayFor(message, turn.uuid)) {
+			// The SDK echoing our user message proves it runs under this session id.
+			entry.sdkSessionIdConfirmed = true;
+			claimTurn(entry, turn);
+		} else if (message.type === "stream_event") bufferBeforeReplay(registry, entry, turn, message);
 		else if (message.type === "result") {
 			// A result that fails before the SDK ever echoed our user message (a
 			// 400 version floor, a session limit) must surface as that failure so
