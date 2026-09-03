@@ -36,6 +36,8 @@ export interface CreateEvalToolOptions {
 	readonly proxyExecutor?: (params: EvalToolInput, signal?: AbortSignal) => Promise<AgentToolResult<EvalToolDetails>>;
 	readonly renderers?: Pick<ToolDefinition<EvalInputSchema, EvalToolDetails>, "renderCall" | "renderResult">;
 	readonly spawns?: boolean;
+	/** Whether the session registry exposes the monitor tool through eval. */
+	readonly monitor?: boolean;
 	readonly spawnDefaultAgent?: string;
 	readonly modelId?: string;
 	readonly hostLine?: string;

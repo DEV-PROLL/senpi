@@ -108,6 +108,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			pi.rpc?.emit(EVAL_EXECUTION_EVENT, toEvalExecutionRpcPayload(payload));
 			pi.events?.emit(EVAL_EXECUTION_EVENT, payload);
 		};
+		const monitor = pi.getAllTools().some((tool) => tool.name === "monitor");
 		pi.registerTool(
 			createEvalTool({
 				enabledLanguages: runtime.enabledLanguages,
@@ -122,6 +123,7 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 				executionTracker: manager,
 				onCellSettled,
 				renderers,
+				monitor,
 				spawns: runtime.spawns,
 				spawnDefaultAgent: runtime.settings.taskTools.task,
 				hostLine: hostLine(),
@@ -159,6 +161,8 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			}),
 			executionTracker: manager,
 			renderers,
+			// The baseline tool is registered before extensions such as monitor load.
+			monitor: false,
 			hostLine: hostLine(),
 			runtimes: { js: jsRuntimeInfo() },
 			...(bunSkillPath === undefined ? {} : { bunSkillPath }),
