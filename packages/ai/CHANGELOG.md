@@ -6,6 +6,7 @@
 
 ### Added
 
+- `OAuthPrompt` and `OAuthSelectPrompt` carry an optional `signal` so login callbacks can observe a provider abandoning a prompt (for example a manual-code prompt raced against a local callback server) ([#1316](https://github.com/code-yeongyu/senpi/issues/1316)).
 ### Changed
 
 ### Fixed

@@ -1709,6 +1709,37 @@ Emitted when an extension throws an error.
 }
 ```
 
+## OAuth login
+
+Logins are fire-command-then-subscribe: the command answers as soon as the flow has started, and the URL plus the terminal result arrive as events.
+
+- `login_start` `{provider}`: responds immediately with `success: true` (flow started). A second `login_start` for the same provider aborts the earlier attempt.
+- `auth_login_url` `{provider, url}`: the URL (or device-code verification URL) the user must open.
+- `auth_login_end` `{provider, success, error?}`: exactly one per login; `error` is a non-secret message.
+- `login_cancel` `{provider}`: aborts the in-flight login; the client then sees `auth_login_end` with `success: false`.
+
+Some providers need input mid-flow (a pasted authorization code, a text or secret value, a choice between accounts). Those prompts reuse the extension UI dialog channel described in the next section:
+
+- `text`, `secret`, and `manual_code` prompts arrive as an `extension_ui_request` with `method: "input"`. `title` is the provider's prompt message and `placeholder` is present when the provider supplied one.
+- `select` prompts arrive with `method: "select"`; `options` holds the option labels.
+
+Answer with `extension_ui_response` `{id, value}`. For `select`, `value` is the chosen label and is mapped back to the option id in-process. Sending `{id, cancelled: true}` cancels the login, and `auth_login_end` reports `success: false` with `error: "Login cancelled"`.
+
+A client that never answers loses nothing. The browser/callback completion path still finishes the login, and the pending request is released when the login ends or is cancelled, so an open dialog never blocks completion. Secrets don't cross the wire in either direction: only the prompt message, placeholder, and labels are emitted, and the answer is consumed in-process and never echoed.
+
+Example exchange (Anthropic, user pastes the code instead of finishing in the browser):
+
+```jsonl
+{"id": "login-1", "type": "login_start", "provider": "anthropic"}
+{"id": "login-1", "type": "response", "command": "login_start", "success": true}
+{"type": "auth_login_url", "provider": "anthropic", "url": "https://claude.ai/oauth/authorize?..."}
+{"type": "extension_ui_request", "id": "uuid-7", "method": "input", "title": "Complete login in your browser, or paste the authorization code / redirect URL here:", "placeholder": "http://localhost:53692/callback"}
+{"type": "extension_ui_response", "id": "uuid-7", "value": "<pasted code>"}
+{"type": "auth_login_end", "provider": "anthropic", "success": true}
+```
+
+If the user completes the flow in the browser instead, the same `extension_ui_request` is emitted, no response is needed, and `auth_login_end` arrives on its own.
+
 ## Extension UI Protocol
 
 Extensions can request user interaction via `ctx.ui.select()`, `ctx.ui.confirm()`, etc. In RPC mode, these are translated into a request/response sub-protocol on top of the base command/event flow.

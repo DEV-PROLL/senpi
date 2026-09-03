@@ -64,6 +64,7 @@ import {
 	RENDERED_COMPONENTS_CAPABILITY,
 } from "./custom-capability.ts";
 import { createRpcEventOutputBuffer } from "./event-output-buffer.ts";
+import { createRpcLoginPromptCallbacks } from "./login-prompts.ts";
 import { buildRpcCommandsForSession, createCommandsChangedEvent, rpcCommandListDigest } from "./rpc-command-surface.ts";
 import { rpcCommandPayloadError, rpcCommandShapeError, rpcMessageLengthError } from "./rpc-input-validation.ts";
 import type {
@@ -913,21 +914,21 @@ export function createRpcConnectionHandler(
 	 * Reuses AuthStorage.login (the same callbacks the classic TUI uses). Only the
 	 * URL-based happy path is surfaced over RPC: onAuth emits an auth_login_url
 	 * event; success/failure/cancel emit a single auth_login_end event. Callbacks
-	 * that need interactive mid-flow input (onPrompt/onSelect/onManualCodeInput)
-	 * are not answerable in the event-only model, so they reject cleanly. Clients
-	 * use the browser/callback-server completion path. Secrets are never emitted:
-	 * only the provider id, the auth URL, and a success flag (plus a
-	 * non-secret error message) cross the wire.
+	 * that need interactive mid-flow input (onPrompt/onSelect) are answered over
+	 * the extension UI dialog channel, so clients may either answer the dialog or
+	 * finish through the browser/callback-server path. An unanswered dialog never
+	 * blocks that completion path: it is released the moment the login settles.
+	 * Secrets are never emitted: only the provider id, the auth URL, the prompt
+	 * text/option labels, and a success flag (plus a non-secret error message)
+	 * cross the wire; a client's answer is consumed in-process.
 	 */
 	const startLogin = async (provider: string): Promise<void> => {
 		// A second login_start for the same provider aborts the prior attempt.
 		activeLogins.get(provider)?.abort();
 		const controller = new AbortController();
+		const settled = new AbortController();
+		const loginSignal = AbortSignal.any([controller.signal, settled.signal]);
 		activeLogins.set(provider, controller);
-
-		const rejectInteractive = (): never => {
-			throw new Error("Interactive login input is not supported over RPC");
-		};
 
 		try {
 			await session.modelRegistry.authStorage.login(provider as OAuthProviderId, {
@@ -937,8 +938,7 @@ export function createRpcConnectionHandler(
 				onDeviceCode: (info) => {
 					outputEvent({ type: "auth_login_url", provider, url: info.verificationUri });
 				},
-				onPrompt: async () => rejectInteractive(),
-				onSelect: async () => rejectInteractive(),
+				...createRpcLoginPromptCallbacks(createExtensionUIContext(), loginSignal),
 				onProgress: () => {},
 				signal: controller.signal,
 			});
@@ -949,6 +949,8 @@ export function createRpcConnectionHandler(
 			const message = loginError instanceof Error ? loginError.message : String(loginError);
 			outputEvent({ type: "auth_login_end", provider, success: false, error: message });
 		} finally {
+			// Release any dialog still pending so it can never outlive the login.
+			settled.abort();
 			if (activeLogins.get(provider) === controller) {
 				activeLogins.delete(provider);
 			}
