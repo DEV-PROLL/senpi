@@ -1,5 +1,28 @@
 # claude-sdk-oauth
 
+## 2026-09-03 - Map malformed content entries to text instead of broken image blocks
+
+### What changed
+
+- `content-blocks.ts`: new shared `appendSdkContentBlocks` mapper. Raw string entries become text blocks, well-formed images keep `media_type`/`data`, and anything else becomes an omission placeholder.
+- `prompt-bridge.ts`: flatten `appendContentBlocks` delegates to the shared mapper and keeps hasText / "(see attached image)" semantics.
+- `session-sync.ts`: resident delta `appendContent` delegates to the same mapper and ignores the boolean.
+
+### Why
+
+- Persisted tool results can include raw strings (OmO formatter notes mixed into `toolResult` content). Both bridges treated every non-`text` entry as a base64 image, so a string became `{type:"image", source:{media_type: undefined, data: undefined}}` and Claude Code aborted the next query with a Buffer/string type error ([oh-my-openagent#7660](https://github.com/code-yeongyu/oh-my-openagent/issues/7660)).
+
+### Why an extension could not handle it
+
+- Flatten and resident-delta content-block mapping are private to this builtin provider. An external extension cannot rewrite those SDK blocks after they are assembled.
+
+### Expected merge conflict zones
+
+- LOW in `prompt-bridge.ts` around `appendContentBlocks`.
+- LOW in `session-sync.ts` around `appendContent`.
+- NEW file `content-blocks.ts`.
+
+
 ## 2026-09-02 - Honor tool-less summarization requests
 
 ### What changed
