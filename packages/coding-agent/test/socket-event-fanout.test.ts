@@ -109,6 +109,9 @@ describe("SocketEventSinkActor", () => {
 		const sink = gatedSink();
 		const failures: unknown[] = [];
 		const actor = new SocketEventSinkActor(sink, (cause) => failures.push(cause), 16);
+		// "a" goes in flight immediately (the drain starts synchronously and parks
+		// on backpressure); the next record is what stays queued.
+		actor.enqueue("a\n");
 		actor.enqueue("0123456789\n");
 		actor.enqueue("abcdefghijklmnop\n");
 		expect(failures).toHaveLength(1);

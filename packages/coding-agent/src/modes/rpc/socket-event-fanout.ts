@@ -23,16 +23,20 @@ type QueueEntry = {
 const DEFAULT_QUEUE_BYTES = 64 * 1024 * 1024;
 
 export class SocketEventQueueOverflowError extends Error {
-	constructor(
-		readonly queuedBytes: number,
-		readonly incomingBytes: number,
-		readonly maxQueueBytes: number,
-		readonly incomingPreview: string,
-	) {
+	readonly queuedBytes: number;
+	readonly incomingBytes: number;
+	readonly maxQueueBytes: number;
+	readonly incomingPreview: string;
+
+	constructor(queuedBytes: number, incomingBytes: number, maxQueueBytes: number, incomingPreview: string) {
 		super(
 			`socket event queue overflow: ${queuedBytes} queued + ${incomingBytes} incoming > ${maxQueueBytes} (incoming: ${incomingPreview})`,
 		);
 		this.name = "SocketEventQueueOverflowError";
+		this.queuedBytes = queuedBytes;
+		this.incomingBytes = incomingBytes;
+		this.maxQueueBytes = maxQueueBytes;
+		this.incomingPreview = incomingPreview;
 	}
 }
 
