@@ -71,7 +71,12 @@ describe("SocketEventSinkActor", () => {
 		expect(sink.writes).toEqual(["barrier\n"]);
 		actor.enqueue('{"delta":"hel","message":{"full":1}}\n', "message", undefined, '{"delta":"hel","message":null}\n');
 		actor.enqueue('{"delta":"lo ","message":{"full":2}}\n', "message", undefined, '{"delta":"lo ","message":null}\n');
-		actor.enqueue('{"delta":"world","message":{"full":3}}\n', "message", undefined, '{"delta":"world","message":null}\n');
+		actor.enqueue(
+			'{"delta":"world","message":{"full":3}}\n',
+			"message",
+			undefined,
+			'{"delta":"world","message":null}\n',
+		);
 
 		// When: the reader drains.
 		for (let i = 0; i < 4; i++) {
