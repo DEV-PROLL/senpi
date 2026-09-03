@@ -56,10 +56,13 @@ export function sdkResultFailure(message: Extract<SDKMessage, { type: "result" }
 export function sdkAssistantFailure(message: Extract<SDKMessage, { type: "assistant" }>): Error | undefined {
 	if (!message.error) return undefined;
 	const content = message.message.content;
-	const text = (typeof content === "string" ? content : content
-		.filter((block): block is { type: "text"; text: string } => block.type === "text")
-		.map((block) => block.text)
-		.join(" ")).trim();
+	const text = (typeof content === "string"
+		? content
+		: content
+				.filter((block) => block.type === "text" && "text" in block && typeof block.text === "string")
+				.map((block) => ("text" in block && typeof block.text === "string" ? block.text : ""))
+				.join(" ")
+	).trim();
 	return new Error(text ? (message.error === "unknown" ? text : `${text} (${message.error})`) : message.error);
 }
 
