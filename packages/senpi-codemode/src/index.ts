@@ -64,6 +64,15 @@ export interface SenpiCodemodeOptions {
 	readonly now?: () => number;
 }
 
+/** Whether the session registry holds `monitor`; false when the runtime cannot be read yet. */
+function monitorIsRegistered(pi: CodemodeExtensionAPI): boolean {
+	try {
+		return pi.getAllTools().some((tool) => tool.name === "monitor");
+	} catch {
+		return false;
+	}
+}
+
 export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCodemodeOptions = {}): void {
 	const manager = new SessionManagerProxy();
 	const complete = options.complete ?? ((request, ctx) => createCompletionHandler()(ctx)(request));
@@ -108,7 +117,11 @@ export default function senpiCodemode(pi: CodemodeExtensionAPI, options: SenpiCo
 			pi.rpc?.emit(EVAL_EXECUTION_EVENT, toEvalExecutionRpcPayload(payload));
 			pi.events?.emit(EVAL_EXECUTION_EVENT, payload);
 		};
-		const monitor = pi.getAllTools().some((tool) => tool.name === "monitor");
+		// `listTools` below survives because it is lazy; this read is eager, and the loader's
+		// action methods throw while extensions are still loading (the bundled codemode path
+		// reaches this before the runtime is bound). An unreadable registry means "do not teach
+		// a tool we cannot confirm"; session_start / model_select re-register once it is live.
+		const monitor = monitorIsRegistered(pi);
 		pi.registerTool(
 			createEvalTool({
 				enabledLanguages: runtime.enabledLanguages,
