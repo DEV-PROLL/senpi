@@ -1,5 +1,25 @@
 # changes
 
+## 2026-09-03 - Make eval-only tool routing unconditional and registry-aware
+
+### What changed
+
+- `packages/coding-agent/src/core/agent-session.ts`: replaces the settings-gated bash/workflow policy with the fixed eval-only set `bash`, `powershell`, `workflow`, and `monitor`; keeps SDK overrides, routes monitor guidance through its required `description` and command fields, filters prompt/hint names to the session registry, and preserves reload resolution and hint withdrawal.
+- `packages/coding-agent/src/core/settings-manager.ts`: removes the deleted `experimental.bashEvalOnly` and `experimental.workflowEvalOnly` settings and getters while retaining `experimental.sharedHost`.
+
+### Why
+
+- Eval is the execution boundary for shell, workflow, and monitor operations whenever the registry provides it, so a settings key could disable the intended default and stale `powershell` guidance could reach macOS sessions that cannot provide that tool.
+
+### Why an extension could not handle it
+
+- Active-tool withholding, registry-backed execution, removed-tool hints, and system-prompt assembly are coordinated inside `AgentSession` before extension code can atomically enforce the policy; settings schema and getters are core load-time behavior.
+
+### Expected merge conflict zones
+
+- MEDIUM: `packages/coding-agent/src/core/agent-session.ts` around eval-only policy constants, hint publication, prompt suffix assembly, tool registry refresh, and reload.
+- LOW: `packages/coding-agent/src/core/settings-manager.ts` around `ExperimentalSettings` and the experimental getter block.
+
 ## 2026-09-02 - Provider stream-start default raised to 300s for slow thinking models
 
 ### What changed

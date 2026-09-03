@@ -209,15 +209,14 @@ import { createAllToolDefinitions, temporarilyDisabledToolNames } from "./tools/
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
-/** Built-in shell tools routed exclusively through eval when experimental.bashEvalOnly is enabled. */
-const EVAL_ONLY_SHELL_TOOL_NAMES: readonly string[] = ["bash", "powershell"];
-/** Workflow tool routed exclusively through eval when experimental.workflowEvalOnly is enabled. */
-const EVAL_ONLY_WORKFLOW_TOOL_NAMES: readonly string[] = ["workflow"];
+/** Tools routed exclusively through eval while the registered eval tool is available. */
+const EVAL_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set(["bash", "powershell", "workflow", "monitor"]);
 
 /** Sample eval-cell call for an eval-only tool, using the argument name that tool actually takes. */
 function evalHelperCall(name: string): string {
-	if (EVAL_ONLY_SHELL_TOOL_NAMES.includes(name)) return `tool.${name}({ command: "..." })`;
-	if (EVAL_ONLY_WORKFLOW_TOOL_NAMES.includes(name)) return `tool.${name}({ action: "..." })`;
+	if (name === "bash" || name === "powershell") return `tool.${name}({ command: "..." })`;
+	if (name === "workflow") return `tool.${name}({ action: "..." })`;
+	if (name === "monitor") return `tool.monitor({ description: "...", command: "...", filter: "..." })`;
 	return `tool.${name}({ ... })`;
 }
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
@@ -1124,7 +1123,7 @@ export class AgentSession {
 	private _initialActiveToolNames?: string[];
 	private _defaultToolNames?: Set<string>;
 	private _evalOnlyToolNames?: ReadonlySet<string>;
-	/** Explicit config override; when supplied it wins over the settings-derived policy across reloads. */
+	/** Explicit config override; when supplied it wins over the fixed policy across reloads. */
 	private readonly _evalOnlyToolNamesOverride?: ReadonlySet<string>;
 	/** Policy tools withheld from the model, retained so disarming can restore direct access. */
 	private readonly _withheldEvalOnlyToolNames = new Set<string>();
@@ -3112,17 +3111,9 @@ export class AgentSession {
 		return this._evalOnlyToolNames !== undefined && this._toolRegistry.has("eval");
 	}
 
-	/**
-	 * Resolve the eval-only policy from settings so a reload picks up a flag change.
-	 * An explicitly configured set stays authoritative for SDK embedders and tests.
-	 */
-	private _resolveEvalOnlyToolNames(): ReadonlySet<string> | undefined {
-		if (this._evalOnlyToolNamesOverride !== undefined) return this._evalOnlyToolNamesOverride;
-		const names = [
-			...(this.settingsManager.getExperimentalBashEvalOnly() ? EVAL_ONLY_SHELL_TOOL_NAMES : []),
-			...(this.settingsManager.getExperimentalWorkflowEvalOnly() ? EVAL_ONLY_WORKFLOW_TOOL_NAMES : []),
-		];
-		return names.length > 0 ? new Set(names) : undefined;
+	/** Resolve the fixed eval-only policy, unless an SDK embedder supplied an override. */
+	private _resolveEvalOnlyToolNames(): ReadonlySet<string> {
+		return this._evalOnlyToolNamesOverride ?? EVAL_ONLY_TOOL_NAMES;
 	}
 
 	/**
@@ -3134,13 +3125,14 @@ export class AgentSession {
 	 */
 	private _publishEvalOnlyToolHints(): void {
 		const armed = this._isEvalOnlyPolicyArmed() ? (this._evalOnlyToolNames ?? new Set<string>()) : undefined;
+		const registered = armed ? new Set([...armed].filter((name) => this._toolRegistry.has(name))) : undefined;
 		for (const name of this._publishedEvalOnlyHintNames) {
-			if (armed?.has(name)) continue;
+			if (registered?.has(name)) continue;
 			delete this.agent.removedToolHints[name];
 		}
 		this._publishedEvalOnlyHintNames.clear();
-		if (!armed) return;
-		for (const name of armed) {
+		if (!registered) return;
+		for (const name of registered) {
 			this.agent.removedToolHints[name] =
 				`Run ${name} inside an eval cell via ${evalHelperCall(name)}; hooks and permissions still apply.`;
 			this._publishedEvalOnlyHintNames.add(name);
@@ -3200,7 +3192,7 @@ export class AgentSession {
 		} else {
 			this._withheldEvalOnlyToolNames.clear();
 		}
-		// Remember the unfiltered request so a later disarm can restore withheld shell tools.
+		// Remember the unfiltered request so a later disarm can restore withheld eval-only tools.
 		this._requestedActiveToolNames = [...new Set([...toolNames, ...this._withheldEvalOnlyToolNames])];
 		for (const name of filteredToolNames) {
 			const tool = this._toolRegistry.get(name);
@@ -3399,21 +3391,22 @@ export class AgentSession {
 			loaderAppendSystemPrompt.length > 0 ? `${basePrompt}\n\n${loaderAppendSystemPrompt.join("\n\n")}` : basePrompt;
 		if (!this._isEvalOnlyPolicyArmed()) return prompt;
 		const armed = this._evalOnlyToolNames ?? new Set<string>();
+		const registered = new Set([...armed].filter((name) => this._toolRegistry.has(name)));
 		const sentences: string[] = [];
-		const shellHelpers = EVAL_ONLY_SHELL_TOOL_NAMES.filter((name) => armed.has(name)).map(evalHelperCall);
+		const shellHelpers = ["bash", "powershell"].filter((name) => registered.has(name)).map(evalHelperCall);
 		if (shellHelpers.length > 0) {
 			sentences.push(
 				`Shell commands run ONLY inside eval cells via ${shellHelpers.join(" or ")}; hooks and permissions still apply.`,
 			);
 		}
-		if (armed.has("workflow")) {
+		if (registered.has("workflow")) {
 			sentences.push(
 				`The workflow tool runs ONLY inside eval cells via ${evalHelperCall("workflow")}; hooks and permissions still apply.`,
 			);
 		}
 		// SDK embedders can arm names outside the built-in groups; they still need eval guidance.
-		const otherHelpers = [...armed]
-			.filter((name) => !EVAL_ONLY_SHELL_TOOL_NAMES.includes(name) && name !== "workflow")
+		const otherHelpers = [...registered]
+			.filter((name) => name !== "bash" && name !== "powershell" && name !== "workflow")
 			.map(evalHelperCall);
 		if (otherHelpers.length > 0) {
 			sentences.push(
@@ -7227,7 +7220,7 @@ export class AgentSession {
 		const previousFlagValues = oldExtensionRunner.getFlagValues();
 		const previousActiveToolRegistrationIds = new Map<string, string>();
 		// Cover withheld eval-only tools too: the rebuild drops any seeded name missing from this
-		// map, which would strand shell tools when the policy disarms during this reload.
+		// map, which would strand eval-only tools when the policy disarms during this reload.
 		for (const name of this._requestedActiveToolNames ?? this.getActiveToolNames()) {
 			const entry = this._toolDefinitions.get(name);
 			if (entry) previousActiveToolRegistrationIds.set(name, deriveExtensionRegistrationId(entry.sourceInfo, name));
@@ -7240,9 +7233,9 @@ export class AgentSession {
 		await this.settingsManager.reload();
 		this._delegatedCompactionKey = undefined;
 		// Capture the unfiltered request BEFORE the rebuild reassigns it, so a policy that
-		// disarms during this reload can still restore its withheld shell tools.
+		// disarms during this reload can still restore its withheld eval-only tools.
 		const requestedActiveToolNamesBeforeRebuild = [...(this._requestedActiveToolNames ?? this.getActiveToolNames())];
-		// A flag change must take effect on reload, matching documented settings hot-reload behavior.
+		// Re-resolve the fixed policy (or SDK override) so reload cannot regress it.
 		this._evalOnlyToolNames = this._resolveEvalOnlyToolNames();
 		this.syncQueueModesFromSettings();
 		resetApiProviders();
