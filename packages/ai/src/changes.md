@@ -7,6 +7,12 @@
   `current` now takes the `upsertSlot` path, so `listSlots` synthesizes its `default` slot from the flat fields and the
   fresh login is appended as the next generated `login-N`. The provider-owned pool guard added for senpi#1279 keeps its
   place ahead of both branches and is unchanged, as is the pooled-`current` append.
+- `packages/ai/src/auth/pool/slots.ts`: `removeSlot` re-projects the flat top-level fields from the first surviving slot
+  when the removed slot was the one those fields mirrored (matched by `access`/`refresh` for OAuth, by `key` for an API
+  key). Removing a slot whose material the flat fields never carried still leaves them byte-identical, the last-slot
+  removal still returns `undefined`, and a pin naming the removed slot is still cleared. `accounts` is preserved in every
+  surviving case, so a one-slot pool stays a pool rather than collapsing to a bare flat credential; only its projection
+  moves to the survivor.
 
 ### Why
 
@@ -16,6 +22,12 @@
   and the pool they were trying to build never came into existence (senpi LAB-109). Promotion is the same transition
   `setSlot` already performs, and `upsertSlot` keeps the pre-existing flat fields as the top-level projection, so a build
   that ignores `accounts` still authenticates with exactly the bytes it authenticated with before.
+- Promotion alone made removal unsafe. After promotion the flat fields are the legacy `default`'s material, so removing
+  `default` used to leave the pool listing only `login-2` while the flat projection still held the deleted account's
+  tokens. That is not cosmetic: `mightHoldCredentialPool` in the coding-agent model runtime only routes through
+  credential rotation when `accounts.length > 1`, so a pool with one slot left resolves through `resolveProviderAuth`'s
+  flat branch and kept authenticating as exactly the account the user had just removed, with no way to pin around it.
+  Re-projecting from the survivor makes the remaining account the effective credential the moment the removal lands.
 - This supersedes the sentence in the 2026-09-03 senpi#1279 entry below that says a flat `current` still stores the flat
   credential as-is; that branch is what this pass changes. Every other branch it describes is still accurate.
 
@@ -24,11 +36,15 @@
 - `appendLoginSlot` is the shared write step inside `ModelsImpl.login` and the coding-agent auth storage `set`, running
   after the provider's `login` resolves and before the credential is persisted. No provider or extension seam exists
   between producing the credential and the write that was discarding the previous account.
+- `removeSlot` is the shared slot algebra behind `ModelsImpl.logout({ slotId })`, `AuthStorage.removeSlot` and
+  `removeCredentialAccount`. Every removal caller reaches the flat projection only through it, so nothing above it can
+  keep the projection and the surviving slot in agreement.
 
 ### Expected merge conflict zones
 
 - LOW: the second condition of `appendLoginSlot` and its JSDoc in `auth/pool/slots.ts`, immediately below the senpi#1279
   guard that the open PRs #1304 and #1196 also touch.
+- LOW: the `removeSlot` body and the two projection helpers added directly above it in `auth/pool/slots.ts`.
 
 ## OAuth prompt types carry the provider's cancellation signal (2026-09-03)
 

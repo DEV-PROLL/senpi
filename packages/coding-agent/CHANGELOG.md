@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- `/gpt-account remove` (and every other account-removal path) now leaves the remaining account actually in use. Removing the account the stored credential's top-level fields projected used to keep those fields pointing at the deleted account's tokens, and a provider left with one account does not enter credential rotation, so requests kept authenticating as the removed account; the surviving account's material is now projected onto those fields.
 - Claude SDK OAuth classifies Fable-style "requires usage credits" failures as a non-retryable entitlement instead of a rate limit, so the account is not blocked for 60s and AgentSession can fall through to the next model ([#709](https://github.com/code-yeongyu/senpi/issues/709)).
 - Print mode (`-p` / `--mode json`) now writes a stderr notice when retry fallback substitutes a model, so silent wrong-model answers are visible without corrupting JSON stdout ([oh-my-openagent#7626](https://github.com/code-yeongyu/oh-my-openagent/issues/7626)).
 ### New Features
