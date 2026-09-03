@@ -1,4 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { convertToLlm } from "../../../messages.ts";
 import type { ExtensionAPI, ExtensionContext } from "../../types.ts";
 import { CLAUDE_SDK_OAUTH_PROVIDER_ID } from "./account-management.ts";
 import {
@@ -24,7 +25,7 @@ import {
 	recordPendingFork,
 	switchSessionModel,
 } from "./session-registry.ts";
-import { isTransmittedMessage, sentHashesForEntry, sentMessageHashes } from "./session-sync.ts";
+import { sentHashesForEntry, sentMessageHashes, sentMessages } from "./session-sync.ts";
 
 const commitBoundary = new AssistantCommitBoundary();
 
@@ -139,7 +140,8 @@ export function registerSessionRegistry(
 		if (outcome !== "clean") return;
 		const sessionFile = ctx.sessionManager.getSessionFile?.();
 		if (!sessionFile || !pi.appendEntry) return;
-		const hashes = sentMessageHashes(ctx.sessionManager.buildSessionContext().messages.filter(isTransmittedMessage));
+		const context = ctx.sessionManager.buildSessionContext();
+		const hashes = sentMessageHashes(sentMessages({ ...context, messages: convertToLlm(context.messages) }));
 		if (hashes.length === 0) return;
 		pi.appendEntry(BINDING_ENTRY_TYPE, BINDING_MARKER);
 		const markerEntryId = ctx.sessionManager.getLeafId();

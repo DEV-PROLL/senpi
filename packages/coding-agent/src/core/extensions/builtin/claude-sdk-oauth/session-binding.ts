@@ -72,7 +72,12 @@ export function storedBindingFromBinding(
 	hashes: readonly string[],
 	anchor: StoredBindingAnchor,
 ): StoredBinding | undefined {
+	if (binding.sdkSessionIdConfirmed === false) return undefined;
 	if (binding.sentCount !== hashes.length) return undefined;
+	if (binding.sentPrefixHash !== undefined && binding.sentPrefixHash !== sentHashPrefixDigest(hashes)) return undefined;
+	if (binding.sentHashes.length > 0 && sentHashPrefixDigest(binding.sentHashes) !== sentHashPrefixDigest(hashes)) {
+		return undefined;
+	}
 	return {
 		schemaVersion: 1,
 		sessionPath: anchor.sessionPath,
@@ -122,8 +127,6 @@ const SAFE_BINDING_SUFFIX_TYPES: ReadonlySet<string> = new Set([
 	"pi-rules.scan",
 	"rule-activation",
 	"goal-cache-warmup",
-	"senpi-memory.session-binding",
-	"omo-memory:accepted-turns",
 ]);
 
 function isSafeBindingSuffix(entry: BranchEntry): boolean {
