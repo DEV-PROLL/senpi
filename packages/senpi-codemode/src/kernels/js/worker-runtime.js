@@ -3,6 +3,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { inspect } from "node:util";
 import { awaitMaybePromise, indirectEval, wrapUserCode } from "./worker-indirect-eval.js";
+import { installShellCapture } from "./worker-shell-capture.js";
 
 const PREPARED_CELL_PREFIX = "/*senpi:prepared-cell*/";
 const INTERNAL_URL = /^([a-z][a-z0-9+.-]*):\/\/(.*)$/iu;
@@ -84,11 +85,16 @@ export class JsWorkerRuntime {
 		process.stderr.write = routeWrite(process.stderr, originalStderrWrite, "stderr");
 		console.log = (...values) => this.#emitText("stdout", `${values.map(formatValue).join(" ")}\n`);
 		console.error = (...values) => this.#emitText("stderr", `${values.map(formatValue).join(" ")}\n`);
+		const restoreShellCapture = installShellCapture({
+			isActive: () => this.#hooks !== null,
+			emitText: (stream, data) => this.#emitText(stream, data),
+		});
 		globalThis.__senpi_restore_console__ = () => {
 			console.log = originalLog;
 			console.error = originalError;
 			process.stdout.write = originalStdoutWrite;
 			process.stderr.write = originalStderrWrite;
+			restoreShellCapture();
 		};
 	}
 
