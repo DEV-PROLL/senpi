@@ -1,5 +1,38 @@
 # Builtin extensions changes
 
+## OpenAI Codex OAuth account command (2026-09-03)
+
+### What changed
+
+- `gpt-account.ts` (new): `/gpt-account` is the dedicated OpenAI Codex OAuth account manager, mirroring the
+  `/claude-account` action set. `add` runs an interactive `openai-codex` oauth login through
+  `ctx.modelRegistry.modelRuntime.login` and emits `emitProviderAccountsChanged` so subscribed clients re-read the pool;
+  `remove <name>`, `pin <name>` and `unpin` go through `credential-accounts.ts` (which emits on its own); the
+  no-argument form lists every stored slot as `name | source | available|blocked` with the pin marked. Only names,
+  sources and health are rendered, never key or token material.
+- `index.ts`: registers `{ id: "gpt-account", factory: gptAccountExtension }` immediately after the provider-neutral
+  `account` builtin, so the Codex lane keeps its own command name the way `claude-sdk-oauth` and `cursor-cli-oauth` do.
+
+### Why
+
+- The provider-neutral `/account` command lists, pins, unpins and removes accounts for any provider but has no `add`, so
+  the only way to put a second `openai-codex` account into the pool was `/login openai-codex` - the shared write path
+  that this same pass fixes for LAB-109. Codex users need the add/remove/pin surface that claude-sdk-oauth users already
+  have from `/claude-account`, and keeping it in its own command leaves the Codex-specific login wiring (interactive
+  prompt relay, auth-url notices) out of the provider-neutral command.
+
+### Why an extension could not handle it
+
+- The command has to exist for every session, which means being present in the `builtinExtensions` registry in
+  `index.ts`; a user extension cannot insert itself there. It also drives `modelRuntime.login` and the coding-agent auth
+  storage pool directly, and that login/persist seam is core state with no extension-visible hook between producing a
+  credential and writing it.
+
+### Expected merge conflict zones
+
+- LOW: the import block and the `builtinExtensions` array in `index.ts`, where every new provider lane adds a line.
+  `gpt-account.ts` itself is new and fork-only.
+
 ## Shared eval-only routing predicate for prompt surfaces (2026-09-03)
 
 ### What changed
