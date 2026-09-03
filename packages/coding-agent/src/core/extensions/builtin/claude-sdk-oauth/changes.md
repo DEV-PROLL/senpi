@@ -22,6 +22,7 @@
 - LOW in `session-sync.ts` around `appendContent`.
 - NEW file `content-blocks.ts`.
 ## 2026-09-03 - Accept a rotation-projected OAuth slot as configured
+## Surface SDK error text and classify is_error results (2026-09-03)
 
 ### What changed
 
@@ -38,6 +39,26 @@
 ### Expected merge conflict zones
 
 - LOW: `oauth-login.ts` around the `accountCount` computation in `configuredFor`. The same hunk appears in the open PRs #1304 and #1196.
+- `errors.ts`: added shared extraction for assistant text and `is_error` result failures, transport classification, and SDK code classifications.
+- `auth-lane.ts`: shared SDK failure extraction now carries real text, and transient token refresh failures are marked as server errors instead of permanent auth errors.
+- `stream.ts`: assistant and result failures terminate ambient streams with their actual text.
+- `session-registry-pump.ts`: `is_error` results reject and close claimed resident turns.
+- `session-turn-attempt.ts`: only genuine successful results record a successful turn.
+- `guidance.ts`: added version-floor and model-not-found remediation guidance.
+- `stream-guidance.ts`: appends actionable binary guidance to surfaced SDK errors.
+
+### Why
+
+- Claude Code emits useful API text beside a bare `unknown` assistant error and can mark an otherwise `success` result as `is_error`; losing either signal hides version failures and prevents session-limit and API-error failover.
+
+### Why an extension could not handle it
+
+- These SDK messages are classified inside the builtin provider's ambient stream, managed auth lane, and resident session pump before any extension-facing result exists.
+
+### Expected merge conflict zones
+
+- MEDIUM in `errors.ts`, `auth-lane.ts`, and `stream.ts` around SDK message failure extraction.
+- LOW in `session-registry-pump.ts`, `session-turn-attempt.ts`, `guidance.ts`, and `stream-guidance.ts`.
 ## 2026-09-02 - Honor tool-less summarization requests
 
 ### What changed
