@@ -5,6 +5,7 @@
 ### What changed
 
 - `packages/coding-agent/package.json`: `@anthropic-ai/claude-agent-sdk` 0.3.241 -> 0.3.259. Regenerated the coding-agent publish dependency closure, install lock, Claude Agent SDK platform lock, and root lockfiles from the refreshed pin.
+- `bun.lock`: besides the SDK entries, `bun install` also catches the workspace package versions up from `2026.9.2-4` to `2026.9.3`. The release commit `240fff144` bumped every workspace `package.json` and the npm locks but never regenerated `bun.lock`, so the tracked Bun lockfile was already stale on main; this PR records the state `bun install` produces from the current manifests and adds no dependency beyond the SDK's own optional platform packages.
 
 ### Why
 
