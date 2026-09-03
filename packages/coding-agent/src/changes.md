@@ -1,5 +1,23 @@
 # changes
 
+## 2026-09-03 - Announce print-mode model fallback on stderr
+
+### What changed
+
+- `packages/coding-agent/src/modes/print-mode.ts` writes one stderr line when `retry_fallback_applied`, `retry_fallback_exhausted`, or `retry_fallback_reverted` fires, in both text and json print modes, without changing JSON stdout.
+
+### Why
+
+- `senpi -p` answered on a fallback model with no human-visible notice, so users could treat the wrong model's output as the requested model's. JSON mode already streamed `retry_fallback_applied` on stdout; stderr is the channel that does not corrupt that stream.
+
+### Why an extension could not handle it
+
+- Print mode owns the `-p` / `--mode json` I/O path and is the only subscriber that can write stderr without going through the interactive TUI. Retry fallback already emits session events; the hole is print-mode rendering, not the controller.
+
+### Expected merge conflict zones
+
+- LOW: the `session.subscribe` callback in `packages/coding-agent/src/modes/print-mode.ts`.
+
 ## 2026-09-02 - Export the RPC open-in-flight client error
 
 ### What changed
