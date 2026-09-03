@@ -399,8 +399,6 @@ Windows paths in JSON must use forward slashes or escaped backslashes:
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `defaultTools` | string[] | - | Built-in tools enabled initially. When omitted, Pi uses its standard defaults |
-| `experimental.bashEvalOnly` | boolean | `false` | Route `bash` and `powershell` through eval cells only; the tools leave the model's direct tool list |
-| `experimental.workflowEvalOnly` | boolean | `false` | Route the workflow (dag) tool through eval cells only; the tool leaves the model direct tool list |
 
 `defaultTools` selects the built-in tools enabled at startup. Extension and SDK custom tools remain enabled. Available built-ins are `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`:
 
@@ -420,37 +418,17 @@ On Windows, select `powershell` instead of `bash`, or include both:
 
 An empty array starts with no built-in tools while preserving extension and SDK custom tools. `--tools` replaces this behavior with a strict allowlist for all tools, `--no-tools` disables all tools, and `--no-builtin-tools` disables the built-in defaults. `--exclude-tools` filters the resulting list. A project `defaultTools` array replaces the global array.
 
-With `experimental.bashEvalOnly` enabled, the `bash` and `powershell` tools disappear from the model's direct tool list and run only inside eval cells:
+#### Eval-only tools
 
-```json
-{
-  "experimental": {
-    "bashEvalOnly": true
-  }
-}
-```
+Whenever the `eval` tool is available (codemode loaded), `bash`, `powershell`, `workflow` and `monitor` leave the model's direct tool list and run only inside eval cells:
 
 ```js
 const { output } = await tool.bash({ command: "ls -la" });
-```
-
-Hooks and permission checks apply unchanged to shell commands run this way. If the model hallucinates a direct `bash` or `powershell` call anyway, the call returns a hint redirecting it to an eval cell. When the `eval` tool is unavailable (codemode not loaded), the policy auto-disables and both tools stay on the direct tool list, so shell access is never lost.
-
-With `experimental.workflowEvalOnly` enabled, the `workflow` (dag) tool disappears from the model's direct tool list and runs only inside eval cells:
-
-```json
-{
-  "experimental": {
-    "workflowEvalOnly": true
-  }
-}
-```
-
-```js
 const snapshot = await tool.workflow({ action: "snapshot", run_id });
+await tool.monitor({ description: "build", command: "bun run build", filter: "^done" });
 ```
 
-Hooks and permission checks apply unchanged to workflow operations run this way. When the `eval` tool is unavailable (codemode not loaded), the policy auto-disables and the workflow tool stays on the direct tool list, so workflow access is never lost.
+This is the default and has no setting. Hooks and permission checks apply unchanged to calls made this way, and the prompt surfaces that document these tools render the `tool.<name>(` form to match. If the model attempts a direct call anyway, the call returns a hint naming the eval form. When the `eval` tool is unavailable (codemode not loaded, or a child agent whose allowlist omits it), the policy stays inert and all four tools remain directly callable, so shell, workflow and monitor access is never lost.
 
 ### Sessions
 
