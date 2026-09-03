@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- TTSR now interrupts a single streamed assistant message that repeats the same paragraph three times (a within-message narration loop such as re-announcing the same "now writing the DAG cell" step for minutes without ever issuing the tool call): the collapse guard gains a paragraph-repeat mechanism, truncates the message from the first repeat, and injects the usual recovery nudge. Scalar runs, short periods, and line cycles were the only mechanisms before, and blank lines reset line-cycle tracking, so paragraph-level loops streamed unchecked until the user aborted. Tool-argument streams are not affected.
+
 ### New Features
 
 ### Breaking Changes
