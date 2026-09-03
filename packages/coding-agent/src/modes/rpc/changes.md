@@ -1,5 +1,30 @@
 # changes
 
+## `media_placeholders`: inline tool-result images are replaced at one choke point (2026-09-03)
+
+### What changed
+
+- New pure module `media-placeholders.ts` exports `omitInlineMedia(record)`. It replaces `{type:"image", data:<base64>}` blocks with `{type:"image_ref", mimeType, byteLength, ref:{toolCallId, contentIndex}}` inside every object carrying `role:"toolResult"` and inside `tool_execution_end.result.content`. `byteLength` is derived from the base64 string length (`floor(len*3/4) - padding`); the payload is never decoded. User-authored images (`prompt.images`) are left intact.
+- The transform is type-gated first: only `tool_execution_end`, `message_start`, `message_end`, `turn_end`, `agent_end`, `entry_appended`, and `response` records whose command is one of `get_messages`, `get_entries`, `get_tree`, `get_state`, `open_session` are walked. `message_update` — one record per token — is never walked.
+- The walk is copy-on-write and returns the SAME record reference when nothing changed, so unchanged sub-trees keep their identity and live agent state handed to `success()` by reference is never mutated.
+- `SessionEventWriter.enqueue` applies it once, after `targets()`: when no target advertises `media_placeholders` the record is not walked and `serializeJsonLine` is still called exactly once, byte-identical to before. Otherwise the placeholder line is built once and each target is handed the variant it advertised.
+- `SessionEventFanout` gained the generic `connectionHas(id, capability)` accessor; the four hard-coded `"rendered_components"` string checks now go through it with `RENDERED_COMPONENTS_CAPABILITY`. Behavior is unchanged.
+- `SnapshotRecord` gained `placeholderLine` and the source record. `replaySnapshot` picks the variant by the attaching connection's capability; the variant is derived on the first capable replay and memoized, so a session with no capable client pays nothing and replay stays O(1) per record.
+
+### Why
+
+- Four base64 `read` results overflowed a socket queue in one burst (2026-09-03, omo-desktop) and the host then dropped every record and command response for that connection. Gating the bytes on a client capability is the structural fix the previous entry recorded as a follow-up.
+- The image-carrying wire paths are not enumerable reliably: beyond the obvious events, `entry_appended`, `get_entries`, `get_tree` and `open_session`'s `state.entries` all carry `ToolResultMessage.content`. Every one of them converges on `SessionEventWriter.enqueue` in multi-session mode, so the transform runs there once instead of at each call site.
+
+### Scope
+
+- Classic single-connection stdio mode is out of scope: applying the transform there needs a second application point in `connection-handler.ts`, and no stdio client asks for placeholders.
+- A default client (one that never advertised `media_placeholders`) receives byte-identical output.
+
+### Expected merge conflict zones
+
+- LOW: `session-event-writer.ts` `enqueue` fan-out loop and `session-event-fanout.ts` snapshot record shape.
+
 ## Socket fan-out: lossless supersession, and overflow closes the socket (2026-09-03)
 
 ### What changed
