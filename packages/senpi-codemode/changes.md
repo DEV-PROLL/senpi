@@ -1,5 +1,27 @@
 # senpi-codemode fork changes
 
+## Bun child-process output stays inside the JS cell (2026-09-03)
+
+### What changed
+
+- New `src/kernels/js/worker-shell-capture.js` (+ `.d.ts`): `installShellCapture({ isActive, emitText })` replaces `Bun.$` and `Bun.spawn` on the worker's `Bun` global. While a cell is active, every `Bun.$` promise is switched to native quiet mode before its command starts and its captured stdout/stderr are echoed once into the cell's `text` stream when it settles — unless the cell reads it through `.quiet()`/`.text()`/`.json()`/`.lines()`/`.arrayBuffer()`/`.bytes()`/`.blob()`, which Bun itself keeps silent. Shell-level `env`/`cwd`/`nothrow`/`throws` chain on the captured shell; the `Shell`/`ShellPromise`/`ShellError`/`braces`/`escape` statics are carried over. `Bun.spawn` calls that leave `stderr` at its default get `stderr: "pipe"` and the pipe is drained into the cell's stderr stream; explicit `stderr`/`stdio` choices pass through. Outside an active cell both surfaces behave exactly as before (inline-worker mode shares the host globals). On Node the installer is a no-op.
+- `src/kernels/js/worker-runtime.js` installs the capture beside the existing `console`/`process.stdout.write` routing and restores it from `__senpi_restore_console__`.
+- `test/js-kernel-shell-capture.test.ts` pins the contract against a fake that mirrors the verified Bun 1.4 `ShellPromise` behavior (lazy start on `then`, internal quiet for the read methods, same-object chaining); `test/js-kernel-shell-capture-bun.test.ts` runs the real kernel under `bun` (skipped when `bun` is absent) and asserts the markers never reach the driver's fd 1/2.
+
+### Why
+
+- Bun's shell streams a command's output to the process' fd 1/2 unless `.quiet()` is applied or the output is read through a `.text()`-style helper (verified on bun 1.4.0: `await Bun.$\`echo x\`.nothrow()` prints `x` to stdout AND captures it), and `Bun.spawn` defaults `stderr` to `inherit`. Inside the JS kernel those fds are the interactive TUI's terminal, so a cell doing `await $\`vibe-notion page get … --pretty\`.nothrow().then(r => r.stdout)` dumped the whole pretty-printed JSON onto the screen (observed 2026-09-03: a Notion page's block JSON landed in the user's editor and was pasted into the next prompt). The existing `routeWrite` only intercepts JS-level `process.stdout.write`; native child-output writes bypass it.
+- Echoing the captured output into the cell instead of only silencing it keeps Bun's documented "the output is visible" semantics at the correct sink, consistent with how `console.log` is routed today.
+
+### Why an extension could not handle it
+
+- The worker's `Bun` global and the cell-activity gate (`#hooks`) live inside this package's worker runtime; nothing outside the worker can wrap `Bun.$` before a cell's first `then` or attribute an emission to the running cell.
+
+### Expected merge conflict zones
+
+- LOW in `src/kernels/js/worker-runtime.js` around `#installGlobals` (import plus install/restore lines).
+- NONE for the new module and tests.
+
 ## Binary skill resolution and stdout-safe miss reporting (2026-09-02)
 
 ### What changed
