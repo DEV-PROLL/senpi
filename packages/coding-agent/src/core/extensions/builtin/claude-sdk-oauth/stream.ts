@@ -20,6 +20,7 @@ import { type ContinuityObservation, emitContinuityObservation } from "./session
 import { residentSessionMessages } from "./session-stream.ts";
 import { loadClaudeSdkOauthProviderSettingsFromDisk } from "./settings.ts";
 import { applyStreamEvent } from "./stream-events.ts";
+import { sdkAssistantFailure, sdkResultFailure } from "./errors.ts";
 import { withAuthGuidance } from "./stream-guidance.ts";
 import { emptyOutput, errorMessage, mapStopReason, type StreamBlock, updateUsage } from "./stream-protocol.ts";
 import { toolWatch } from "./tool-watch.ts";
@@ -155,6 +156,13 @@ export function streamClaudeSdkOauth(
 			for await (const message of messages) {
 				const refusal = refusalError(message);
 				if (refusal) throw refusal;
+				const failure =
+					message.type === "assistant"
+						? sdkAssistantFailure(message)
+						: message.type === "result"
+							? sdkResultFailure(message)
+							: undefined;
+				if (failure) throw failure;
 				if (!started) {
 					stream.push({ type: "start", partial: output });
 					started = true;
@@ -195,12 +203,6 @@ export function streamClaudeSdkOauth(
 						output.stopReason = mapStopReason(message.stop_reason);
 					}
 					if (!sawStreamEvent) output.content.push({ type: "text", text: message.result });
-				} else if (message.type === "result") {
-					const reason =
-						"errors" in message && Array.isArray(message.errors) && message.errors.length > 0
-							? String(message.errors[0])
-							: `Claude Code ${message.subtype}`;
-					throw new Error(reason);
 				}
 			}
 

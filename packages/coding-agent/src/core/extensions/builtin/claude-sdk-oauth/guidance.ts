@@ -30,6 +30,16 @@ export function allAccountsBlockedGuidance(soonestUnblockAt: number | undefined)
 	].join("\n");
 }
 
+export function claudeCodeVersionFloorGuidance(text: string): string | undefined {
+	if (/does not support this model; version (\S+?) or newer is required|claude_code_version_too_old/i.test(text)) {
+		return "The bundled Claude Code binary is too old for this model. Update senpi/omo (it ships a newer @anthropic-ai/claude-agent-sdk) or set CLAUDE_CODE_EXECUTABLE to a Claude Code <version> or newer binary.";
+	}
+	if (/\bmodel_not_found\b|unrecognized_model|not found for provider/i.test(text)) {
+		return "The bundled Claude Code binary does not know this model id; update senpi/omo or set CLAUDE_CODE_EXECUTABLE to a newer Claude Code binary.";
+	}
+	return undefined;
+}
+
 export function sdkErrorGuidance(kind: SdkErrorKind): string | undefined {
 	switch (kind) {
 		case "org_not_allowed":
