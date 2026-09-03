@@ -12,7 +12,6 @@
 
 - Adding a second account to a provider whose stored credential predates credential pools (a flat entry with no `accounts` array, which is what `openai-codex` OAuth login writes) no longer overwrites the first one. `appendLoginSlot` now promotes that legacy credential into the pool as the `default` slot and stores the new login beside it as `login-2`, so both accounts remain usable and the flat top-level fields still authenticate a build predating pools. First login (no stored credential) still writes the flat credential as-is, and a provider that returns its own populated `accounts` array is still written through untouched.
 - Removing the account whose material the flat top-level credential fields projected no longer leaves the pool authenticating as the deleted account. `removeSlot` now re-projects those fields from the first surviving slot, so a pool left with a single account (which does not enter credential rotation and therefore resolves through the flat projection) immediately uses the account that remains. `accounts` is kept, removing a non-projected slot still leaves the flat fields untouched, and removing the last slot still drops the credential entirely.
-- Provider-owned OAuth account pools now survive login persistence and overlapping login flows without losing provider-assigned account names or converting sentinel projections into generated slots.
 
 ### Removed
 
