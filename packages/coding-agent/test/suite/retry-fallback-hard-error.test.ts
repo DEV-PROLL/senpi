@@ -119,8 +119,7 @@ describe("retry fallback hard errors", () => {
 		expect(harness.faux.state.callCount).toBe(1);
 		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
 		expect(harness.eventsOfType("retry_fallback_applied")).toEqual([]);
-		const messages = harness.session.state.messages;
-		expect(messages[messages.length - 1]).toMatchObject({ errorMessage: insufficientQuota });
+		expect(harness.session.state.messages.at(-1)).toMatchObject({ errorMessage: insufficientQuota });
 	});
 
 	it("does not replay a hard error that contains a tool call", async () => {
@@ -159,8 +158,7 @@ describe("retry fallback hard errors", () => {
 
 		expect(harness.faux.state.callCount).toBe(1);
 		expect(harness.eventsOfType("auto_retry_start")).toEqual([]);
-		const messages = harness.session.state.messages;
-		expect(messages[messages.length - 1]).toMatchObject({ errorMessage: toolSchemaRejection });
+		expect(harness.session.state.messages.at(-1)).toMatchObject({ errorMessage: toolSchemaRejection });
 	});
 
 	it("switches models immediately on a tool-schema rejection instead of retrying in place", async () => {

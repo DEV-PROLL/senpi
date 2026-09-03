@@ -1,4 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { GOAL_CONTINUATION_MESSAGE_TYPE } from "../../../messages.ts";
 import type { StoredBinding } from "./session-binding-store.ts";
 import { assistantContentHash } from "./session-commit-boundary.ts";
 import type { ContinuityBinding } from "./session-reattach.ts";
@@ -74,11 +75,10 @@ export function storedBindingFromBinding(
 ): StoredBinding | undefined {
 	if (binding.sdkSessionIdConfirmed === false) return undefined;
 	if (binding.sentCount !== hashes.length) return undefined;
-	if (binding.sentPrefixHash !== undefined && binding.sentPrefixHash !== sentHashPrefixDigest(hashes))
-		return undefined;
-	if (binding.sentHashes.length > 0 && sentHashPrefixDigest(binding.sentHashes) !== sentHashPrefixDigest(hashes)) {
-		return undefined;
-	}
+	const expectedDigest = sentHashPrefixDigest(hashes);
+	const bindingDigest =
+		binding.sentPrefixHash ?? (binding.sentHashes.length > 0 ? sentHashPrefixDigest(binding.sentHashes) : undefined);
+	if (bindingDigest === undefined || bindingDigest !== expectedDigest) return undefined;
 	return {
 		schemaVersion: 1,
 		sessionPath: anchor.sessionPath,
@@ -131,16 +131,9 @@ const SAFE_BINDING_SUFFIX_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 function isSafeBindingSuffix(entry: BranchEntry): boolean {
-	if (entry.type === "label" || entry.type === "custom_message") return true;
-	if (entry.type === "message") {
-		return isSentMessage(entry.message);
-	}
+	if (entry.type === "label") return true;
+	if (entry.type === "custom_message") return entry.customType === GOAL_CONTINUATION_MESSAGE_TYPE;
 	return entry.type === "custom" && entry.customType !== undefined && SAFE_BINDING_SUFFIX_TYPES.has(entry.customType);
-}
-
-function isSentMessage(value: unknown): boolean {
-	if (typeof value !== "object" || value === null || !("role" in value)) return false;
-	return value.role === "user" || value.role === "toolResult";
 }
 
 function newestBindingEntryIndex(branch: readonly BranchEntry[]): number {

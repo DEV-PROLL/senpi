@@ -4,6 +4,7 @@ import {
 	BINDING_ENTRY_TYPE,
 	BINDING_MARKER,
 	bindingFromStoredBranch,
+	storedBindingFromBinding,
 	storedBindingFromEntry,
 } from "../src/core/extensions/builtin/claude-sdk-oauth/session-binding.ts";
 import type { StoredBinding } from "../src/core/extensions/builtin/claude-sdk-oauth/session-binding-store.ts";
@@ -89,7 +90,7 @@ describe("claude-sdk-oauth stored binding anchor", () => {
 		expect(bindingFromStoredBranch([marker(), assistantEntry(assistant("rewritten"))], stored())).toBeUndefined();
 	});
 
-	it("allows unsent goal continuation context after the committed assistant", () => {
+	it("allows goal continuation context after the committed assistant", () => {
 		const branch = [
 			marker(),
 			assistantEntry(),
@@ -105,10 +106,42 @@ describe("claude-sdk-oauth stored binding anchor", () => {
 				customType: "goal-cache-warmup",
 				data: { phase: "scheduled" },
 			},
-			{ type: "message" as const, id: "later-user", message: { role: "user" as const, content: "resume" } },
 		];
 
 		expect(bindingFromStoredBranch(branch, stored())).toMatchObject({ sdkSessionId: "sdk-1", sentCount: 2 });
+	});
+
+	it("rejects a later user message after the committed assistant", () => {
+		const branch = [
+			marker(),
+			assistantEntry(),
+			{ type: "message" as const, id: "later-user", message: { role: "user" as const, content: "resume" } },
+		];
+
+		expect(bindingFromStoredBranch(branch, stored())).toBeUndefined();
+	});
+
+	it("rejects a count-only fallback binding", () => {
+		const binding = {
+			senpiSessionId: "senpi-1",
+			sdkSessionId: "sdk-1",
+			sentCount: 1,
+			sentHashes: [],
+			lastAssistantUuid: null,
+			accountName: "primary",
+			modelId: "claude-test",
+			systemPromptHash: PROMPT_HASH,
+			toolsetHash: TOOLSET_HASH,
+			sdkSessionIdConfirmed: true,
+		};
+		expect(
+			storedBindingFromBinding(binding, ["different"], {
+				sessionPath: "/tmp/session.jsonl",
+				sessionId: "senpi-1",
+				markerEntryId: "marker-1",
+				assistantContentHash: assistantContentHash(assistant()),
+			}),
+		).toBeUndefined();
 	});
 
 	it("rejects a stale anchor followed by another assistant", () => {

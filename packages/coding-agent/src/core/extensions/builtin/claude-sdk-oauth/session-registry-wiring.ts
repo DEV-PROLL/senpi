@@ -142,7 +142,6 @@ export function registerSessionRegistry(
 		if (!sessionFile || !pi.appendEntry) return;
 		const context = ctx.sessionManager.buildSessionContext();
 		const hashes = sentMessageHashes(sentMessages({ ...context, messages: convertToLlm(context.messages) }));
-		if (hashes.length === 0) return;
 		pi.appendEntry(BINDING_ENTRY_TYPE, BINDING_MARKER);
 		const markerEntryId = ctx.sessionManager.getLeafId();
 		if (!markerEntryId) return;
