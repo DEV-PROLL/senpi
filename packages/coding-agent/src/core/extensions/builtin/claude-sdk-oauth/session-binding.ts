@@ -74,7 +74,8 @@ export function storedBindingFromBinding(
 ): StoredBinding | undefined {
 	if (binding.sdkSessionIdConfirmed === false) return undefined;
 	if (binding.sentCount !== hashes.length) return undefined;
-	if (binding.sentPrefixHash !== undefined && binding.sentPrefixHash !== sentHashPrefixDigest(hashes)) return undefined;
+	if (binding.sentPrefixHash !== undefined && binding.sentPrefixHash !== sentHashPrefixDigest(hashes))
+		return undefined;
 	if (binding.sentHashes.length > 0 && sentHashPrefixDigest(binding.sentHashes) !== sentHashPrefixDigest(hashes)) {
 		return undefined;
 	}
