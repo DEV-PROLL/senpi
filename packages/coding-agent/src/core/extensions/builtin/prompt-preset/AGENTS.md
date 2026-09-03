@@ -20,9 +20,10 @@ prompt-preset/
 ├── gpt-5.6.ts           # GPT-5.6 series preset (sol/terra/luna) — dieted full-core rewrite via `corePrompt`; Hephaestus-parity autonomous deep worker (implement-don't-propose, Manual QA Gate, binding stop contract: declared per-turn stop condition + Stop Goal) under GPT-5.6 simplify-first doctrine; also owns `GPT56_EXECUTION_RULES` — typed execution-discipline rule data (eval-first code-cell routing, maximum parallel batching, over-call bias, in-kernel reduction, stay-direct exceptions, subagent fan-out, finest-grain todos, test-first, atomic commits, LSP symbol routing) rendered one directive per point of use
 ├── claude-fable-5.ts    # Claude Fable 5 preset — dieted full-core rewrite via `corePrompt` (Fable 5 prompting guide; binding stop contract)
 ├── claude-fable-5-1.ts  # Claude Fable 5.1 preset — fable-5 core plus surgical deltas per the Fable 5.1 prompting guide (scope-is-deliverable, batching, surgical edits, test scope, formatting/narration recalibration); dotted release resolves before the generic fable-5 substring
-├── claude-opus-5.ts     # Claude Opus 5 preset — dieted full-core rewrite via `corePrompt` (Opus 5 prompting-guide behaviors; binding stop contract)
-├── claude-opus-4-{5,6,7,8}.ts  # Per-snapshot Opus 4.x presets (claude-opus-4-5.ts … 4-8.ts)
-├── glm-5-{2,3}.ts       # GLM 5.2 / 5.3 presets (glm-5-2.ts, glm-5-3.ts)
+├── claude-opus-5.ts     # Claude Opus 5 preset — dieted full-core rewrite via `corePrompt` on the fable-5-1 skeleton (one home per rule, Scope section) plus the Opus 5 guide deltas: bounded single-pass verification, delegation caps, narration cadence, correction filter, document length, short conciseness line, outcome-first final summary
+├── claude-opus-4-{5,6,7,8}.ts  # Per-snapshot Opus 4.x thin presets: execution-tooling stance + only the guide-documented deltas the shared core lacks (4.7/4.8: literal scope, tool-over-reasoning, same-turn subagent fan-out, house-style counter; 4.8 also reasons over what changed after a user turn; 4.6 carries no tuning text — claude.md documents nothing the dieted core lacks)
+├── glm-5.ts             # Shared GLM 5.x builder (`GLM5_TUNING` + `buildGlm5Prompt`): execution-tooling stance in the claude dialect (GLM is Claude-distilled) + a two-sentence tool-over-deliberation / short-loop tuning; 5.2 and 5.3 share one prompting surface (same base model, post-training delta only)
+├── glm-5-{2,3}.ts       # GLM 5.2 / 5.3 presets — thin aliases over `buildGlm5Prompt`
 ├── deepseek-v4.ts       # Shared DeepSeek V4 rule data (`DEEPSEEK_V4_RULES`) + tuning builders (directive authority, todo discipline, missing-info, settled-reading, reasoning-aim)
 ├── deepseek-v4-flash.ts # DeepSeek V4 Flash preset (thin tuningSection over the shared core)
 ├── deepseek-v4-flash-0731.ts # DeepSeek V4 Flash 0731 snapshot preset — dated snapshot resolves before the generic flash alias
@@ -39,7 +40,8 @@ prompt-preset/
 | Add a preset for a new model release | new `<family>.ts` + entry in `presets.ts` |
 | Tune GPT-5.x file-handling guidance | `file-operations.ts` (all GPT presets append it) |
 | Tune GPT-5.6 execution discipline (eval/parallel/TDD/commits/LSP) | `gpt-5.6.ts` `GPT56_EXECUTION_RULES` + `test/suite/prompt-presets-gpt-5-6.test.ts` |
-| Tune the eval-default / monitor-subscription stance for Claude and Kimi presets | `execution-tooling.ts` + `test/suite/prompt-presets-execution-tooling.test.ts` |
+| Tune the eval-default / monitor-subscription stance for Claude, GLM, and Kimi presets | `execution-tooling.ts` + `test/suite/prompt-presets-execution-tooling.test.ts` |
+| Tune GLM 5.x behavior | `glm-5.ts` `GLM5_TUNING` (both 5.2 and 5.3 render it) |
 | Adjust model-id → preset matching | `presets.ts` `resolvePresetName()` |
 | User override via settings | `settings.ts` `PromptPresetName` |
 
@@ -66,7 +68,8 @@ Exception: `gpt-5.5.ts`, `gpt-5.6.ts`, `kimi-k3.ts`, `claude-fable-5.ts`, and `c
 - **Model-family naming, not personas**: presets are named after the model they target (`gpt-5.ts`, not `coder.ts`). The 2026-04-30 rename removed persona-style names.
 - **`file-operations.ts` is appended to EVERY GPT-5.x preset**. New GPT preset → mirror this. Negative-only directives lose to model priors; pair them with positive routing.
 - **`resolvePresetName()` is cheap** (used by startup header). `resolvePreset()` builds the full prompt — call only when needed.
-- **Don't duplicate identity / intent / exploration** in a preset — they're already in the default builder.
+- **Don't duplicate identity / intent / exploration** in a preset — they're already in the default builder. The dieted core (2026-09-02/03) also carries one-plan commitment, scope fidelity, the conditional delegation rule, and the auto-compaction continuation fact — a tuning line that restates any of these is dead weight (2026-09-03 audit removed such lines from every Opus 4.x and GLM preset).
+- **A tuning line must be documented for the target model**: cite the guide section (or the preset's own probe evidence) in `changes.md`. A preset whose guide documents nothing beyond the core renders execution tooling only (`claude-opus-4-6.ts`).
 
 ## ANTI-PATTERNS
 
@@ -77,7 +80,7 @@ Exception: `gpt-5.5.ts`, `gpt-5.6.ts`, `kimi-k3.ts`, `claude-fable-5.ts`, and `c
 
 ## NOTES
 
-- Tests under `packages/coding-agent/test/suite/prompt-presets-*.test.ts` validate that each preset produces a non-empty `tuningSection` and contains the model-family signal.
+- Tests under `packages/coding-agent/test/suite/prompt-presets-*.test.ts` validate preset resolution per model-id shape, settings forcing, and catalog coverage; shared tuning text is asserted by shipped-copy equality against the exported constant (`GLM5_TUNING`), never by pinned sentences.
 - Prompt-content coverage asserts **parsed rule data**, never pinned sentences (senpi's `prompt-behavior-coverage` test-discipline rule). `prompt-presets-gpt-5-6.test.ts` is the reference shape: ids → concerns, each directive rendered exactly once, and a placement table that fails if a directive drifts out of its owning `## ` section.
 - The fork rationale: senpi is a neutral coding agent; persona-named presets collapsed identity into specific personas and made `--model` ↔ active preset hard to reason about. Family naming is the canonical resolution.
 - Adding a new model release: copy the closest existing preset, replace the model family in the test, update `presets.ts` matcher, add a regression test.

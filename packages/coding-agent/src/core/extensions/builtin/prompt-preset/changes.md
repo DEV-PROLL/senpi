@@ -1,5 +1,29 @@
 # prompt-preset Extension Changes
 
+## Opus 4.x / Opus 5 / GLM 5.x preset parity with the dieted cores (2026-09-03)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/builtin/prompt-preset/claude-opus-5.ts`: rebuilt on the claude-fable-5-1 skeleton (one home per rule, a `## Scope` section, literal register). The 2026-07-24 core stated the stop contract three times in one paragraph, scope twice, kept quoted anti-example scaffolding, a default-trait list, and a Hard Limit the claim-audit rule already covers; it lacked the Opus 5 guide's outcome-first final-summary shape and the 5.1 blocks (test scope, pre-existing bug as follow-up, blocked-part handling, ask after answer-independent work, surgical edits, claim audit). Every Opus 5 guide behavior is kept once where it binds: bounded single-pass verification, delegation caps fused with keep-working-while-they-run, narration cadence, correction filter, document length, the guide's short conciseness line. Rendered prompt (eval+monitor+task selected): 1,877 -> 1,984 o200k tokens; the growth is the missing documented behaviors, the repetition is gone.
+- `claude-opus-4-8.ts` / `claude-opus-4-7.ts`: tuning keeps only the guide-documented deltas the dieted core lacks (literal scope, tool-over-reasoning, house-style counter) and adds the guide's same-turn subagent fan-out direction (the guide: both models spawn fewer subagents by default and are steerable). 4.8 keeps its interactive-turn delta reduced to the non-duplicate half ("reason over what changed"). The compaction-continuation line and the "do not re-derive facts" clause are dropped: the core now carries both.
+- `claude-opus-4-6.ts`: tuning text removed entirely. Its three lines were the one-plan rule (now core Working the Task), scope literalism (documented for 4.7+, not 4.6), and compaction continuation (now core Style with the mechanism). claude.md documents nothing further for 4.6 that the dieted core lacks, so the preset renders the execution-tooling stance and the claude workstation dialect only. Rendered: 1,945 -> 1,916 tokens.
+- `claude-opus-4-5.ts`: compaction line dropped (same reason); the 4.5 ordered-steps tuning is unchanged.
+- `glm-5.ts` (new) + `glm-5-2.ts` / `glm-5-3.ts`: one shared builder. Removed from the old identical tunings: the lineage preamble ("Opus 4.6-class ... Fable 5 decisiveness ... GPT 5.5 outcome-first" - a model claim with no behavioral consequence), "the routing line is non-optional" (duplicates the Intent Gate), the "ultrawork mode" sentence (a mode the prompt never defines; omo's directive carries its own rules), the unconditional `todo` procedure (names a tool the turn may not have; the tool section carries it when present), "define the outcome ... stopping condition" and "prove completion with evidence" (Intent Gate / Verification). Added: the execution-tooling stance in the claude dialect (GLM is Claude-distilled; it was the only Claude-dialect preset without eval/monitor routing) and `GLM5_TUNING` - two sentences: tool call over deliberation, short act-inspect-verify loops (GLM-5 paper: strongest on repo exploration, weakest on long chained tasks where errors compound). 5.2 and 5.3 render identically: same base model, post-training delta only, no prompt-level guidance distinguishing them. Rendered: 1,776 -> 1,966 tokens, all of it the execution-tooling block.
+- `packages/coding-agent/test/suite/prompt-presets-execution-tooling.test.ts`: glm-5.2/glm-5.3 join `PRESET_DIALECT` (claude); OUT_OF_SCOPE keeps gpt-5.5/grok-4.6/deepseek-v4-flash. `prompt-presets-glm-5-2.test.ts` / `-5-3`: prose pins ("running on GLM", "absolute certainty", "todo") replaced by shipped-copy containment of `GLM5_TUNING`. `prompt-presets-model-switch.test.ts`: the 4.6 switch asserts the 4.7 literalism sentinel is absent instead of pinning removed 4.6 prose.
+- `AGENTS.md`: file table, WHERE TO LOOK, and conventions updated (documented-delta rule, no restating the dieted core).
+
+### Why
+
+- Prompt-engineering audit of every preset against the per-model guides (claude.md, Opus 4.7/4.8, Opus 5 at platform.claude.com, Fable 5/5.1, GPT-5.6, Kimi, Z.ai GLM-5/5.3 docs + the GLM-5 paper) after the universal core diet (#1302) moved the shared contracts into the core. Thin tunings that predated that diet now restated core rules (attention competition, no behavior gain); GLM carried undefined references and a tool name the turn may lack; the Opus 5 core repeated the very rule the guide says compounds with the model's own over-verification and lacked the guide's final-summary contract. The two core additions (conditional delegation, compaction mechanism - see `dynamic-prompt/changes.md`) give those behaviors one home so every thin preset drops its copy.
+
+### Why extension system couldn't handle this differently
+
+- Content-only change inside this builtin plus two sentences in the core builder it wraps.
+
+### Expected merge conflict zones on next upstream sync
+
+- LOW: all preset files are fork-only; `glm-5.ts` is new.
+
 ## Execution tooling stance: eval-default + monitor subscription (2026-09-02)
 
 ### What changed

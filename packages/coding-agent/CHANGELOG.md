@@ -6,6 +6,8 @@
 
 ### Changed
 
+- Per-model system prompt presets for Claude Opus 4.5-4.8, Claude Opus 5, and GLM 5.2/5.3 are audited against their prompting guides and the dieted shared core: the Opus 5 core is rebuilt on the Fable 5.1 skeleton with the Opus 5 guide behaviors stated once each and gains the guide's outcome-first final-summary shape; Opus 4.7/4.8 keep only their documented deltas and gain the same-turn subagent fan-out direction; Opus 4.6 drops tuning text the core now carries; GLM 5.2/5.3 share one builder, gain the eval/monitor execution-tooling stance, and lose the lineage preamble, undefined-mode reference, and unconditional todo procedure. The shared core gains a conditional delegation rule and states the auto-compaction mechanism behind the context-limits rule.
+
 ### Fixed
 
 - Bundled Claude Code is now 2.1.259 via `@anthropic-ai/claude-agent-sdk` 0.3.259, so `claude-sdk-oauth` sessions on `claude-fable-5-1` no longer fail with the API 400 that required version 2.1.251 or newer ([#1298](https://github.com/code-yeongyu/senpi/issues/1298)).
