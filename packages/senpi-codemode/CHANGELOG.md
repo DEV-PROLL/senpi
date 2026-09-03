@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- JavaScript eval cells no longer leak child-process output onto the host terminal under Bun: `Bun.$` commands awaited without `.quiet()`/`.text()` and `Bun.spawn` children with the default stderr now route their output into the cell's stdout/stderr streams instead of the inherited fd 1/2 that the interactive TUI owns.
+
 ### Removed
 
 ## [2026.9.3] - 2026-09-03
