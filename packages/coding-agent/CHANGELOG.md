@@ -10,6 +10,7 @@
 
 - Claude SDK OAuth classifies Fable-style "requires usage credits" failures as a non-retryable entitlement instead of a rate limit, so the account is not blocked for 60s and AgentSession can fall through to the next model ([#709](https://github.com/code-yeongyu/senpi/issues/709)).
 - Print mode (`-p` / `--mode json`) now writes a stderr notice when retry fallback substitutes a model, so silent wrong-model answers are visible without corrupting JSON stdout ([oh-my-openagent#7626](https://github.com/code-yeongyu/oh-my-openagent/issues/7626)).
+- Claude SDK OAuth host-tool denial now states that Senpi executes the tool on the host and returns the result as the next user message, so models no longer treat "Do not retry with other tools; end the turn." as a failure ([#784](https://github.com/code-yeongyu/senpi/issues/784), [oh-my-openagent#7115](https://github.com/code-yeongyu/oh-my-openagent/issues/7115)).
 ### New Features
 
 ### Breaking Changes
