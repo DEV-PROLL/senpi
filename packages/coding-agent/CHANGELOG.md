@@ -10,6 +10,8 @@
 
 ### Added
 
+- The skills prompt section aliases each shared skill root to an `r0`/`r1` prefix once and renders per-skill locations relative to it, so the long absolute root is no longer billed per skill (145 skills, -1,137 tokens/turn).
+
 ### Changed
 
 ### Fixed
