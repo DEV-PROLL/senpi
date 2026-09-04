@@ -1071,7 +1071,8 @@ const MAX_MODEL_IDS = [
 
 function supportsMaxModel<TApi extends Api>(model: Model<TApi>): boolean {
 	if (!model.reasoning) return false;
-	if (OPENAI_MAX_APIS.includes(model.api) && OPENAI_MAX_MODEL_IDS.some((id) => matchesModelFamily(model.id, id))) return true;
+	if (OPENAI_MAX_APIS.includes(model.api) && OPENAI_MAX_MODEL_IDS.some((id) => matchesModelFamily(model.id, id)))
+		return true;
 	return MAX_MODEL_IDS.some((id) => matchesModelFamily(model.id, id));
 }
 
