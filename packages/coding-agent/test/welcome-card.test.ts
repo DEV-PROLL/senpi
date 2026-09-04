@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { GrokWelcomeCard } from "../src/modes/interactive/grok/welcome-card.ts";
+import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+
+initTheme();
 
 describe("GrokWelcomeCard", () => {
 	it("prefixes release versions with v", () => {
