@@ -1241,7 +1241,15 @@ export class AgentSession {
 					ephemeralThinkingLevel: thinking,
 				});
 			},
-			emit: (event) => this._emit(event),
+			emit: (event) => {
+				try {
+					this._emit(event);
+				} catch (error) {
+					this._sessionLogger.warn("retry_fallback_observer_failed", {
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			},
 			getCurrentSelector: () => (this.model ? { model: this.model, thinkingLevel: this.thinkingLevel } : undefined),
 			isAuthAvailable: (provider) => this._modelRuntime.hasConfiguredAuth(provider),
 		});
@@ -4727,28 +4735,48 @@ export class AgentSession {
 		this._currentServiceTier = this._resolveServiceTier(model, scopedMatch?.serviceTier);
 		this._applyProvisionalThinkingLevel(thinking, ephemeralThinking);
 
+		const runCommittedAction = (stage: string, action: () => void): void => {
+			try {
+				action();
+			} catch (error) {
+				this._sessionLogger.warn("model_switch_post_commit_failed", {
+					stage,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		};
 		const commitAfterPersistence = (): void => {
-			if (invalidatesCompaction) this._invalidateCompactionForModelSelection();
+			if (invalidatesCompaction) {
+				runCommittedAction("compaction_invalidation", () => this._invalidateCompactionForModelSelection());
+			}
 			if (opts.persistDefault) {
-				this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+				runCommittedAction("persist_default", () =>
+					this.settingsManager.setDefaultModelAndProvider(model.provider, model.id),
+				);
 			}
 			// Rewind the provisional level so the real setter observes the same before/after
 			// pair it would have seen without deferral, and therefore emits the same events,
 			// session entry, and fallback bookkeeping as an undeferred switch.
 			this.agent.state.thinkingLevel = previous.thinkingLevel;
 			this.agent.state.thinkingSelection = previous.thinkingSelection;
-			if (ephemeralThinking) this._applyEphemeralThinkingLevel(thinking.level);
-			else this._setThinkingLevel(thinking.level, false, thinking.selection);
-			this._emitHighReasoningWarningIfNeeded();
+			runCommittedAction("thinking_level", () => {
+				if (ephemeralThinking) this._applyEphemeralThinkingLevel(thinking.level);
+				else this._setThinkingLevel(thinking.level, false, thinking.selection);
+			});
+			runCommittedAction("reasoning_warning", () => this._emitHighReasoningWarningIfNeeded());
 			// Post-switch: the level reported here is the one actually in force (clamped, or restored
 			// from this model's memory), not the level requested for the previous model.
-			this._emit({
-				type: "model_changed",
-				model,
-				thinkingLevel: this.thinkingLevel,
-				source: opts.modelSelectSource,
+			runCommittedAction("model_changed", () => {
+				this._emit({
+					type: "model_changed",
+					model,
+					thinkingLevel: this.thinkingLevel,
+					source: opts.modelSelectSource,
+				});
 			});
-			this._emitServiceTierChangeIfNeeded(previous.tier, previous.fastMode);
+			runCommittedAction("service_tier", () =>
+				this._emitServiceTierChangeIfNeeded(previous.tier, previous.fastMode),
+			);
 		};
 
 		let systemPromptChange: SystemPromptChangeEvent | undefined;
@@ -4788,7 +4816,14 @@ export class AgentSession {
 		}
 		commitAfterPersistence();
 		if (systemPromptChange) {
-			await this._announceSystemPromptChange(systemPromptChange);
+			try {
+				await this._announceSystemPromptChange(systemPromptChange);
+			} catch (error) {
+				this._sessionLogger.warn("model_switch_post_commit_failed", {
+					stage: "system_prompt_change",
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
 		}
 		return systemPromptChange;
 	}
@@ -7759,6 +7794,21 @@ export class AgentSession {
 	 * @returns whether retry continuation started, was blocked by compaction, or was not handled
 	 */
 	private async _handleRetryableError(
+		message: AssistantMessage,
+		options: { hardErrorFallback?: boolean; sameModelRemint?: boolean } = {},
+	): Promise<"continued" | "blocked" | "not-handled" | "cancelled"> {
+		try {
+			return await this._handleRetryableErrorOwned(message, options);
+		} catch (error) {
+			this._sessionLogger.warn("retry_fallback_handler_failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			this._resolveRetry();
+			return "not-handled";
+		}
+	}
+
+	private async _handleRetryableErrorOwned(
 		message: AssistantMessage,
 		options: { hardErrorFallback?: boolean; sameModelRemint?: boolean } = {},
 	): Promise<"continued" | "blocked" | "not-handled" | "cancelled"> {

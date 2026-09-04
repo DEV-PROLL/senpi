@@ -6,6 +6,11 @@ import type { RetryFallbackExhaustedEvent } from "../../src/index.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
 type RetryInternals = {
+	readonly _retryFallback: {
+		readonly activeState?: {
+			readonly chainKey: string;
+		};
+	};
 	_handleRetryableError: (
 		message: ReturnType<typeof fauxAssistantMessage>,
 		options: { hardErrorFallback: boolean },
@@ -98,12 +103,20 @@ describe("retry fallback exhaustion isolation", () => {
 
 		// when
 		await started;
-		await Promise.resolve();
 
 		// then
+		let timeout: ReturnType<typeof setTimeout> | undefined;
 		try {
+			const result = await Promise.race([
+				retry,
+				new Promise<never>((_, reject) => {
+					timeout = setTimeout(() => reject(new Error("retry remained blocked by exhaustion handler")), 500);
+				}),
+			]);
+			expect(result).toBe("not-handled");
 			expect(settled).toBe(true);
 		} finally {
+			if (timeout) clearTimeout(timeout);
 			releaseNotify?.();
 			await retry;
 		}
@@ -166,7 +179,7 @@ describe("retry fallback exhaustion isolation", () => {
 		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "model_change")).toEqual([]);
 	});
 
-	it("keeps a persisted fallback active when a post-commit observer throws", async () => {
+	it("completes a fallback turn when post-commit observers throw", async () => {
 		// given
 		const harness = await createHarness({
 			models: [
@@ -183,29 +196,66 @@ describe("retry fallback exhaustion isolation", () => {
 			},
 		});
 		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "upstream unavailable" }),
+			fauxAssistantMessage("fallback answer"),
+		]);
 		harness.session.subscribe((event) => {
-			if (event.type === "model_changed" && event.model.id === "faux-2") {
+			if (
+				(event.type === "model_changed" && event.model.id === "faux-2") ||
+				event.type === "retry_fallback_applied"
+			) {
 				throw new Error("observer failed after commit");
 			}
 		});
 
 		// when
-		const result = await retryInternals(harness)
-			._handleRetryableError(
-				fauxAssistantMessage("", { stopReason: "error", errorMessage: "upstream unavailable" }),
-				{ hardErrorFallback: true },
-			)
-			.then(
-				() => "returned" as const,
-				(error: unknown) => (error instanceof Error ? error.message : String(error)),
-			);
+		await harness.session.prompt("complete through fallback");
 
 		// then
-		expect(result).toBe("observer failed after commit");
 		expect(harness.session.model?.id).toBe("faux-2");
 		expect(harness.sessionManager.getEntries()).toContainEqual(
 			expect.objectContaining({ type: "model_change", modelId: "faux-2", reason: "fallback" }),
 		);
+		expect(retryInternals(harness)._retryFallback.activeState?.chainKey).toBe("faux/faux-1");
+		expect(harness.session.isRetrying).toBe(false);
+		const lastMessage = harness.sessionManager.buildSessionContext().messages.at(-1);
+		if (lastMessage?.role !== "assistant") throw new Error("missing fallback assistant response");
+		expect(lastMessage.content).toEqual([{ type: "text", text: "fallback answer" }]);
+	});
+
+	it("settles the public prompt lifecycle when fallback persistence fails", async () => {
+		// given
+		const harness = await createHarness({
+			models: [
+				{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 4_000 },
+				{ id: "faux-2", contextWindow: 200_000, maxTokens: 4_000 },
+			],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 0,
+					baseDelayMs: 1,
+					fallbackChains: { "faux/faux-1": ["faux/faux-2"] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("", { stopReason: "error", errorMessage: "upstream unavailable" })]);
+		const persist = Reflect.get(harness.sessionManager, "_persist");
+		if (typeof persist !== "function") throw new Error("missing session persistence seam");
+		Reflect.set(harness.sessionManager, "_persist", (entry: { readonly type: string }) => {
+			if (entry.type === "model_change") throw new Error("disk full");
+			return Reflect.apply(persist, harness.sessionManager, [entry]);
+		});
+
+		// when
+		await harness.session.prompt("fail fallback persistence");
+
+		// then
+		expect(harness.session.isRetrying).toBe(false);
+		expect(harness.session.model?.id).toBe("faux-1");
+		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "model_change")).toEqual([]);
 	});
 
 	it("bounds the extension exhaustion diagnostics", async () => {
