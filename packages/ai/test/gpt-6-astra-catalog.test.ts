@@ -16,7 +16,7 @@ for (const provider of ["openai", "openai-codex"] as const) {
 			expect(model).toMatchObject({
 				id: "gpt-6-astra",
 				name: "GPT-6 Astra",
-				api: "openai-responses",
+				api: provider === "openai" ? "openai-responses" : "openai-codex-responses",
 				provider,
 				baseUrl: provider === "openai" ? "https://api.openai.com/v1" : "https://chatgpt.com/backend-api",
 				reasoning: true,
@@ -30,7 +30,7 @@ for (const provider of ["openai", "openai-codex"] as const) {
 		it("exposes only the supported reasoning efforts", () => {
 			const model = getModel(provider, "gpt-6-astra")!;
 			expect(model.thinkingLevelMap).toMatchObject({ off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" });
-			expect(getSupportedThinkingLevels(model)).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+			expect(getSupportedThinkingLevels(model)).toEqual(["low", "medium", "high", "xhigh", "max"]);
 			expect(supportsXhigh(model)).toBe(true);
 			expect(supportsMax(model)).toBe(true);
 		});
