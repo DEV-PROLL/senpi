@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
+import type { RetryFallbackExhaustedEvent } from "../../src/index.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
 type RetryInternals = {
@@ -43,19 +44,6 @@ function seedLiveContext(harness: Harness, tokens: number): void {
 	harness.session.agent.state.messages = harness.sessionManager.buildSessionContext().messages;
 }
 
-function registerUnknownEvent(pi: object, eventName: string, handler: (event: unknown) => unknown): void {
-	const register = Reflect.get(pi, "on");
-	if (typeof register !== "function") throw new Error("missing extension event registration");
-	Reflect.apply(register, pi, [eventName, handler]);
-}
-
-function objectValue(value: unknown): Record<string, unknown> {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		throw new Error("expected object value");
-	}
-	return Object.fromEntries(Object.entries(value));
-}
-
 describe("retry fallback exhaustion isolation", () => {
 	const harnesses: Harness[] = [];
 
@@ -88,7 +76,7 @@ describe("retry fallback exhaustion isolation", () => {
 			},
 			extensionFactories: [
 				(pi) => {
-					registerUnknownEvent(pi, "retry_fallback_exhausted", () => {
+					pi.on("retry_fallback_exhausted", () => {
 						notifyStarted?.();
 						return pending;
 					});
@@ -178,9 +166,51 @@ describe("retry fallback exhaustion isolation", () => {
 		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "model_change")).toEqual([]);
 	});
 
+	it("keeps a persisted fallback active when a post-commit observer throws", async () => {
+		// given
+		const harness = await createHarness({
+			models: [
+				{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 4_000 },
+				{ id: "faux-2", contextWindow: 200_000, maxTokens: 4_000 },
+			],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 0,
+					baseDelayMs: 1,
+					fallbackChains: { "faux/faux-1": ["faux/faux-2"] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.session.subscribe((event) => {
+			if (event.type === "model_changed" && event.model.id === "faux-2") {
+				throw new Error("observer failed after commit");
+			}
+		});
+
+		// when
+		const result = await retryInternals(harness)
+			._handleRetryableError(
+				fauxAssistantMessage("", { stopReason: "error", errorMessage: "upstream unavailable" }),
+				{ hardErrorFallback: true },
+			)
+			.then(
+				() => "returned" as const,
+				(error: unknown) => (error instanceof Error ? error.message : String(error)),
+			);
+
+		// then
+		expect(result).toBe("observer failed after commit");
+		expect(harness.session.model?.id).toBe("faux-2");
+		expect(harness.sessionManager.getEntries()).toContainEqual(
+			expect.objectContaining({ type: "model_change", modelId: "faux-2", reason: "fallback" }),
+		);
+	});
+
 	it("bounds the extension exhaustion diagnostics", async () => {
 		// given
-		const extensionEvents: unknown[] = [];
+		const extensionEvents: RetryFallbackExhaustedEvent[] = [];
 		const fallbackIds = Array.from({ length: 24 }, (_, index) => `fallback-${index + 1}`);
 		const harness = await createHarness({
 			models: [
@@ -197,7 +227,9 @@ describe("retry fallback exhaustion isolation", () => {
 			},
 			extensionFactories: [
 				(pi) => {
-					registerUnknownEvent(pi, "retry_fallback_exhausted", (event) => extensionEvents.push(event));
+					pi.on("retry_fallback_exhausted", (event) => {
+						extensionEvents.push(event);
+					});
 				},
 			],
 		});
@@ -209,14 +241,11 @@ describe("retry fallback exhaustion isolation", () => {
 			fauxAssistantMessage("", { stopReason: "error", errorMessage: "x".repeat(20_000) }),
 			{ hardErrorFallback: true },
 		);
-		const event = objectValue(extensionEvents[0]);
-		const rejected = event["rejectedCandidates"];
+		const event = extensionEvents[0];
 
 		// then
 		expect(extensionEvents).toHaveLength(1);
-		expect(typeof event["lastError"]).toBe("string");
-		expect(String(event["lastError"]).length).toBeLessThanOrEqual(8_192);
-		expect(Array.isArray(rejected)).toBe(true);
-		expect(Array.isArray(rejected) ? rejected.length : Number.POSITIVE_INFINITY).toBeLessThanOrEqual(16);
+		expect(event?.lastError.length).toBeLessThanOrEqual(8_192);
+		expect(event?.rejectedCandidates.length).toBeLessThanOrEqual(16);
 	});
 });

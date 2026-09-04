@@ -1031,7 +1031,9 @@ export class SessionManager {
 		if (!this.persist || !this.sessionFile) return;
 		const persistedEntry = this.residentStore.materialize(entry);
 
-		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
+		const hasAssistant =
+			(entry.type === "message" && entry.message.role === "assistant") ||
+			this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
 		if (!hasAssistant) {
 			if (this.flushed) {
 				appendFileSync(this.sessionFile, `${JSON.stringify(persistedEntry)}\n`);
@@ -1048,6 +1050,7 @@ export class SessionManager {
 				for (const e of this.fileEntries) {
 					writeFileSync(fd, `${JSON.stringify(this.residentStore.materialize(e))}\n`);
 				}
+				writeFileSync(fd, `${JSON.stringify(persistedEntry)}\n`);
 			} finally {
 				closeSync(fd);
 			}
@@ -1059,13 +1062,15 @@ export class SessionManager {
 
 	private _appendEntry(entry: SessionEntry): void {
 		const residentEntry = this.residentStore.externalize(entry);
+		// Persist first so a filesystem failure cannot expose an entry through the
+		// in-memory indexes while the durable session lacks it.
+		this._persist(residentEntry);
 		this.fileEntries.push(residentEntry);
 		this.byId.set(residentEntry.id, residentEntry);
 		this.entryOrdersById.set(residentEntry.id, this.fileEntries.length - 1);
 		this.leafId = residentEntry.id;
 		this._accumulateUsage(residentEntry);
 		this.mutationCount++;
-		this._persist(residentEntry);
 	}
 
 	/**

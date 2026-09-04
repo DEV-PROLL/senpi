@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { type CandidateUsability, RetryFallbackController } from "../../src/core/retry-fallback/controller.ts";
 import { SelectorCooldowns } from "../../src/core/retry-fallback/cooldown.ts";
+import type { RetryFallbackExhaustedEvent } from "../../src/index.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
 type SwitchRecord = {
@@ -95,6 +96,43 @@ describe("retry fallback context compatibility", () => {
 		expect(switches).toEqual([{ model: "compatible", thinking: "high" }]);
 	});
 
+	it("accepts a fallback with an unknown context window", async () => {
+		// given
+		const harness = await createHarness({
+			models: [
+				{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 4_000 },
+				{ id: "faux-2", contextWindow: 0, maxTokens: 4_000 },
+			],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 0,
+					baseDelayMs: 1,
+					fallbackChains: { "faux/faux-1": ["faux/faux-2"] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		const internals = harness.session as unknown as {
+			_handleRetryableError: (
+				message: ReturnType<typeof fauxAssistantMessage>,
+				options: { hardErrorFallback: boolean },
+			) => Promise<string>;
+		};
+
+		// when
+		await internals._handleRetryableError(
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "upstream unavailable" }),
+			{ hardErrorFallback: true },
+		);
+
+		// then
+		expect(harness.session.model?.id).toBe("faux-2");
+		expect(harness.sessionManager.getEntries()).toContainEqual(
+			expect.objectContaining({ type: "model_change", modelId: "faux-2", reason: "fallback" }),
+		);
+	});
+
 	it("rolls back a post-model-select budget rejection without persisting a fallback switch", async () => {
 		// given
 		const primaryTool: AgentTool = {
@@ -170,7 +208,7 @@ describe("retry fallback context compatibility", () => {
 
 	it("emits one extension-visible exhaustion event when every fallback is context-incompatible", async () => {
 		// given
-		const extensionEvents: unknown[] = [];
+		const extensionEvents: RetryFallbackExhaustedEvent[] = [];
 		const harness = await createHarness({
 			models: [
 				{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 4_000 },
@@ -186,12 +224,9 @@ describe("retry fallback context compatibility", () => {
 			},
 			extensionFactories: [
 				(pi) => {
-					const register = Reflect.get(pi, "on");
-					if (typeof register !== "function") throw new Error("missing extension event registration");
-					Reflect.apply(register, pi, [
-						"retry_fallback_exhausted",
-						(event: unknown) => extensionEvents.push(event),
-					]);
+					pi.on("retry_fallback_exhausted", (event) => {
+						extensionEvents.push(event);
+					});
 				},
 			],
 		});

@@ -8,7 +8,8 @@
   `RetryFallbackExhaustedEvent` and the matching
   `pi.on("retry_fallback_exhausted", ...)` overload. The payload names the session,
   active selector, exhausted chain, terminal provider error, exhaustion reason, and
-  the rejected candidate budget projections.
+  the rejected candidate budget projections. The event type is re-exported from
+  both the extension barrel and the package root for extension authors.
 
 ### Why
 
@@ -27,6 +28,8 @@
 
 - LOW: the event interface, `ExtensionEvent` union, and `ExtensionAPI.on` overload in
   `packages/coding-agent/src/core/extensions/types.ts`.
+- LOW: public type export lists in `packages/coding-agent/src/core/extensions/index.ts`
+  and `packages/coding-agent/src/index.ts`.
 
 
 ## Expose the extension event bus for session activity signals (2026-08-31)

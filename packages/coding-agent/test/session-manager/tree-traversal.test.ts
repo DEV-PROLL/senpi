@@ -66,6 +66,22 @@ describe("SessionManager append and tree traversal", () => {
 			expect(entries[2].parentId).toBe(modelId);
 		});
 
+		it("does not expose an entry when persistence fails", () => {
+			// given
+			const session = SessionManager.inMemory();
+			const entriesBefore = session.getEntries();
+			Reflect.set(session, "_persist", () => {
+				throw new Error("disk full");
+			});
+
+			// when
+			const append = () => session.appendModelChange("openai", "gpt-4");
+
+			// then
+			expect(append).toThrow("disk full");
+			expect(session.getEntries()).toEqual(entriesBefore);
+		});
+
 		it("appendCompaction integrates into tree", () => {
 			const session = SessionManager.inMemory();
 

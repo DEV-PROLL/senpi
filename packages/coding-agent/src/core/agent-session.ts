@@ -4589,7 +4589,7 @@ export class AgentSession {
 	 * live conversation only trades one dead lane for another, so the walk skips it.
 	 */
 	private _assessFallbackCandidate(model: Model<Api>): CandidateUsability {
-		if (model.contextWindow <= 0) return true;
+		if (model.contextWindow <= 0) return { usable: true };
 		const projection = projectModelUsabilityBudget({
 			model,
 			systemPrompt: this.agent.state.systemPrompt,
@@ -4727,20 +4727,8 @@ export class AgentSession {
 		this._currentServiceTier = this._resolveServiceTier(model, scopedMatch?.serviceTier);
 		this._applyProvisionalThinkingLevel(thinking, ephemeralThinking);
 
-		// Runs only once the target has cleared the post-`model_select` budget assert.
-		// Order matches an undeferred switch exactly: the durable record lands before any
-		// outward notification, so no observer can see a model that was not recorded.
-		const commit = (): void => {
+		const commitAfterPersistence = (): void => {
 			if (invalidatesCompaction) this._invalidateCompactionForModelSelection();
-			if (opts.appendSessionEntry) {
-				this.sessionManager.appendModelChange(
-					model.provider,
-					model.id,
-					opts.entryReason,
-					previousModel?.provider,
-					previousModel?.id,
-				);
-			}
 			if (opts.persistDefault) {
 				this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
 			}
@@ -4763,30 +4751,46 @@ export class AgentSession {
 			this._emitServiceTierChangeIfNeeded(previous.tier, previous.fastMode);
 		};
 
-		if (!opts.emitModelSelect) {
-			commit();
-			return undefined;
-		}
-		try {
-			this._provisionalModelSelectDepth++;
-			let systemPromptChange: SystemPromptChangeEvent | undefined;
+		let systemPromptChange: SystemPromptChangeEvent | undefined;
+		if (opts.emitModelSelect) {
 			try {
-				systemPromptChange = await this._emitModelSelect(model, previousModel, opts.modelSelectSource, {
-					deferSystemPromptAnnouncement: true,
-				});
-			} finally {
-				this._provisionalModelSelectDepth--;
+				this._provisionalModelSelectDepth++;
+				try {
+					systemPromptChange = await this._emitModelSelect(model, previousModel, opts.modelSelectSource, {
+						deferSystemPromptAnnouncement: true,
+					});
+				} finally {
+					this._provisionalModelSelectDepth--;
+				}
+				this.assertModelUsable(model, liveContextTokens);
+			} catch (error) {
+				await this._rollbackProvisionalModelSwitch(model, previous);
+				throw error;
 			}
-			this.assertModelUsable(model, liveContextTokens);
-			commit();
-			if (systemPromptChange) {
-				await this._announceSystemPromptChange(systemPromptChange);
-			}
-			return systemPromptChange;
-		} catch (error) {
-			await this._rollbackProvisionalModelSwitch(model, previous);
-			throw error;
 		}
+
+		// Persistence is the commit boundary. A failed append is still provisional
+		// and rolls back; once it succeeds, later observer failures must leave the
+		// runtime on the model recorded in session history.
+		if (opts.appendSessionEntry) {
+			try {
+				this.sessionManager.appendModelChange(
+					model.provider,
+					model.id,
+					opts.entryReason,
+					previousModel?.provider,
+					previousModel?.id,
+				);
+			} catch (error) {
+				await this._rollbackProvisionalModelSwitch(model, previous);
+				throw error;
+			}
+		}
+		commitAfterPersistence();
+		if (systemPromptChange) {
+			await this._announceSystemPromptChange(systemPromptChange);
+		}
+		return systemPromptChange;
 	}
 
 	/**
