@@ -220,6 +220,8 @@ function evalHelperCall(name: string): string {
 	return `tool.${name}({ ... })`;
 }
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
+const MAX_FALLBACK_EXHAUSTION_ERROR_CHARS = 8_192;
+const MAX_FALLBACK_EXHAUSTION_CANDIDATES = 16;
 const DEFERRED_RETRY_QUEUE_OWNERS = new WeakSet<object>();
 
 // ============================================================================
@@ -1069,6 +1071,7 @@ export class AgentSession {
 	private readonly _assistantsPendingAtCompaction = new WeakSet<AssistantMessage>();
 	private readonly _postCompactionUsageExemptAssistants = new WeakSet<AssistantMessage>();
 	private _messageRevision = 0;
+	private _provisionalModelSelectDepth = 0;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -3219,7 +3222,7 @@ export class AgentSession {
 			// binding itself, not to a mid-session change. The session was already
 			// committed to the client, so cancelling or invalidating work it started
 			// against that session would be spurious.
-			if (this._extensionBindingPromptReadiness === undefined) {
+			if (this._extensionBindingPromptReadiness === undefined && this._provisionalModelSelectDepth === 0) {
 				this.abortCompaction();
 				this._incrementMessageRevision();
 			}
@@ -4513,6 +4516,7 @@ export class AgentSession {
 		nextModel: Model<any>,
 		previousModel: Model<any> | undefined,
 		source: ModelSelectSource,
+		options: { deferSystemPromptAnnouncement?: boolean } = {},
 	): Promise<SystemPromptChangeEvent | undefined> {
 		this.syncPromptCacheSafeWaitEnv();
 		if (!this._modelSelectionChangesContext(previousModel, nextModel)) return undefined;
@@ -4546,9 +4550,16 @@ export class AgentSession {
 		if (result.systemPromptName) {
 			event.systemPromptName = result.systemPromptName;
 		}
+		if (options.deferSystemPromptAnnouncement) {
+			return event;
+		}
+		await this._announceSystemPromptChange(event);
+		return event;
+	}
+
+	private async _announceSystemPromptChange(event: SystemPromptChangeEvent): Promise<void> {
 		await this._extensionRunner.emit(event);
 		this._emit(event);
-		return event;
 	}
 
 	/**
@@ -4679,6 +4690,9 @@ export class AgentSession {
 			ephemeralThinkingLevel?: ThinkingLevel;
 		},
 	): Promise<SystemPromptChangeEvent | undefined> {
+		if (opts.entryReason !== "fallback") {
+			return this._switchActiveModelCommittedFirst(model, opts);
+		}
 		const previousModel = this.model;
 		const invalidatesCompaction =
 			opts.invalidateCompaction &&
@@ -4691,6 +4705,10 @@ export class AgentSession {
 		const previous = {
 			model: previousModel,
 			systemPrompt: this.agent.state.systemPrompt,
+			baseSystemPrompt: this._baseSystemPrompt,
+			tools: [...this.agent.state.tools],
+			requestedActiveToolNames: this._requestedActiveToolNames ? [...this._requestedActiveToolNames] : undefined,
+			withheldEvalOnlyToolNames: [...this._withheldEvalOnlyToolNames],
 			thinkingLevel: this.agent.state.thinkingLevel,
 			thinkingSelection: this.agent.state.thinkingSelection,
 			tier: this._currentServiceTier,
@@ -4750,12 +4768,101 @@ export class AgentSession {
 			return undefined;
 		}
 		try {
-			const systemPromptChange = await this._emitModelSelect(model, previousModel, opts.modelSelectSource);
+			this._provisionalModelSelectDepth++;
+			let systemPromptChange: SystemPromptChangeEvent | undefined;
+			try {
+				systemPromptChange = await this._emitModelSelect(model, previousModel, opts.modelSelectSource, {
+					deferSystemPromptAnnouncement: true,
+				});
+			} finally {
+				this._provisionalModelSelectDepth--;
+			}
 			this.assertModelUsable(model, liveContextTokens);
 			commit();
+			if (systemPromptChange) {
+				await this._announceSystemPromptChange(systemPromptChange);
+			}
 			return systemPromptChange;
 		} catch (error) {
 			await this._rollbackProvisionalModelSwitch(model, previous);
+			throw error;
+		}
+	}
+
+	/**
+	 * Preserve the established event order for manual selection, cycling, restore,
+	 * and fallback revert. Only automatic fallback admission needs the provisional
+	 * transaction because it may walk to another rung after a context rejection.
+	 */
+	private async _switchActiveModelCommittedFirst(
+		model: Model<Api>,
+		opts: {
+			persistDefault: boolean;
+			appendSessionEntry: boolean;
+			entryReason?: "fallback" | "fallback-revert";
+			emitModelSelect: boolean;
+			modelSelectSource: ModelSelectSource;
+			invalidateCompaction: boolean;
+			ephemeralThinkingLevel?: ThinkingLevel;
+		},
+	): Promise<SystemPromptChangeEvent | undefined> {
+		const previousModel = this.model;
+		if (
+			opts.invalidateCompaction &&
+			(this._modelSelectionChangesContext(previousModel, model) ||
+				previousModel?.provider !== model.provider ||
+				previousModel?.id !== model.id)
+		) {
+			this._invalidateCompactionForModelSelection();
+		}
+		const thinking = this._getThinkingForModelSwitch(model, opts.ephemeralThinkingLevel);
+		const liveContextTokens = this._getDownswitchLiveContextTokens(model);
+		this.agent.state.model = model;
+		this.agent.abortServerSideFallback =
+			this.settingsManager.getAbortServerSideFallback() && this._retryFallback.hasConfiguredChain();
+		if (opts.appendSessionEntry) {
+			this.sessionManager.appendModelChange(
+				model.provider,
+				model.id,
+				opts.entryReason,
+				previousModel?.provider,
+				previousModel?.id,
+			);
+		}
+		if (opts.persistDefault) {
+			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+		}
+
+		const scopedMatch = this._scopedModels.find((sm) => modelsAreEqual(sm.model, model));
+		const previousTier = this._currentServiceTier;
+		const previousFastMode = this.isFastModeActive();
+		this._currentServiceTier = this._resolveServiceTier(model, scopedMatch?.serviceTier);
+
+		if (opts.ephemeralThinkingLevel !== undefined) {
+			this._applyEphemeralThinkingLevel(thinking.level);
+		} else {
+			this._setThinkingLevel(thinking.level, false, thinking.selection);
+		}
+
+		this._emitHighReasoningWarningIfNeeded();
+		this._emit({
+			type: "model_changed",
+			model,
+			thinkingLevel: this.thinkingLevel,
+			source: opts.modelSelectSource,
+		});
+		this._emitServiceTierChangeIfNeeded(previousTier, previousFastMode);
+
+		if (!opts.emitModelSelect) return undefined;
+		const previousSystemPrompt = this.agent.state.systemPrompt;
+		try {
+			const systemPromptChange = await this._emitModelSelect(model, previousModel, opts.modelSelectSource);
+			this.assertModelUsable(model, liveContextTokens);
+			return systemPromptChange;
+		} catch (error) {
+			if (previousModel) this.agent.state.model = previousModel;
+			else delete (this.agent.state as { model?: Model<Api> }).model;
+			this.agent.state.systemPrompt = previousSystemPrompt;
 			throw error;
 		}
 	}
@@ -4787,27 +4894,53 @@ export class AgentSession {
 		previous: {
 			model: Model<Api> | undefined;
 			systemPrompt: string;
+			baseSystemPrompt: string;
+			tools: AgentTool[];
+			requestedActiveToolNames: string[] | undefined;
+			withheldEvalOnlyToolNames: string[];
 			thinkingLevel: ThinkingLevel;
 			thinkingSelection: ThinkingSelection | undefined;
 			tier: ServiceTier | undefined;
 			abortServerSideFallback: boolean | undefined;
 		},
 	): Promise<void> {
-		if (previous.model) this.agent.state.model = previous.model;
-		else delete (this.agent.state as { model?: Model<Api> }).model;
-		this.agent.state.systemPrompt = previous.systemPrompt;
-		this.agent.state.thinkingLevel = previous.thinkingLevel;
-		this.agent.state.thinkingSelection = previous.thinkingSelection;
-		this._currentServiceTier = previous.tier;
-		this.agent.abortServerSideFallback = previous.abortServerSideFallback;
+		const restoreSessionState = (): void => {
+			if (previous.model) this.agent.state.model = previous.model;
+			else delete (this.agent.state as { model?: Model<Api> }).model;
+			this.agent.state.systemPrompt = previous.systemPrompt;
+			this._baseSystemPrompt = previous.baseSystemPrompt;
+			this.agent.state.tools = [...previous.tools];
+			this._requestedActiveToolNames = previous.requestedActiveToolNames
+				? [...previous.requestedActiveToolNames]
+				: undefined;
+			this._withheldEvalOnlyToolNames.clear();
+			for (const name of previous.withheldEvalOnlyToolNames) {
+				this._withheldEvalOnlyToolNames.add(name);
+			}
+			this.agent.state.thinkingLevel = previous.thinkingLevel;
+			this.agent.state.thinkingSelection = previous.thinkingSelection;
+			this._currentServiceTier = previous.tier;
+			this.agent.abortServerSideFallback = previous.abortServerSideFallback;
+		};
+
+		restoreSessionState();
 		if (!previous.model) return;
 		try {
-			await this._emitModelSelect(previous.model, rejectedModel, "restore");
+			this._provisionalModelSelectDepth++;
+			try {
+				await this._emitModelSelect(previous.model, rejectedModel, "restore", {
+					deferSystemPromptAnnouncement: true,
+				});
+			} finally {
+				this._provisionalModelSelectDepth--;
+			}
 		} catch (error) {
-			// A failing resync must not replace the rejection the caller is about to
-			// report, and must not leave the prompt owned by the rejected model.
-			this.agent.state.systemPrompt = previous.systemPrompt;
 			console.error("model switch rollback could not resync model_select state", error);
+		} finally {
+			// Extension resynchronization is best-effort. Session-owned state is restored
+			// directly both before and after it so a handler that mutates and then fails
+			// cannot leak the rejected model's prompt or tools into the parent session.
+			restoreSessionState();
 		}
 	}
 
@@ -7479,16 +7612,17 @@ export class AgentSession {
 	}
 
 	private _isHardErrorFallbackEligible(message: AssistantMessage): boolean {
-		return (
+		const eligibleError =
 			!message.errorMessage?.startsWith(TURN_RETRY_SUPPRESSION_PREFIX) &&
 			message.stopReason === "error" &&
 			!isContextOverflow(message, this.model?.contextWindow ?? 0) &&
 			!this._isCursorPayloadOverflow(message) &&
 			!isCursorZeroTokenResourceExhausted(message) &&
 			!isClassifierRefusal(message) &&
-			!message.content.some((content) => content.type === "toolCall") &&
-			this._retryFallback.canTryFallback()
-		);
+			!message.content.some((content) => content.type === "toolCall");
+		if (!eligibleError) return false;
+		if (this._retryFallback.canTryFallback()) return true;
+		return this._retryFallback.exhaustion?.reason === "no-context-compatible-candidate";
 	}
 
 	/**
@@ -7498,7 +7632,7 @@ export class AgentSession {
 	 * work to another model has enough to decide. Both are emitted from this single
 	 * place so the two views can never disagree across the retry branches.
 	 */
-	private async _emitRetryFallbackExhausted(lastError: string): Promise<void> {
+	private _emitRetryFallbackExhausted(lastError: string): void {
 		const chainKey = this._retryFallback.exhaustedChainKey;
 		if (!chainKey) return;
 		this._emit({ type: "retry_fallback_exhausted", chainKey, lastError });
@@ -7506,15 +7640,21 @@ export class AgentSession {
 		// Detail is only trustworthy when it describes the chain being reported.
 		const detail = exhaustion?.chainKey === chainKey ? exhaustion : undefined;
 		const model = this.model;
-		await this._extensionRunner.emit({
-			type: "retry_fallback_exhausted",
-			sessionId: this.sessionId,
-			chainKey,
-			from: detail?.from ?? (model ? `${model.provider}/${model.id}` : ""),
-			lastError,
-			exhaustionReason: detail?.reason ?? "candidates-exhausted",
-			rejectedCandidates: detail?.rejectedCandidates ?? [],
-		});
+		void this._extensionRunner
+			.emit({
+				type: "retry_fallback_exhausted",
+				sessionId: this.sessionId,
+				chainKey,
+				from: detail?.from ?? (model ? `${model.provider}/${model.id}` : ""),
+				lastError: lastError.slice(0, MAX_FALLBACK_EXHAUSTION_ERROR_CHARS),
+				exhaustionReason: detail?.reason ?? "candidates-exhausted",
+				rejectedCandidates: (detail?.rejectedCandidates ?? []).slice(0, MAX_FALLBACK_EXHAUSTION_CANDIDATES),
+			})
+			.catch((error: unknown) => {
+				this._sessionLogger.warn("retry_fallback_exhaustion_extension_failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
 	}
 
 	private _getProviderRetryDelayMs(errorMessage: string): number | undefined {
@@ -7575,8 +7715,8 @@ export class AgentSession {
 		// for providers without a declared profile).
 		const turnMaxRetries = this._resolveRetryProfile().turn.maxRetries;
 		const hintSettings = this.settingsManager.getHintPolicySettings();
-		const finishTurn = async (attempt: number, finalError: string | undefined): Promise<void> => {
-			await this._emitRetryFallbackExhausted(errorMessage);
+		const finishTurn = (attempt: number, finalError: string | undefined): void => {
+			this._emitRetryFallbackExhausted(errorMessage);
 			this._emit({
 				type: "auto_retry_end",
 				success: false,
@@ -7669,7 +7809,7 @@ export class AgentSession {
 				errorMessage,
 			});
 			if (!switchedFallback) {
-				await this._emitRetryFallbackExhausted(errorMessage);
+				this._emitRetryFallbackExhausted(errorMessage);
 				this._resolveRetry();
 				return "not-handled";
 			}
@@ -7694,7 +7834,7 @@ export class AgentSession {
 			}
 			switchedFallback = await this._retryFallback.tryFallback("refusal", {});
 			if (!switchedFallback) {
-				await this._emitRetryFallbackExhausted(errorMessage);
+				this._emitRetryFallbackExhausted(errorMessage);
 				if (this._retryAttempt > 0) {
 					this._emit({
 						type: "auto_retry_end",
@@ -7740,7 +7880,7 @@ export class AgentSession {
 					if (switchedFallback) {
 						this._retryAttempt = 1;
 					} else {
-						await this._emitRetryFallbackExhausted(errorMessage);
+						this._emitRetryFallbackExhausted(errorMessage);
 						this._emit({
 							type: "auto_retry_end",
 							success: false,
@@ -7785,7 +7925,7 @@ export class AgentSession {
 						if (switchedFallback) {
 							this._retryAttempt = 1;
 						} else {
-							await this._emitRetryFallbackExhausted(errorMessage);
+							this._emitRetryFallbackExhausted(errorMessage);
 							this._emit({
 								type: "auto_retry_end",
 								success: false,
@@ -7823,7 +7963,7 @@ export class AgentSession {
 							if (switchedFallback) {
 								this._retryAttempt = 1;
 							} else {
-								await this._emitRetryFallbackExhausted(errorMessage);
+								this._emitRetryFallbackExhausted(errorMessage);
 								this._emit({
 									type: "auto_retry_end",
 									success: false,
@@ -7876,7 +8016,7 @@ export class AgentSession {
 					// The new model receives a fresh retry budget; the failed model does not.
 					this._retryAttempt = 1;
 				} else {
-					await this._emitRetryFallbackExhausted(errorMessage);
+					this._emitRetryFallbackExhausted(errorMessage);
 					this._emit({
 						type: "auto_retry_end",
 						success: false,
@@ -7915,6 +8055,7 @@ export class AgentSession {
 				}
 			}
 			if (!switchedFallback) {
+				this._emitRetryFallbackExhausted(errorMessage);
 				this._emit({
 					type: "auto_retry_end",
 					success: false,

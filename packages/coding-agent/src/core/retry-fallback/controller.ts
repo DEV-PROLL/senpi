@@ -51,14 +51,9 @@ export interface FallbackRejectedCandidate {
 	readonly error?: string;
 }
 
-/**
- * Verdict from the injected capacity probe. The bare boolean keeps simple
- * callers (and array-backed test doubles) ergonomic; the object form carries the
- * projection so an exhaustion consumer can explain the refusal in tokens.
- */
 export type CandidateUsability =
-	| boolean
-	| { readonly usable: boolean; readonly projection?: ModelUsabilityBudgetProjection };
+	| { readonly usable: true }
+	| { readonly usable: false; readonly projection?: ModelUsabilityBudgetProjection };
 
 export type FallbackExhaustionReason = "candidates-exhausted" | "no-context-compatible-candidate";
 
@@ -408,12 +403,9 @@ export class RetryFallbackController {
 	 * handled here, and a failure inside it propagates, because a projection that
 	 * cannot be computed is a defect rather than a verdict about this candidate.
 	 */
-	private assessUsability(
-		model: Model<Api>,
-	): { usable: boolean; projection?: ModelUsabilityBudgetProjection } | undefined {
+	private assessUsability(model: Model<Api>): CandidateUsability | undefined {
 		if (!this.deps.isCandidateUsable) return undefined;
-		const verdict = this.deps.isCandidateUsable(model);
-		return typeof verdict === "boolean" ? { usable: verdict } : verdict;
+		return this.deps.isCandidateUsable(model);
 	}
 
 	private recordRejection(rejected: FallbackRejectedCandidate): void {
@@ -434,9 +426,10 @@ export class RetryFallbackController {
 	}
 
 	/**
-	 * Single funnel for every reason a rung is passed over. Only reserving walks feed
-	 * the ledger: `canTryFallback` re-walks the same chain several times per provider
-	 * error, and those probes must not multiply the reported rejections.
+	 * Single funnel for every reason a rung is passed over. Context incompatibility
+	 * is retained during admission probes so the session can route the otherwise
+	 * terminal error through the extension-visible exhaustion path. Other reasons
+	 * only enter the ledger during the reserving walk.
 	 */
 	private skip(
 		candidate: string,
@@ -446,7 +439,7 @@ export class RetryFallbackController {
 		detail?: { projection?: ModelUsabilityBudgetProjection },
 	): void {
 		this.deps.logger.debug("candidate_skipped", { candidate, skipReason });
-		if (!reserve) return;
+		if (!reserve && skipReason !== "context-unusable") return;
 		this.recordRejection(
 			detail?.projection === undefined
 				? { selector, reason: skipReason }

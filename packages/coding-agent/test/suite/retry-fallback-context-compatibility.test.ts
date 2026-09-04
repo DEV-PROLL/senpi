@@ -3,7 +3,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, getModel } from "@earendil-works/pi-ai/compat";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
-import { RetryFallbackController } from "../../src/core/retry-fallback/controller.ts";
+import { type CandidateUsability, RetryFallbackController } from "../../src/core/retry-fallback/controller.ts";
 import { SelectorCooldowns } from "../../src/core/retry-fallback/cooldown.ts";
 import { createHarness, type Harness } from "./harness.ts";
 
@@ -75,7 +75,8 @@ describe("retry fallback context compatibility", () => {
 			},
 			cooldowns: new SelectorCooldowns(() => 0),
 			logger: { debug: () => {}, info: () => {}, warn: () => {} },
-			isCandidateUsable: (candidate: Model<Api>) => candidate.id !== "incompatible",
+			isCandidateUsable: (candidate: Model<Api>): CandidateUsability =>
+				candidate.id === "incompatible" ? { usable: false } : { usable: true },
 			switchModel: async (candidate: Model<Api>, thinking: ThinkingLevel) => {
 				switches.push({ model: candidate.id, thinking });
 				current = { model: candidate, thinkingLevel: thinking };
@@ -140,6 +141,7 @@ describe("retry fallback context compatibility", () => {
 			],
 		});
 		harnesses.push(harness);
+		const originalSystemPrompt = harness.session.systemPrompt;
 		const internals = harness.session as unknown as {
 			_handleRetryableError: (
 				message: ReturnType<typeof fauxAssistantMessage>,
@@ -161,7 +163,7 @@ describe("retry fallback context compatibility", () => {
 		// then
 		expect(harness.sessionManager.getEntries().filter((entry) => entry.type === "model_change")).toEqual([]);
 		expect(harness.session.model?.id).toBe("faux-1");
-		expect(harness.session.systemPrompt).toBe("primary prompt");
+		expect(harness.session.systemPrompt).toBe(originalSystemPrompt);
 		expect(harness.session.getActiveToolNames()).toEqual(["primary_tool"]);
 		expect(result).toEqual({ kind: "returned", value: "not-handled" });
 	});
