@@ -422,6 +422,13 @@ function getSessionContextSettings(
 	let thinkingLevel = "off";
 	let thinkingSelection: ThinkingSelection | undefined;
 	let model: { provider: string; modelId: string } | null = null;
+	// An explicit selection (a manual `model_change`, or the primary restored from a fallback
+	// window) outranks the model id echoed by later assistant messages from the SAME provider:
+	// the persisted message id is the wire id, which differs from the catalog id whenever the
+	// catalog entry maps to an `upstreamModelId` (a `-fast` priority variant is the common case),
+	// so trusting the echo would resume the base model and silently drop the tier. A message
+	// from another provider still wins, since no `model_change` recorded that hop.
+	let isModelSelectionExplicit = false;
 	let isInFallbackWindow = false;
 	// A fallback switch applies an ephemeral thinking level to the fallback model, so
 	// the level recorded inside the window must not outlive it: restoring the primary
@@ -441,6 +448,7 @@ function getSessionContextSettings(
 					preFallbackThinkingSelection = thinkingSelection;
 					if (entry.originalProvider && entry.originalModelId) {
 						model = { provider: entry.originalProvider, modelId: entry.originalModelId };
+						isModelSelectionExplicit = true;
 					}
 				}
 				isInFallbackWindow = true;
@@ -455,9 +463,12 @@ function getSessionContextSettings(
 				// it is a deliberate choice and carries over to the newly selected model.
 				isInFallbackWindow = false;
 				model = { provider: entry.provider, modelId: entry.modelId };
+				isModelSelectionExplicit = true;
 			}
 		} else if (entry.type === "message" && entry.message.role === "assistant" && !isInFallbackWindow) {
+			if (isModelSelectionExplicit && model?.provider === entry.message.provider) continue;
 			model = { provider: entry.message.provider, modelId: entry.message.model };
+			isModelSelectionExplicit = false;
 		}
 	}
 
