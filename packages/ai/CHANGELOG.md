@@ -6,6 +6,8 @@
 
 ### Added
 
+- Added GPT-6 Astra to the OpenAI and OpenAI Codex model catalogs, including long-context pricing, reasoning efforts, tool search, and Priority `-fast` variants.
+
 ### Changed
 
 ### Fixed
