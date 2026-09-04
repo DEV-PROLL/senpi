@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Branded build labels now render verbatim in the startup UI instead of gaining a `v` prefix, and unorderable version pairs no longer advertise a bogus engine update.
+
+### Breaking Changes
+
+### Added
+
+- The skills prompt section aliases each shared skill root to an `r0`/`r1` prefix once and renders per-skill locations relative to it, so the long absolute root is no longer billed per skill (145 skills, -1,137 tokens/turn).
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.9.4] - 2026-09-04
+
 ### Breaking Changes
 
 ### Added
@@ -20,6 +38,7 @@
   candidates, settles when none fit, and never persists a rejected automatic
   fallback switch or leaks its prompt/tool state into the parent session.
 - Anthropic Messages requests that carry deferred (`defer_loading`) tools no longer fail with `invalid_request_error: tools.N.tool_search_tool_bm25_20251119.name: Input should be 'tool_search_tool_bm25'`. The injected native tool-search server tool is now named `tool_search_tool_bm25` as the API contract requires; the local `tool_search` custom tool is unchanged.
+- Prompt surfaces no longer ship the same guidance twice per turn: the `Task_Management` section stops re-sending the todo tool description, `update_goal` points at the goal audits instead of restating them, and the bash timeout policy hands the waiting doctrine to the terminal section. Roughly 1.5K tokens leave every turn with no rule removed.
 - The shared GPT eval-routing bridge no longer routes multi-call work to the `exec`/`wait` Code Mode tools that were removed in favor of detached `eval` cells; every GPT preset now points at `eval` only.
 - Resuming a session left on a `-fast` catalog variant (or any model with an `upstreamModelId`) now restores that exact selection instead of its upstream base model, so the priority tier and the fast indicator survive the resume; assistant messages no longer override an explicit same-provider model selection during session restore.
 - TTSR now interrupts a single streamed assistant message that repeats the same paragraph three times (a within-message narration loop such as re-announcing the same "now writing the DAG cell" step for minutes without ever issuing the tool call): the collapse guard gains a paragraph-repeat mechanism, truncates the message from the first repeat, and injects the usual recovery nudge. Scalar runs, short periods, and line cycles were the only mechanisms before, and blank lines reset line-cycle tracking, so paragraph-level loops streamed unchecked until the user aborted. Tool-argument streams are not affected.

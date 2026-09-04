@@ -6,6 +6,22 @@
 
 ### Added
 
+- `foregroundWindowSeconds` codemode setting (default `60`, env `SENPI_CODEMODE_FOREGROUND_SECONDS`): the longest an interactive `eval` call blocks the turn before the cell detaches. A larger `timeout` now frees the turn at this window while the cell keeps running to the hard limit, instead of blocking the agent loop for the whole `timeout`.
+
+### Changed
+
+- The `eval` tool description is dieted from ~2002 to ~1588 tokens (codex dialect): the three reuse-chain JSON examples, the `<workflow>` graph prose, the repeated state-persistence rules, and the per-dialect wait-doctrine clause are removed or folded; every helper signature and dialect routing is kept. The workflow block's fused `handle=True{ handle: true }` is fixed into per-language correct forms.
+
+### Fixed
+
+### Removed
+
+## [2026.9.4] - 2026-09-04
+
+### Breaking Changes
+
+### Added
+
 ### Changed
 
 ### Fixed
@@ -235,6 +251,7 @@
 
 ### Fixed
 
+- An explicit `timeout` no longer silently disables detach for interactive `eval` cells. Previously `timeout` was both the detach budget and the hard-limit extension with no cap, so a call like `timeout: 7000` (intended to keep a long detached cell alive) blocked the agent loop for ~2h before the hard limit killed it. The detach point is now capped at the foreground window; `on_timeout: "error"` (and print/json) keep `timeout` as the unclamped deadline, and the hard-limit extension (`max(hardLimitSeconds, timeout)`) is unchanged.
 - Detached-eval same-language busy errors now name each idle enabled kernel and tell the agent to continue the step there (`continue this step in an idle kernel: js`), instead of only pointing at peek and the output tail. A busy Python kernel no longer reads as "eval is unavailable", which previously sent agents to `bash`+`python3` while JavaScript (or another idle kernel) was free. Single-language sessions and fully-busy sessions omit the idle-kernel claim.
 - JavaScript eval cells now persist only top-level declarations, including destructuring bindings and uninitialized variables, without rewriting declaration-shaped text inside literals or comments.
 - Eval completion and detached-cell handling retain explicit lifecycle observability: nested tool counts, wall/kernel timing, detach state, `peek`, `stop`, hard limits, and crash recovery remain bounded and machine-readable for hosts and telemetry consumers.

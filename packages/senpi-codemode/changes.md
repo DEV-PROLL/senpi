@@ -1,5 +1,46 @@
 # senpi-codemode fork changes
 
+## 2026-09-04 - eval tool description diet
+
+### What changed
+
+- `src/prompt/eval-prompt.ts`: dropped `REUSE_CHAIN_EXAMPLES` (three embedded JSON call examples), collapsed the `<workflow>` block to one dense rule sentence, merged the three state-persistence restatements into one, tightened the timeout/on_timeout/hard-limit/detach prose, and removed the per-dialect "sleeping/timed retries are not waiting" clause from the monitor bullets (the terminal section owns that doctrine). Helper signatures and dialect selection are unchanged. Fixed the workflow block's fused `handle=True{ handle: true }` into per-language correct forms.
+- `test/prompt.test.ts`: removed the reuse-chain filter test (its subject is gone), added the handle-form regression test, regenerated snapshots.
+
+### Why
+
+- The description cost ~2.0k tokens on every eval-enabled turn; the cuts are content the model already does by default or that the terminal section states. codex dialect 2002 -> 1588, claude 2058 -> 1648, kimi 2073 -> 1668, default 2079 -> 1668 (o200k).
+
+### Expected merge conflict zones
+
+- LOW: `eval-prompt.ts` template and the prompt snapshots; regenerate snapshots rather than merging.
+
+
+## eval foreground window caps the interactive detach budget (2026-09-04)
+
+### What changed
+
+- `packages/senpi-codemode/src/config/settings.ts` adds `foregroundWindowSeconds` to the settings schema, `CodemodeSettings`, `defaultCodemodeSettings` (`60`), and `mergeSettings`, plus `DEFAULT_FOREGROUND_WINDOW_SECONDS`, `FOREGROUND_WINDOW_ENVIRONMENT_FLAG` (`SENPI_CODEMODE_FOREGROUND_SECONDS`), and `resolveForegroundWindowSeconds()` mirroring the hard-limit resolver.
+- `packages/senpi-codemode/src/tool/eval-tool.ts` computes the timeout behavior first, then clamps the detach watchdog budget to `min(timeout ?? cellTimeoutSeconds, foregroundWindowSeconds)` only when the behavior is `"detach"`; `"error"` keeps the unclamped deadline. The wall-clock hard limit (`max(hardLimitSeconds, timeout)`) is untouched.
+- `packages/senpi-codemode/src/tool/eval-tool-options.ts` adds the optional `foregroundWindowSeconds` factory option; `packages/senpi-codemode/src/index.ts` passes `resolveForegroundWindowSeconds(...)` at both eval registration sites.
+- `packages/senpi-codemode/src/prompt/eval-prompt.ts` and `packages/senpi-codemode/src/tool/types.ts` document that `timeout` is the detach budget capped at the foreground window and that a larger value extends the hard limit, not the foreground block.
+
+### Why
+
+- A real session passed `timeout: 7000` to keep a long detached orchestration cell alive; because `timeout` had no cap it blocked the agent loop for ~2h and then hit the 7000s hard limit, killing the cell and restarting the kernel. The bash tool already separates a 60s foreground window from the kill deadline; eval had no equivalent, so `timeout` did the worst of both worlds.
+
+### Why an extension could not handle it
+
+- The detach-vs-error decision and the idle watchdog budget are computed inside this package's `runEvalCell`; no downstream hook can re-cap the detach timer before the cell is scheduled, and the setting must live in this package's settings schema and registration path.
+
+### Expected merge conflict zones
+
+- LOW in `src/config/settings.ts` around the settings schema, defaults, and resolver functions.
+- LOW in `src/tool/eval-tool.ts` around the `timeoutMs` computation in `runEvalCell`.
+- LOW in `src/index.ts` at the two `createEvalTool` registration sites.
+- LOW in `src/tool/types.ts` and `src/prompt/eval-prompt.ts` around the `timeout`/`on_timeout` descriptions.
+
+
 ## Eval description subscribes to monitor events when available (2026-09-03)
 
 ### What changed

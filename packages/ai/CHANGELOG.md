@@ -6,6 +6,18 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [2026.9.4] - 2026-09-04
+
+### Breaking Changes
+
+### Added
+
 - Added GPT-6 Astra to the OpenAI and OpenAI Codex model catalogs, including long-context pricing, reasoning efforts, tool search, and Priority `-fast` variants.
 
 ### Changed
