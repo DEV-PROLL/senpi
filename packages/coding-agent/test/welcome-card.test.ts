@@ -1,3 +1,4 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 
 import { GrokWelcomeCard } from "../src/modes/interactive/grok/welcome-card.ts";
@@ -21,7 +22,7 @@ describe("GrokWelcomeCard", () => {
 	it("keeps every line within the terminal width", () => {
 		const lines = new GrokWelcomeCard("OmO", "omo@c6e7dd7 2026-09-04").render(12);
 		for (const line of lines) {
-			expect(line.length).toBeLessThanOrEqual(12);
+			expect(visibleWidth(line)).toBeLessThanOrEqual(12);
 		}
 	});
 });
