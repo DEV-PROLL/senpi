@@ -55,16 +55,16 @@ function runCliWithCurrentRuntime(args, { env, cwd, timeoutMs }) {
 function systemTextOf(body) {
 	if (typeof body?.instructions === "string") return body.instructions;
 	const input = Array.isArray(body?.input) ? body.input : [];
-	const systemItem = input.find((item) => item?.role === "developer" || item?.role === "system");
-	if (!systemItem) return "";
-	if (typeof systemItem.content === "string") return systemItem.content;
-	return (systemItem.content ?? []).map((part) => part?.text ?? "").join("\n");
+	const systemItems = input.filter((item) => item?.role === "developer" || item?.role === "system");
+	return systemItems
+		.map((item) => (typeof item.content === "string" ? item.content : (item.content ?? []).map((part) => part?.text ?? "").join("\n")))
+		.join("\n");
 }
 
 async function main() {
 	const evidence = evidenceDir(EVIDENCE_SLUG);
 	installCleanupHooks();
-	guardRealAuth(evidence);
+	const authGuard = guardRealAuth();
 
 	const sandbox = makeSandbox("senpi-qa-gpt6-astra");
 	const env = hermeticEnv(sandbox.env);
@@ -102,6 +102,7 @@ async function main() {
 			join(evidence, "stdout.txt"),
 			`exit=${result.code}\n---STDOUT---\n${result.stdout}\n---STDERR---\n${result.stderr}\n`,
 		);
+		check("real auth store unchanged", authGuard.assertUnchanged());
 	} finally {
 		await server.stop();
 		sandbox.cleanup();

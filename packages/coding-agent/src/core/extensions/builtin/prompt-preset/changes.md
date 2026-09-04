@@ -32,9 +32,18 @@
 - gpt-6-astra 3047 tokens (14,427 chars) vs gpt-5.6 2867 (after the bridge fix; 2969 before). Per section: identity 40, Intent Gate 191, Initiative 264, Instructions From Files 92, Working the Task ~570, Asynchronous Work ~212, Verification ~400, Scope and Recovery 155, Hard Limits ~190, Writing ~320, Reporting 228, Stop Goal ~120.
 - The +180 over 5.6 is the two sections 5.6 has no counterpart for (Instructions From Files + Asynchronous Work, ~300 tokens, both guide- or harness-mandated) plus the owner-directed bun-runtime rule; every other section was cut against its first draft (Initiative -60, orchestration rules -120, Verification -45, Stop Goal -20, one process line and a duplicated compaction clause removed, the run-once rule merged with the shared single-pass-runner rule). Excluding the two new sections the core is ~2740 tokens, under the 5.6 core.
 
+### Decisions recorded
+
+- `high-reasoning-warning.ts` is intentionally NOT extended to gpt-6-astra (the catalog PR #1334 deferred this). That warning guards the gpt-5.x Sol over-run failure; the Astra guide describes Astra as "our most aligned model yet" that "excels at exercising care, respecting task boundaries", the opposite failure mode, so no warning is warranted. The residual from #1334 is closed by this note, not by a code change.
+- `brand-identity.test.ts` gains gpt-6-astra in its `PRESET_FILES` / `PRESET_BUILDERS` sweep (the guard that no full-core preset hardcodes the product name), following the claude-fable-5-1 precedent.
+
 ### Why extension system couldn't handle this differently
 
 - Content-only addition inside this builtin, following the established `corePrompt` preset architecture; the bridge fix is a one-line correction of shared tuning text.
+
+### Known follow-up (out of scope here)
+
+- `file-operations.ts` names `apply_patch` / `read` / `grep` unconditionally, and every GPT preset appends it unconditionally (documented convention in this folder's AGENTS.md). Making that block derive its tool names from the active tool set is a cross-cutting change across all GPT presets and their tests, tracked separately rather than bundled into this preset.
 
 ### Expected merge conflict zones on next upstream sync
 

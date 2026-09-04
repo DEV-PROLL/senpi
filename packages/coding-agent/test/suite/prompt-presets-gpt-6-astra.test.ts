@@ -73,9 +73,7 @@ function hasGpt6AstraCatalogSignal(model: Model<Api>): boolean {
 }
 
 function getGpt6AstraCatalogModels(): Model<Api>[] {
-	return getProviders().flatMap((provider) =>
-		(getModels(provider) as Model<Api>[]).filter(hasGpt6AstraCatalogSignal),
-	);
+	return getProviders().flatMap((provider) => (getModels(provider) as Model<Api>[]).filter(hasGpt6AstraCatalogSignal));
 }
 
 const EXPECTED_CONCERN: Record<Gpt6AstraRuleId, Gpt6AstraConcern> = {
@@ -178,19 +176,26 @@ describe("GPT-6 Astra prompt preset", () => {
 		expect(name).toBe("gpt-6-astra");
 	});
 
-	it.each(["gpt-5.6-sol", "gpt-5.6-astra", "gpt-6", "gpt-6-mini", "gpt-6.1", "astral-v1", "astra", "kimi-k3", "grok-4.6"])(
-		"does not route %s to the gpt-6-astra preset",
-		(modelId) => {
-			// given
-			const settings: PromptPresetSettings = { promptPreset: "auto" };
+	it.each([
+		"gpt-5.6-sol",
+		"gpt-5.6-astra",
+		"gpt-6",
+		"gpt-6-mini",
+		"gpt-6.1",
+		"astral-v1",
+		"astra",
+		"kimi-k3",
+		"grok-4.6",
+	])("does not route %s to the gpt-6-astra preset", (modelId) => {
+		// given
+		const settings: PromptPresetSettings = { promptPreset: "auto" };
 
-			// when
-			const name = resolvePresetName(createModel(modelId), settings);
+		// when
+		const name = resolvePresetName(createModel(modelId), settings);
 
-			// then
-			expect(name === "gpt-6-astra").toBe(false);
-		},
-	);
+		// then
+		expect(name === "gpt-6-astra").toBe(false);
+	});
 
 	it("keeps gpt-5.6 on its own preset, distinct from gpt-6-astra", () => {
 		// given
@@ -224,6 +229,9 @@ describe("GPT-6 Astra prompt preset", () => {
 		const catalogModels = getGpt6AstraCatalogModels();
 
 		// when
+		// A gpt-6-astra catalog entry may not have landed yet (it ships in a
+		// separate PR); when it has, every matching model must resolve. The sweep
+		// is a non-regression guard, so an empty catalog is allowed, not asserted.
 		const misses = catalogModels
 			.filter((model) => resolvePresetName(model, settings) !== "gpt-6-astra")
 			.map((model) => `${model.provider}/${model.id}`);
