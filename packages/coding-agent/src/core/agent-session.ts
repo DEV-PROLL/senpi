@@ -7722,7 +7722,7 @@ export class AgentSession {
 			}));
 		const extensionEvent = {
 			type: "retry_fallback_exhausted",
-			sessionId: this.sessionId,
+			sessionId: truncateUtf8(this.sessionId, MAX_FALLBACK_EXHAUSTION_SELECTOR_BYTES),
 			chainKey: truncateUtf8(chainKey, MAX_FALLBACK_EXHAUSTION_SELECTOR_BYTES),
 			from: truncateUtf8(
 				detail?.from ?? (model ? `${model.provider}/${model.id}` : ""),

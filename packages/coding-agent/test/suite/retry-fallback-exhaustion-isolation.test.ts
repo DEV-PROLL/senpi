@@ -335,6 +335,7 @@ describe("retry fallback exhaustion isolation", () => {
 			],
 		});
 		harnesses.push(harness);
+		Reflect.set(harness.sessionManager, "sessionId", "세".repeat(70_000));
 		seedLiveContext(harness, 90_000);
 
 		// when
@@ -346,6 +347,7 @@ describe("retry fallback exhaustion isolation", () => {
 
 		// then
 		expect(extensionEvents).toHaveLength(1);
+		expect(Buffer.byteLength(event?.sessionId ?? "")).toBeLessThanOrEqual(512);
 		expect(Buffer.byteLength(event?.chainKey ?? "")).toBeLessThanOrEqual(512);
 		expect(Buffer.byteLength(event?.from ?? "")).toBeLessThanOrEqual(512);
 		expect(Buffer.byteLength(event?.lastError ?? "")).toBeLessThanOrEqual(8_192);
