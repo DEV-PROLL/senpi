@@ -311,8 +311,8 @@ describe("retry fallback exhaustion isolation", () => {
 	it("bounds the extension exhaustion diagnostics", async () => {
 		// given
 		const extensionEvents: RetryFallbackExhaustedEvent[] = [];
-		const primaryId = `primary-${"p".repeat(2_000)}`;
-		const fallbackIds = Array.from({ length: 24 }, (_, index) => `fallback-${index + 1}-${"f".repeat(2_000)}`);
+		const primaryId = `primary-${"주".repeat(2_000)}`;
+		const fallbackIds = Array.from({ length: 24 }, (_, index) => `fallback-${index + 1}-${"후".repeat(2_000)}`);
 		const harness = await createHarness({
 			models: [
 				{ id: primaryId, contextWindow: 1_000_000, maxTokens: 4_000 },
@@ -339,21 +339,21 @@ describe("retry fallback exhaustion isolation", () => {
 
 		// when
 		await retryInternals(harness)._handleRetryableError(
-			fauxAssistantMessage("", { stopReason: "error", errorMessage: "x".repeat(20_000) }),
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "오류".repeat(20_000) }),
 			{ hardErrorFallback: true },
 		);
 		const event = extensionEvents[0];
 
 		// then
 		expect(extensionEvents).toHaveLength(1);
-		expect(event?.chainKey.length).toBeLessThanOrEqual(512);
-		expect(event?.from.length).toBeLessThanOrEqual(512);
-		expect(event?.lastError.length).toBeLessThanOrEqual(8_192);
+		expect(Buffer.byteLength(event?.chainKey ?? "")).toBeLessThanOrEqual(512);
+		expect(Buffer.byteLength(event?.from ?? "")).toBeLessThanOrEqual(512);
+		expect(Buffer.byteLength(event?.lastError ?? "")).toBeLessThanOrEqual(8_192);
 		expect(event?.rejectedCandidates.length).toBeLessThanOrEqual(16);
 		for (const rejected of event?.rejectedCandidates ?? []) {
-			expect(rejected.selector.length).toBeLessThanOrEqual(512);
-			expect(rejected.error?.length ?? 0).toBeLessThanOrEqual(2_048);
-			expect(rejected.projection?.model.length ?? 0).toBeLessThanOrEqual(512);
+			expect(Buffer.byteLength(rejected.selector)).toBeLessThanOrEqual(512);
+			expect(Buffer.byteLength(rejected.error ?? "")).toBeLessThanOrEqual(2_048);
+			expect(Buffer.byteLength(rejected.projection?.model ?? "")).toBeLessThanOrEqual(512);
 		}
 		expect(Buffer.byteLength(JSON.stringify(event))).toBeLessThanOrEqual(64 * 1_024);
 	});

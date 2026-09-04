@@ -132,6 +132,7 @@ import {
 	type MessageStartEvent,
 	type MessageUpdateEvent,
 	type ReplacedSessionContext,
+	type RetryFallbackExhaustedEvent,
 	type SessionBeforeCompactResult,
 	type SessionBeforeTreeResult,
 	type SessionCompactFailedEvent,
@@ -220,11 +221,25 @@ function evalHelperCall(name: string): string {
 	return `tool.${name}({ ... })`;
 }
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
-const MAX_FALLBACK_EXHAUSTION_ERROR_CHARS = 8_192;
+const MAX_FALLBACK_EXHAUSTION_ERROR_BYTES = 8_192;
 const MAX_FALLBACK_EXHAUSTION_CANDIDATES = 16;
-const MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS = 512;
-const MAX_FALLBACK_EXHAUSTION_CANDIDATE_ERROR_CHARS = 2_048;
+const MAX_FALLBACK_EXHAUSTION_SELECTOR_BYTES = 512;
+const MAX_FALLBACK_EXHAUSTION_CANDIDATE_ERROR_BYTES = 2_048;
+const MAX_FALLBACK_EXHAUSTION_PAYLOAD_BYTES = 64 * 1_024;
 const DEFERRED_RETRY_QUEUE_OWNERS = new WeakSet<object>();
+
+function truncateUtf8(text: string, maxBytes: number): string {
+	if (Buffer.byteLength(text) <= maxBytes) return text;
+	let bytes = 0;
+	let result = "";
+	for (const character of text) {
+		const characterBytes = Buffer.byteLength(character);
+		if (bytes + characterBytes > maxBytes) break;
+		result += character;
+		bytes += characterBytes;
+	}
+	return result;
+}
 
 // ============================================================================
 // Skill Invocation Formatting and Parsing
@@ -7692,37 +7707,42 @@ export class AgentSession {
 			.slice(0, MAX_FALLBACK_EXHAUSTION_CANDIDATES)
 			.map((candidate) => ({
 				...candidate,
-				selector: candidate.selector.slice(0, MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS),
+				selector: truncateUtf8(candidate.selector, MAX_FALLBACK_EXHAUSTION_SELECTOR_BYTES),
 				...(candidate.error === undefined
 					? {}
-					: { error: candidate.error.slice(0, MAX_FALLBACK_EXHAUSTION_CANDIDATE_ERROR_CHARS) }),
+					: { error: truncateUtf8(candidate.error, MAX_FALLBACK_EXHAUSTION_CANDIDATE_ERROR_BYTES) }),
 				...(candidate.projection === undefined
 					? {}
 					: {
 							projection: {
 								...candidate.projection,
-								model: candidate.projection.model.slice(0, MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS),
+								model: truncateUtf8(candidate.projection.model, MAX_FALLBACK_EXHAUSTION_SELECTOR_BYTES),
 							},
 						}),
 			}));
-		void this._extensionRunner
-			.emit({
-				type: "retry_fallback_exhausted",
-				sessionId: this.sessionId,
-				chainKey: chainKey.slice(0, MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS),
-				from: (detail?.from ?? (model ? `${model.provider}/${model.id}` : "")).slice(
-					0,
-					MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS,
-				),
-				lastError: lastError.slice(0, MAX_FALLBACK_EXHAUSTION_ERROR_CHARS),
-				exhaustionReason: detail?.reason ?? "candidates-exhausted",
-				rejectedCandidates,
-			})
-			.catch((error: unknown) => {
-				this._sessionLogger.warn("retry_fallback_exhaustion_extension_failed", {
-					error: error instanceof Error ? error.message : String(error),
-				});
+		const extensionEvent = {
+			type: "retry_fallback_exhausted",
+			sessionId: this.sessionId,
+			chainKey: truncateUtf8(chainKey, MAX_FALLBACK_EXHAUSTION_SELECTOR_BYTES),
+			from: truncateUtf8(
+				detail?.from ?? (model ? `${model.provider}/${model.id}` : ""),
+				MAX_FALLBACK_EXHAUSTION_SELECTOR_BYTES,
+			),
+			lastError: truncateUtf8(lastError, MAX_FALLBACK_EXHAUSTION_ERROR_BYTES),
+			exhaustionReason: detail?.reason ?? "candidates-exhausted",
+			rejectedCandidates,
+		} satisfies RetryFallbackExhaustedEvent;
+		while (
+			Buffer.byteLength(JSON.stringify(extensionEvent)) > MAX_FALLBACK_EXHAUSTION_PAYLOAD_BYTES &&
+			rejectedCandidates.length > 0
+		) {
+			rejectedCandidates.pop();
+		}
+		void this._extensionRunner.emit(extensionEvent).catch((error: unknown) => {
+			this._sessionLogger.warn("retry_fallback_exhaustion_extension_failed", {
+				error: error instanceof Error ? error.message : String(error),
 			});
+		});
 	}
 
 	private _getProviderRetryDelayMs(errorMessage: string): number | undefined {
