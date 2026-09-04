@@ -4,5 +4,5 @@
  * such as `omo@c6e7dd7 2026-09-04 10:17 +09:00` render verbatim.
  */
 export function formatDisplayVersion(version: string): string {
-	return version;
+	return /^[0-9]/.test(version) ? `v${version}` : version;
 }

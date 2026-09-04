@@ -62,6 +62,7 @@ import {
 	getShareViewerUrl,
 	VERSION,
 } from "../../config.ts";
+import { formatDisplayVersion } from "./version-label.ts";
 import { type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
 import { isApiKeyLoginProvider } from "../../core/auth-providers.ts";
@@ -1483,7 +1484,7 @@ export class InteractiveMode {
 			this.headerContainer.addChild(this.builtInHeader);
 			this.headerContainer.addChild(new Spacer(1));
 		} else if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
+			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` ${formatDisplayVersion(this.version)}`);
 
 			// Build startup instructions using keybinding hint helpers
 			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
