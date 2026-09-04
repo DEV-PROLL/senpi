@@ -112,6 +112,35 @@ describe("eval foreground window", () => {
 		await manager.flushNotifications();
 	});
 
+	it("detaches a bridge-paused cell at the foreground window, not the default pause grace", async () => {
+		vi.useFakeTimers();
+		const manager = new EvalDetachedCellManager();
+		// The cell pauses its idle watchdog for a host bridge call (e.g. dag-wait) that never resumes.
+		const kernel = new FakeKernel([{ type: "status", event: { op: "timeout-pause" } }]);
+		const tool = createTool(manager, kernel, 2);
+
+		const started = kernel.deferNextRun();
+		const execution = tool.execute(
+			"fw-bridge-cell",
+			{ language: "js", code: "await tool.dag_wait({})", summary: "stuck bridge", timeout: 3600 },
+			undefined,
+			undefined,
+			interactiveContext(),
+		);
+		await started;
+		const settlement = trackSettlement(execution);
+
+		await vi.advanceTimersByTimeAsync(1_999);
+		expect(settlement.settled).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(settlement.settled).toBe(true);
+		const detached = await execution;
+		expect(textOf(detached)).toContain("detached and is still running");
+		await manager.stop("fw-bridge-cell");
+		await manager.flushNotifications();
+	});
+
 	it("keeps an explicit on_timeout:error deadline unclamped by the foreground window", async () => {
 		vi.useFakeTimers();
 		const kernel = new FakeKernel([]);

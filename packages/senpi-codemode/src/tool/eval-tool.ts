@@ -111,6 +111,9 @@ async function runEvalCell(
 	const foregroundWindowMs = (options.foregroundWindowSeconds ?? DEFAULT_FOREGROUND_WINDOW_SECONDS) * 1_000;
 	const timeoutMs =
 		timeoutBehavior === "detach" ? Math.min(requestedTimeoutMs, foregroundWindowMs) : requestedTimeoutMs;
+	// A cell that pauses its watchdog for a host bridge call would otherwise wait the full pause grace
+	// (~10 min) before detaching; cap the grace at the foreground window too so the detach guarantee
+	// holds for bridge-parked cells. Error mode keeps the default grace (its timeout is the deadline).
 	const bridgeAbortController = new AbortController();
 	const cellSignal = AbortSignal.any([invocation.signal, bridgeAbortController.signal]);
 	const bridgeContext: ExtensionContext = { ...invocation.ctx, signal: cellSignal };
@@ -139,6 +142,7 @@ async function runEvalCell(
 		callerSignal: invocation.signal,
 		cellId: invocation.cellId,
 		timeoutMs,
+		...(timeoutBehavior === "detach" ? { maxPauseGraceMs: foregroundWindowMs } : {}),
 		timeoutFactory: options.timeoutFactory ?? defaultTimeoutFactory,
 		onTimeout: (error) => {
 			if (timeoutBehavior === "detach" && cellManager.detach(cell)) {
