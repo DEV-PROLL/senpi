@@ -4,10 +4,9 @@
 
 ### What changed
 
-- `src/modes/interactive/version-label.ts` (new): `formatDisplayVersion` prefixes `v` only when the version string starts with a digit, so release semver/CalVer keep the `v` while branded build labels pass through verbatim.
-- `src/modes/interactive/interactive-mode.ts`: the startup logo line renders through `formatDisplayVersion`.
-- `src/modes/interactive/grok/welcome-card.ts`: both welcome card render sites use the same helper.
-- `src/utils/version-check.ts`: `isNewerPackageVersion` returns `false` for version pairs it cannot order instead of falling back to string inequality.
+- `packages/coding-agent/src/modes/interactive/version-label.ts` (new): `formatDisplayVersion` prefixes `v` only when the version string starts with a digit, so release semver/CalVer keep the `v` while branded build labels pass through verbatim.
+- `packages/coding-agent/src/modes/interactive/grok/welcome-card.ts`: both welcome card render sites use the same helper.
+- `packages/coding-agent/src/utils/version-check.ts`: `isNewerPackageVersion` returns `false` for version pairs it cannot order instead of falling back to string inequality.
 
 ### Why
 
@@ -19,7 +18,7 @@
 
 ### Expected merge conflict zones
 
-- LOW: the logo line in `interactive-mode.ts` and the two template literals in `grok/welcome-card.ts`.
+- LOW: the logo line in `packages/coding-agent/src/modes/interactive/interactive-mode.ts` and the two template literals in `packages/coding-agent/src/modes/interactive/grok/welcome-card.ts`.
 
 ## 2026-09-03 - Announce print-mode model fallback on stderr
 
