@@ -991,9 +991,6 @@ function applyThinkingLevelMetadata(model: Model<any>): void {
 	if (model.provider === "openai" && model.id.startsWith("gpt-5.6")) {
 		mergeThinkingLevelMap(model, { minimal: "minimal" });
 	}
-	if (model.id === "gpt-6-astra" && (model.provider === "openai" || model.provider === "openai-codex")) {
-		mergeThinkingLevelMap(model, { off: null, minimal: null });
-	}
 	if (model.provider === "openai" && model.id === "gpt-5.5") {
 		mergeThinkingLevelMap(model, { minimal: null });
 	}
@@ -3297,9 +3294,6 @@ async function generateModels() {
 		applyOpenAICompletionsCompatMetadata(model);
 		applyAnthropicMessagesCompatMetadata(model);
 		applyModelsDevReasoningOptionMetadata(model);
-		if (model.id === "gpt-6-astra" && (model.provider === "openai" || model.provider === "openai-codex")) {
-			mergeThinkingLevelMap(model, { off: null, minimal: null });
-		}
 		applyThinkingLevelMetadata(model);
 		applyStrictToolCompatMetadata(model);
 		applyOpenAIGrammarToolCompatMetadata(model);
