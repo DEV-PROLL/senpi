@@ -1,5 +1,33 @@
 # Core Extensions Changes
 
+## Expose context-incompatible fallback exhaustion (2026-09-03)
+
+### What changed
+
+- `packages/coding-agent/src/core/extensions/types.ts` adds the notification-only
+  `RetryFallbackExhaustedEvent` and the matching
+  `pi.on("retry_fallback_exhausted", ...)` overload. The payload names the session,
+  active selector, exhausted chain, terminal provider error, exhaustion reason, and
+  the rejected candidate budget projections.
+
+### Why
+
+- Retry fallback previously exposed exhaustion only to session listeners used by the
+  TUI and RPC hosts. An extension capable of moving an oversized parent turn into a
+  fresh child context could not distinguish a context-incompatible chain from ordinary
+  exhaustion or select the rejected candidate safely.
+
+### Why an extension could not handle it
+
+- The event describes a decision made inside the private retry-fallback controller.
+  Extensions cannot observe candidate budget rejections until the host publishes the
+  typed result.
+
+### Expected merge conflict zones
+
+- LOW: the event interface, `ExtensionEvent` union, and `ExtensionAPI.on` overload in
+  `packages/coding-agent/src/core/extensions/types.ts`.
+
 
 ## Expose the extension event bus for session activity signals (2026-08-31)
 

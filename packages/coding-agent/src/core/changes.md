@@ -1,5 +1,30 @@
 # changes
 
+## 2026-09-03 - Skip context-incompatible fallback rungs and make the model switch transactional
+
+### What changed
+
+- `packages/coding-agent/src/core/retry-fallback/controller.ts`: `RetryFallbackControllerDeps` gained the injected `isCandidateUsable` capacity preflight and the `classifySwitchFailure` seam. `nextCandidate` now skips a rung whose window cannot hold the live conversation (`context-unusable`) and keeps walking; `tryFallback` walks the remaining rungs when applying a model is refused on capacity grounds after `model_select` ran, and rethrows any failure the classifier does not recognize so one broken extension cannot spend the whole chain. A turn-scoped, selector-keyed rejection ledger backs the new `exhaustion` accessor (`chainKey`, `from`, `reason`, `rejectedCandidates`); `exhaustedChainKey` is unchanged.
+- `packages/coding-agent/src/core/agent-session.ts`: `_switchActiveModel` is now two-phase. Model, thinking level, service tier, and the server-side-fallback flag are applied provisionally so `model_select` handlers build against the target, but compaction invalidation, `model_changed`, `thinking_level_changed`/`thinking_level_select`, the service-tier event, the high-reasoning warning, `appendModelChange`, and the persisted default all wait until the post-`model_select` `assertModelUsable` clears. A rejected target is rolled back silently and extension-owned prompt/tool state is resynced by re-running `model_select` for the previous model. The seven duplicated exhaustion emits collapse into `_emitRetryFallbackExhausted`, which emits the unchanged session event plus the new extension event.
+- `packages/coding-agent/src/core/extensions/types.ts`: new `RetryFallbackExhaustedEvent` (`sessionId`, `chainKey`, `from`, `lastError`, `exhaustionReason`, `rejectedCandidates`) in the `ExtensionEvent` union with a `pi.on("retry_fallback_exhausted", ...)` overload. It flows through the generic runner `emit` and returns no result: it is notification-only.
+
+### Why
+
+- The chain walk had no capacity dimension at all, so a 1M-window primary could fall back onto a 200K rung that cannot hold the conversation, trading one dead lane for another.
+- The switch wrote its `model_change` entry before the budget assert, so a rejected target left an unpaired `reason: "fallback"` entry that session restore replays as a fallback window that was never entered, while thinking level and extension-swapped toolsets stayed on the rejected model.
+- `ModelUsabilityBudgetError` escaping `tryFallback` reached `_processAgentEvent`, whose rejection is swallowed by the agent event queue, so `_resolveRetry()` never ran and `prompt()` hung on `waitForRetry()`.
+- `retry_fallback_exhausted` existed only as an `AgentSessionEvent`, so an extension that could route the work to another model had no typed way to learn the parent model's chain was spent.
+
+### Why an extension could not handle it
+
+- Candidate selection, the model-switch commit boundary, and retry dispatch are private `AgentSession`/controller lifecycle state; extensions observe `model_select` only after the core has already mutated and persisted the switch, and cannot atomically defer or undo it.
+
+### Expected merge conflict zones
+
+- HIGH: `packages/coding-agent/src/core/agent-session.ts` around `_switchActiveModel` and the `_handleRetryableError` exhaustion branches.
+- MEDIUM: `packages/coding-agent/src/core/retry-fallback/controller.ts` around `nextCandidate`, `tryFallback`, and the deps interface.
+- LOW: `packages/coding-agent/src/core/extensions/types.ts` around the event union and the `on` overloads.
+
 ## 2026-09-03 - Make eval-only tool routing unconditional and registry-aware
 
 ### What changed
