@@ -1,6 +1,6 @@
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { getGrokChromeTokens } from "./chrome-tokens.ts";
 import { formatDisplayVersion } from "../version-label.ts";
+import { getGrokChromeTokens } from "./chrome-tokens.ts";
 
 /** Mode-owned startup welcome card for grok chrome. */
 export class GrokWelcomeCard implements Component {
@@ -18,7 +18,10 @@ export class GrokWelcomeCard implements Component {
 
 	render(width: number): string[] {
 		const tokens = getGrokChromeTokens();
-		if (width < 3) return [tokens.primaryText(truncateToWidth(`${this.appName} ${formatDisplayVersion(this.version)}`, width, ""))];
+		if (width < 3)
+			return [
+				tokens.primaryText(truncateToWidth(`${this.appName} ${formatDisplayVersion(this.version)}`, width, "")),
+			];
 
 		const contentWidth = width - 2;
 		const line = (text: string) => {

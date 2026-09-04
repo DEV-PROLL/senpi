@@ -16,7 +16,7 @@ describe("GrokWelcomeCard", () => {
 		const label = "omo@c6e7dd7 2026-09-04 10:17 +09:00";
 		const lines = new GrokWelcomeCard("OmO", label).render(80);
 		expect(lines.join("\n")).toContain(label);
-		expect(lines.join("\n")).not.toContain("v" + label);
+		expect(lines.join("\n")).not.toContain(`v${label}`);
 	});
 
 	it("keeps every line within the terminal width", () => {
