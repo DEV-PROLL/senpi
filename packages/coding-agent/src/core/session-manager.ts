@@ -9,7 +9,10 @@ import {
 	openSync,
 	readdirSync,
 	readSync,
+	renameSync,
+	rmSync,
 	statSync,
+	truncateSync,
 	writeFileSync,
 } from "fs";
 import { readdir } from "fs/promises";
@@ -1045,18 +1048,38 @@ export class SessionManager {
 		}
 
 		if (!this.flushed) {
-			const fd = openSync(this.sessionFile, "wx");
+			const temporaryFile = `${this.sessionFile}.${process.pid}.${randomUUID()}.tmp`;
 			try {
-				for (const e of this.fileEntries) {
-					writeFileSync(fd, `${JSON.stringify(this.residentStore.materialize(e))}\n`);
+				const fd = openSync(temporaryFile, "wx", 0o600);
+				try {
+					for (const e of this.fileEntries) {
+						writeFileSync(fd, `${JSON.stringify(this.residentStore.materialize(e))}\n`);
+					}
+					writeFileSync(fd, `${JSON.stringify(persistedEntry)}\n`);
+				} finally {
+					closeSync(fd);
 				}
-				writeFileSync(fd, `${JSON.stringify(persistedEntry)}\n`);
-			} finally {
-				closeSync(fd);
+				renameSync(temporaryFile, this.sessionFile);
+			} catch (error) {
+				rmSync(temporaryFile, { force: true });
+				throw error;
 			}
 			this.flushed = true;
 		} else {
-			appendFileSync(this.sessionFile, `${JSON.stringify(persistedEntry)}\n`);
+			const originalSize = statSync(this.sessionFile).size;
+			try {
+				appendFileSync(this.sessionFile, `${JSON.stringify(persistedEntry)}\n`);
+			} catch (error) {
+				try {
+					truncateSync(this.sessionFile, originalSize);
+				} catch (rollbackError) {
+					throw new AggregateError(
+						[error, rollbackError],
+						`Session append failed and ${this.sessionFile} could not be restored`,
+					);
+				}
+				throw error;
+			}
 		}
 	}
 

@@ -222,6 +222,8 @@ function evalHelperCall(name: string): string {
 const TURN_RETRY_SUPPRESSION_PREFIX = "senpi:no-turn-retry:";
 const MAX_FALLBACK_EXHAUSTION_ERROR_CHARS = 8_192;
 const MAX_FALLBACK_EXHAUSTION_CANDIDATES = 16;
+const MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS = 512;
+const MAX_FALLBACK_EXHAUSTION_CANDIDATE_ERROR_CHARS = 2_048;
 const DEFERRED_RETRY_QUEUE_OWNERS = new WeakSet<object>();
 
 // ============================================================================
@@ -1642,7 +1644,14 @@ export class AgentSession {
 	private _emit(event: AgentSessionEvent): void {
 		this._logSessionEvent(event);
 		for (const l of this._eventListeners) {
-			l(event);
+			try {
+				l(event);
+			} catch (error) {
+				this._sessionLogger.warn("session_event_listener_failed", {
+					kind: event.type,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
 		}
 	}
 
@@ -7679,15 +7688,35 @@ export class AgentSession {
 		// Detail is only trustworthy when it describes the chain being reported.
 		const detail = exhaustion?.chainKey === chainKey ? exhaustion : undefined;
 		const model = this.model;
+		const rejectedCandidates = (detail?.rejectedCandidates ?? [])
+			.slice(0, MAX_FALLBACK_EXHAUSTION_CANDIDATES)
+			.map((candidate) => ({
+				...candidate,
+				selector: candidate.selector.slice(0, MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS),
+				...(candidate.error === undefined
+					? {}
+					: { error: candidate.error.slice(0, MAX_FALLBACK_EXHAUSTION_CANDIDATE_ERROR_CHARS) }),
+				...(candidate.projection === undefined
+					? {}
+					: {
+							projection: {
+								...candidate.projection,
+								model: candidate.projection.model.slice(0, MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS),
+							},
+						}),
+			}));
 		void this._extensionRunner
 			.emit({
 				type: "retry_fallback_exhausted",
 				sessionId: this.sessionId,
-				chainKey,
-				from: detail?.from ?? (model ? `${model.provider}/${model.id}` : ""),
+				chainKey: chainKey.slice(0, MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS),
+				from: (detail?.from ?? (model ? `${model.provider}/${model.id}` : "")).slice(
+					0,
+					MAX_FALLBACK_EXHAUSTION_SELECTOR_CHARS,
+				),
 				lastError: lastError.slice(0, MAX_FALLBACK_EXHAUSTION_ERROR_CHARS),
 				exhaustionReason: detail?.reason ?? "candidates-exhausted",
-				rejectedCandidates: (detail?.rejectedCandidates ?? []).slice(0, MAX_FALLBACK_EXHAUSTION_CANDIDATES),
+				rejectedCandidates,
 			})
 			.catch((error: unknown) => {
 				this._sessionLogger.warn("retry_fallback_exhaustion_extension_failed", {

@@ -611,4 +611,39 @@ describe("createBranchedSession", () => {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
+
+	it("does not publish a partial initial session file when serialization fails", () => {
+		// given
+		const tempDir = join(tmpdir(), `session-atomic-flush-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+
+		try {
+			const session = SessionManager.create(tempDir, tempDir);
+			const sessionFile = session.getSessionFile();
+			if (!sessionFile) throw new Error("missing session file path");
+			session.appendMessage(userMsg("deferred"));
+			const residentStore = Reflect.get(session, "residentStore");
+			const materialize = Reflect.get(residentStore, "materialize");
+			if (typeof materialize !== "function") throw new Error("missing resident materializer");
+			Reflect.set(residentStore, "materialize", (entry: { readonly type: string }) => {
+				const materialized = Reflect.apply(materialize, residentStore, [entry]);
+				if (entry.type !== "message" || typeof materialized !== "object" || materialized === null) {
+					return materialized;
+				}
+				const message = Reflect.get(materialized, "message");
+				return typeof message === "object" && message !== null && Reflect.get(message, "role") === "assistant"
+					? { ...Object.fromEntries(Object.entries(materialized)), invalid: 1n }
+					: materialized;
+			});
+
+			// when
+			const flush = () => session.appendMessage(assistantMsg("flush"));
+
+			// then
+			expect(flush).toThrow();
+			expect(existsSync(sessionFile)).toBe(false);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
 });

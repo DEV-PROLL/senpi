@@ -847,7 +847,9 @@ pi.on("retry_fallback_exhausted", (event, ctx) => {
 
 The payload includes `sessionId`, `chainKey`, `from`, `lastError`,
 `exhaustionReason`, and `rejectedCandidates`. Diagnostics delivered to
-extensions are bounded to 8,192 error characters and 16 rejected candidates.
+extensions are bounded to 8,192 terminal-error characters, 16 rejected
+candidates, 512 characters per selector-bearing field, and 2,048 characters
+per candidate error.
 The original session event remains available to TUI/RPC listeners with its
 existing `{ chainKey, lastError }` shape.
 

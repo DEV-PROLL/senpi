@@ -224,6 +224,56 @@ describe("retry fallback exhaustion isolation", () => {
 		expect(lastMessage.content).toEqual([{ type: "text", text: "fallback answer" }]);
 	});
 
+	it("completes a fallback turn when an agent-end observer throws before retry handling", async () => {
+		// given
+		const harness = await createHarness({
+			models: [
+				{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 4_000 },
+				{ id: "faux-2", contextWindow: 200_000, maxTokens: 4_000 },
+			],
+			settings: {
+				retry: {
+					enabled: true,
+					maxRetries: 0,
+					baseDelayMs: 1,
+					fallbackChains: { "faux/faux-1": ["faux/faux-2"] },
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("", { stopReason: "error", errorMessage: "upstream unavailable" }),
+			fauxAssistantMessage("fallback after observer"),
+		]);
+		let rejectedAgentEnd = false;
+		harness.session.subscribe((event) => {
+			if (event.type === "agent_end" && !rejectedAgentEnd) {
+				rejectedAgentEnd = true;
+				throw new Error("agent-end observer failed");
+			}
+		});
+
+		// when
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const prompt = harness.session.prompt("continue despite observer");
+		try {
+			await Promise.race([
+				prompt,
+				new Promise<never>((_, reject) => {
+					timeout = setTimeout(() => reject(new Error("prompt remained blocked after observer failure")), 500);
+				}),
+			]);
+		} finally {
+			if (timeout) clearTimeout(timeout);
+			if (harness.session.isRetrying) harness.session.abortRetry();
+		}
+
+		// then
+		expect(rejectedAgentEnd).toBe(true);
+		expect(harness.session.isRetrying).toBe(false);
+		expect(harness.session.model?.id).toBe("faux-2");
+	});
+
 	it("settles the public prompt lifecycle when fallback persistence fails", async () => {
 		// given
 		const harness = await createHarness({
@@ -261,10 +311,11 @@ describe("retry fallback exhaustion isolation", () => {
 	it("bounds the extension exhaustion diagnostics", async () => {
 		// given
 		const extensionEvents: RetryFallbackExhaustedEvent[] = [];
-		const fallbackIds = Array.from({ length: 24 }, (_, index) => `fallback-${index + 1}`);
+		const primaryId = `primary-${"p".repeat(2_000)}`;
+		const fallbackIds = Array.from({ length: 24 }, (_, index) => `fallback-${index + 1}-${"f".repeat(2_000)}`);
 		const harness = await createHarness({
 			models: [
-				{ id: "faux-1", contextWindow: 1_000_000, maxTokens: 4_000 },
+				{ id: primaryId, contextWindow: 1_000_000, maxTokens: 4_000 },
 				...fallbackIds.map((id) => ({ id, contextWindow: 80_000, maxTokens: 4_000 })),
 			],
 			settings: {
@@ -272,7 +323,7 @@ describe("retry fallback exhaustion isolation", () => {
 					enabled: true,
 					maxRetries: 0,
 					baseDelayMs: 1,
-					fallbackChains: { "faux/faux-1": fallbackIds.map((id) => `faux/${id}`) },
+					fallbackChains: { [`faux/${primaryId}`]: fallbackIds.map((id) => `faux/${id}`) },
 				},
 			},
 			extensionFactories: [
@@ -295,7 +346,15 @@ describe("retry fallback exhaustion isolation", () => {
 
 		// then
 		expect(extensionEvents).toHaveLength(1);
+		expect(event?.chainKey.length).toBeLessThanOrEqual(512);
+		expect(event?.from.length).toBeLessThanOrEqual(512);
 		expect(event?.lastError.length).toBeLessThanOrEqual(8_192);
 		expect(event?.rejectedCandidates.length).toBeLessThanOrEqual(16);
+		for (const rejected of event?.rejectedCandidates ?? []) {
+			expect(rejected.selector.length).toBeLessThanOrEqual(512);
+			expect(rejected.error?.length ?? 0).toBeLessThanOrEqual(2_048);
+			expect(rejected.projection?.model.length ?? 0).toBeLessThanOrEqual(512);
+		}
+		expect(Buffer.byteLength(JSON.stringify(event))).toBeLessThanOrEqual(64 * 1_024);
 	});
 });
