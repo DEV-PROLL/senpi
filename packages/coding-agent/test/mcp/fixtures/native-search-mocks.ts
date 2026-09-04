@@ -194,7 +194,9 @@ export function validateAnthropicToolSearchPayload(payload: unknown): AnthropicV
 	// stub is tolerated here so shape-only fixtures stay valid.
 	const misnamed = objs.findIndex(
 		(tool) =>
-			tool.type === ANTHROPIC_TOOL_SEARCH_TYPE && "name" in tool && tool.name !== ANTHROPIC_TOOL_SEARCH_CONTRACT_NAME,
+			tool.type === ANTHROPIC_TOOL_SEARCH_TYPE &&
+			"name" in tool &&
+			tool.name !== ANTHROPIC_TOOL_SEARCH_CONTRACT_NAME,
 	);
 	if (misnamed >= 0) {
 		return {
