@@ -1,5 +1,23 @@
 # changes.md — ai
 
+## 2026-09-04 - GPT-6 Astra catalog
+
+### What changed
+
+- Added GPT-6 Astra to the OpenAI and OpenAI Codex catalogs with published pricing, 272k default context, 128k output, image input, low through max reasoning efforts, tool search, and Priority `-fast` variants.
+
+### Why
+
+- OpenAI and Codex expose GPT-6 Astra as a selectable Responses model.
+
+### Why an extension could not handle it
+
+- The static provider catalogs are generated inside this package.
+
+### Expected merge conflict zones
+
+- `scripts/generate-models.ts`, `src/providers/data/openai.json`, and `src/providers/data/openai-codex.json`.
+
 ## 2026-09-02 - Claude Fable 5.1 catalog
 
 ### What changed
