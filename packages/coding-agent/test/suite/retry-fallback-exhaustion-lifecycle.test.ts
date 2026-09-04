@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "./harness.ts";
@@ -81,6 +82,12 @@ describe("retry fallback exhaustion lifecycle", () => {
 		// then
 		expect(harness.faux.getCallLog().map((call) => call.modelId)).toEqual(["faux-1"]);
 		expect(extensionEvents).toHaveLength(1);
+		expect(extensionEvents).toMatchObject([
+			{
+				lastError: "billing error: insufficient_quota",
+				lastErrorSha256: createHash("sha256").update("billing error: insufficient_quota").digest("hex"),
+			},
+		]);
 		expect(harness.eventsOfType("retry_fallback_exhausted")).toMatchObject([
 			{ chainKey: "faux/faux-1", lastError: "billing error: insufficient_quota" },
 		]);

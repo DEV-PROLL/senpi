@@ -1173,6 +1173,8 @@ export interface RetryFallbackExhaustedEvent {
 	from: string;
 	/** Terminal provider error that ended the walk. */
 	lastError: string;
+	/** SHA-256 of the complete terminal error, before `lastError` byte bounding. */
+	lastErrorSha256: string;
 	exhaustionReason: FallbackExhaustionReason;
 	rejectedCandidates: readonly FallbackRejectedCandidate[];
 }

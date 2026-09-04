@@ -846,10 +846,13 @@ pi.on("retry_fallback_exhausted", (event, ctx) => {
 ```
 
 The payload includes `sessionId`, `chainKey`, `from`, `lastError`,
+`lastErrorSha256` (the full pre-truncation error digest),
 `exhaustionReason`, and `rejectedCandidates`. Diagnostics delivered to
 extensions are bounded to 64 KiB of serialized UTF-8: at most 8,192 bytes for
 the terminal error, 16 rejected candidates, 512 bytes per session or
 selector-bearing field, and 2,048 bytes per candidate error.
+Consumers can correlate the bounded `lastError` to a persisted failed message
+by hashing that message's complete error and comparing `lastErrorSha256`.
 The original session event remains available to TUI/RPC listeners with its
 existing `{ chainKey, lastError }` shape.
 

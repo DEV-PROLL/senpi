@@ -13,7 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { basename, dirname } from "node:path";
@@ -7729,6 +7729,7 @@ export class AgentSession {
 				MAX_FALLBACK_EXHAUSTION_SELECTOR_BYTES,
 			),
 			lastError: truncateUtf8(lastError, MAX_FALLBACK_EXHAUSTION_ERROR_BYTES),
+			lastErrorSha256: createHash("sha256").update(lastError).digest("hex"),
 			exhaustionReason: detail?.reason ?? "candidates-exhausted",
 			rejectedCandidates,
 		} satisfies RetryFallbackExhaustedEvent;

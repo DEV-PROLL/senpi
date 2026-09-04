@@ -8,7 +8,8 @@
 
 - Extensions can subscribe to `retry_fallback_exhausted` to receive bounded,
   structured diagnostics when no configured fallback can hold the live
-  conversation, enabling fresh-context delegation without parsing TUI errors.
+  conversation, including a full-error SHA-256 correlation digest, enabling
+  fresh-context delegation without parsing TUI errors.
 - New `gpt-6-astra` prompt preset, written from scratch against the GPT-6 Astra prompting guide: every `gpt-6-astra` model id (bare, `-fast`, dated snapshots, provider-prefixed, Bedrock `openai.gpt-6-astra`, display name "GPT-6 Astra") now gets a full-core system prompt with an initiative section (bias to action, approval as the last step on a concrete result), explicit instruction precedence for skills and project files, an asynchronous-work section mapping Astra's async-tool training onto background sessions, monitors, child tasks, and detached eval cells (end the turn to wait; no wait tool), calibrated test-first verification, and an engineer-prose writing style with the guide's slop-phrase ban. `promptPreset: "gpt-6-astra"` forces it.
 
 ### Changed

@@ -7,8 +7,9 @@
 - `packages/coding-agent/src/core/extensions/types.ts` adds the notification-only
   `RetryFallbackExhaustedEvent` and the matching
   `pi.on("retry_fallback_exhausted", ...)` overload. The payload names the session,
-  active selector, exhausted chain, terminal provider error, exhaustion reason, and
-  the rejected candidate budget projections. The event type is re-exported from
+  active selector, exhausted chain, bounded terminal provider error plus its
+  full-error SHA-256 correlation digest, exhaustion reason, and the rejected
+  candidate budget projections. The event type is re-exported from
   both the extension barrel and the package root for extension authors.
 
 ### Why
