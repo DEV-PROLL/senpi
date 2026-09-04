@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Branded build labels now render verbatim in the startup UI instead of gaining a `v` prefix, and unorderable version pairs no longer advertise a bogus engine update.
+
 ### Breaking Changes
 
 ### Added
