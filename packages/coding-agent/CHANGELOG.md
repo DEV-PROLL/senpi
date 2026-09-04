@@ -14,6 +14,7 @@
 
 - Anthropic Messages requests that carry deferred (`defer_loading`) tools no longer fail with `invalid_request_error: tools.N.tool_search_tool_bm25_20251119.name: Input should be 'tool_search_tool_bm25'`. The injected native tool-search server tool is now named `tool_search_tool_bm25` as the API contract requires; the local `tool_search` custom tool is unchanged.
 - The shared GPT eval-routing bridge no longer routes multi-call work to the `exec`/`wait` Code Mode tools that were removed in favor of detached `eval` cells; every GPT preset now points at `eval` only.
+- Resuming a session left on a `-fast` catalog variant (or any model with an `upstreamModelId`) now restores that exact selection instead of its upstream base model, so the priority tier and the fast indicator survive the resume; assistant messages no longer override an explicit same-provider model selection during session restore.
 - TTSR now interrupts a single streamed assistant message that repeats the same paragraph three times (a within-message narration loop such as re-announcing the same "now writing the DAG cell" step for minutes without ever issuing the tool call): the collapse guard gains a paragraph-repeat mechanism, truncates the message from the first repeat, and injects the usual recovery nudge. Scalar runs, short periods, and line cycles were the only mechanisms before, and blank lines reset line-cycle tracking, so paragraph-level loops streamed unchecked until the user aborted. Tool-argument streams are not affected.
 
 ### Removed
