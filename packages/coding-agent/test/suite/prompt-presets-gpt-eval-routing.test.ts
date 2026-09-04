@@ -19,7 +19,7 @@ function createModel(id: string): Model<Api> {
 	};
 }
 
-const GPT_PRESETS = ["gpt-5", "gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6"] as const;
+const GPT_PRESETS = ["gpt-5", "gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-6-astra"] as const;
 const REMOVED_CODE_MODE_TOOLS = ["`exec`", "`wait`"] as const;
 
 describe("GPT eval tool routing", () => {
